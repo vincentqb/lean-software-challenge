@@ -1,13 +1,24 @@
 # Lean Software Challenge
 
 A repository that uses this library is a challenge: implement code that does what its headline
-theorems say. You own the challenge, and agents submit solutions made of code and proofs. A
-solution is accepted when Lean's kernel proves the headlines of the code that runs, every
-headline rejects a wrong implementation, and no challenge file changed. Requires **Lean 4.35.0**.
+theorems say. You own the challenge, and agents submit solutions made of code and proofs.
+Requires **Lean 4.35.0**.
+
+## What an accepted solution guarantees
+
+- **Its status is truthful.** ● means the kernel proved the headline; ◕ means it rests on a
+  named open conjecture.
+- **The code that runs is the code proved.** Spec and core code is pure, foreign code enters only
+  through `@[extern] opaque` bindings, and `main` reaches every hole.
+- **Every headline can fail.** A kill proves it rejects a wrong implementation.
+- **Every assumption is named and tested.** A headline assumes only the world claims it takes as
+  hypotheses, and each has a `Test`, `Check`, or live suite.
+- **What is claimed did not change.** `grade` refuses a candidate that edits a file listed on
+  the report's `Owned:` line.
 
 ## Files
 
-| File | Contains | Edited by |
+| File | Contains | Approved by |
 |---|---|---|
 | `Challenge.lean` | the headline theorems and their kills, stated with `sorry` | you |
 | `comparator.json` | the headlines, kills, and holes `lake comparator` checks | you |
@@ -55,8 +66,7 @@ theorem output_correct_rejects_suffix :
 - A kill is `¬` a headline with its holes and boundary constants replaced by wrong ones; every
   headline needs one in `comparator.json`.
 
-Claims live in spec modules, and every world assumption a headline uses needs a `Check`,
-suite, or `Test`.
+Claims live in spec modules.
 
 ## Setup
 
@@ -88,13 +98,15 @@ public meta def main : List String → IO Unit := SoftwareChallenge.Audit.run {
 - `.tooling` covers `Solution` and scripts; like every role, it may use only standard axioms.
 - Non-`meta` imports run from tooling to shell to core to spec and boundary, never back;
   other libraries must be listed in `trusted`, which defaults to `Init`, `Std`, and `Lean`.
+- `entry` names the program's entry point, `main` by default, which must be declared in a
+  shell module. A library, whose users call its holes directly, sets `entry := none`.
 
 `Challenge.lean` imports only spec and boundary modules and declares each core or shell
 function a headline mentions as a hole with the code's exact type, `def name : T := sorry`;
-[`comparator.json`](comparator.json) lists exactly its theorems and holes, and `main` must
-reach every hole. Put `Solution` in a default target, and declare `Challenge` as a `lean_lib`
-that is not one, with `leanOptions := #[⟨`warn.sorry, false⟩]`. The audit imports every module
-of the default targets into one environment, so only one of them may define `main`.
+[`comparator.json`](comparator.json) lists exactly its theorems and holes. Put `Solution` in a
+default target, and declare `Challenge` as a `lean_lib` that is not one, with
+`leanOptions := #[⟨`warn.sorry, false⟩]`. The audit imports every module of the default
+targets into one environment, so only one of them may define `main`.
 
 ## Run
 
