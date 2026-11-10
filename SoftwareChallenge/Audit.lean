@@ -164,6 +164,13 @@ private def compiledCallees (env : Environment) (name : Name) : Array Name :=
 def reachedFrom (env : Environment) (running : Name → Bool) (root : Name) : NameSet :=
   closure (fun name => (compiledCallees env name).filter running) #[root]
 
+def entryOf (project : Project) (env : Environment) (roleOf : Name → Option Role)
+    (running : Name → Bool) (holes : Array Name) : Option (Name × Option Role × Array Name) :=
+  project.entry.map fun entry =>
+    if env.contains entry then
+      (entry, roleOf entry, holes.filter (!(reachedFrom env running entry).contains ·))
+    else (entry, none, #[])
+
 structure Facts where
   inventory : Inventory := ⟨#[], #[]⟩
   evidence : Array Evidence := #[]
@@ -172,7 +179,7 @@ structure Facts where
   mentioned : NameSet := {}
   holes : Array (Name × Option Role) := #[]
   registrations : Array (Name × Option Role × Bool) := #[]
-  entry : Option (Option Role × Array Name) := none
+  entry : Option (Name × Option Role × Array Name) := none
   challengeImports : Array Name := #[]
   challengeTheorems : Array Name := #[]
   challengeHoles : Array Name := #[]
@@ -194,9 +201,9 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
   for (hole, role) in facts.holes do
     unless role matches some .core | some .shell do
       errors := errors.push s!"{hole}: a definition hole must be a core or shell definition"
-  if let some (role, unreached) := facts.entry then
-    unless role matches some .shell do errors := errors.push "main: declare it in a shell module"
-    for hole in unreached do errors := errors.push s!"{hole}: main never reaches this hole"
+  if let some (entry, role, unreached) := facts.entry then
+    unless role matches some .shell do errors := errors.push s!"{entry}: declare it in a shell module"
+    for hole in unreached do errors := errors.push s!"{hole}: {entry} never reaches this hole"
   for line in facts.headlines do
     for hypothesis in line.unnamed do
       errors := errors.push s!"{line.name}: hypothesis {hypothesis} is not a WorldClaim or Conjecture"
@@ -280,7 +287,6 @@ def gather (project : Project) (config : Config) (catalog : Array Name) : IO Fac
       config.theorem_names
     let running := fun name => (moduleOf name).any fun module =>
       catalog.contains module && project.role? module != some .tooling
-    let reached := reachedFrom env running `main
     return {
       inventory, killsByHeadline
       evidence := allEvidence env
@@ -291,8 +297,7 @@ def gather (project : Project) (config : Config) (catalog : Array Name) : IO Fac
       registrations := catalog.flatMap fun module =>
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
           fun (claim, _) => (claim, project.role? module, moduleOf claim == some module)
-      entry := if env.contains `main then some (roleOf `main, config.holes.filter (!reached.contains ·))
-        else none : Facts }
+      entry := entryOf project env roleOf running config.holes : Facts }
   let (challengeTheorems, challengeHoles) ← challengeDeclarations config.challenge_module
   return { facts with
     challengeTheorems, challengeHoles

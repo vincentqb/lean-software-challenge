@@ -103,8 +103,14 @@ run_cmd Elab.Command.liftCoreM do
       !(reached `SoftwareChallengeTests.Fixtures.identity).contains `SoftwareChallengeTests.Fixtures.successor &&
       (reached `SoftwareChallengeTests.Fixtures.loopIdentity).contains `SoftwareChallengeTests.Fixtures.identity do
     throwError "Runtime reachability misread a call"
-  expect (Audit.sound project { entry := some (some .shell, #[`h]) }) "h" "main never reaches"
-  expect (Audit.sound project { entry := some (some .tooling, #[]) }) "main" "shell module"
+  expect (Audit.sound project { entry := some (`main, some .shell, #[`h]) }) "h" "main never reaches"
+  expect (Audit.sound project { entry := some (`main, some .tooling, #[]) }) "main" "shell module"
+  let roleOf := fun (_ : Name) => some Role.shell
+  let missing := Audit.entryOf project env roleOf (fun _ => true) #[`h]
+  unless missing matches some (`main, none, #[]) do throwError "A missing main passed"
+  expect (Audit.sound project { entry := missing }) "main" "shell module"
+  if (Audit.entryOf { project with entry := none } env roleOf (fun _ => true) #[`h]).isSome then
+    throwError "A library without an entry was required to have one"
   let registrations := (valid.push `SoftwareChallengeTests.Fixtures.Rejected).flatMap fun module =>
     (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
       fun (claim, _) => (claim, project.role? module, (env.getModuleIdxFor? claim).any

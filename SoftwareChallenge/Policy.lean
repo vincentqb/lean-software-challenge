@@ -18,6 +18,7 @@ inductive Role where
 structure Project where
   layers : Array (Name × Role)
   trusted : Array Name := #[`Init, `Std, `Lean]
+  entry : Option Name := some `main
 
 @[expose] def Project.role? (project : Project) (name : Name) : Option Role :=
   ((project.layers.filter (·.1.isPrefixOf name)).getMax? (·.1.getNumParts < ·.1.getNumParts)).map (·.2)
