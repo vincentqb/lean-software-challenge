@@ -26,13 +26,13 @@ Requires **Lean 4.35.0**.
 | `MyApp/Spec.lean` | types, reference definitions, and the claims headlines rest on | you |
 | `MyApp/Boundary.lean` | `@[extern] opaque` declarations for foreign code | you |
 | `Audit.lean` | the role of each module prefix | you |
-| `MyApp/Core/…` | pure code: public interface, private helpers, and their proofs | agents |
+| `MyApp/Core.lean` | pure code: public interface, private helpers, and their proofs | agents |
 | `MyApp/Shell.lean` | IO that connects the core to the world, and `main` | agents |
 | `MyApp/Solution.lean` | proofs of the headlines and kills | agents |
 
 Headlines are end-to-end theorems: they say what the program does in terms of the spec,
 assuming only named claims. In the [template](Examples/ConstantFolding), whose challenge is
-[`ConstantFoldingChallenge.lean`](ConstantFoldingChallenge.lean), `output_correct` says the
+[`Challenge.lean`](Challenge.lean), `output_correct` says the
 shell prints the true value of an expression, assuming native addition is correct.
 
 ## Syntax
@@ -49,7 +49,7 @@ Conjecture Normalizes (optimize : Expr → Expr) := ∀ e, normal (optimize e) =
 Test Normalizes fold : normal (fold (.add (.add (.lit 1) (.lit 2)) (.var 0))) = true := by decide
 
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
-    Shell.output e = toString (eval (fun _ => 0) e)
+    output e = toString (eval (fun _ => 0) e)
 theorem output_correct_rejects_suffix :
     ¬ (AddAgrees Nat.add → ∀ e : Expr,
       (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e))

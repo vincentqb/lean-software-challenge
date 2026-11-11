@@ -11,14 +11,14 @@ theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :
   eval_fold env e
 
 theorem fold_closed_literal (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n :=
-  fold_of_closed e h
+  fold_eq_lit_of_closed e h
 
 theorem fold_idempotent (normalizes : Normalizes fold) (e : Expr) : fold (fold e) = fold e :=
-  fixed_of_normal (fold e) (normalizes e)
+  fold_eq_self_of_normal (fold e) (normalizes e)
 
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
-    Shell.output e = toString (eval (fun _ => 0) e) := by
-  simp only [Shell.output, evalNative_eq agrees, fold_preserves_meaning]
+    output e = toString (eval (fun _ => 0) e) := by
+  simp only [output, evalNative_eq agrees, fold_preserves_meaning]
 
 theorem fold_preserves_meaning_rejects_constant :
     ¬ ∀ (env : Nat → Nat) (e : Expr), eval env ((fun _ => Expr.lit 0) e) = eval env e := by

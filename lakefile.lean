@@ -24,7 +24,7 @@ lean_lib «Examples» where
 lean_exe «constant_folding» where
   root := `Examples.ConstantFolding.Shell
 
-lean_lib «ConstantFoldingChallenge» where
+lean_lib «Challenge» where
   leanOptions := #[⟨`warn.sorry, false⟩]
 
 lean_lib «SoftwareChallengeTests» where

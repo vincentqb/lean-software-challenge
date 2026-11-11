@@ -38,7 +38,7 @@ theorem evalNative_eq (agrees : AddAgrees nativeAdd) (env : Nat → Nat) (e : Ex
     simp only [evalNative, eval, ha, hb]
     exact agrees _ _
 
-theorem fold_of_closed (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n := by
+theorem fold_eq_lit_of_closed (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n := by
   induction e with
   | lit n => exact ⟨n, rfl⟩
   | var x => simp [closed] at h
@@ -48,7 +48,7 @@ theorem fold_of_closed (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n
     obtain ⟨m, hm⟩ := hb h.2
     exact ⟨n + m, by simp [fold, hn, hm, combine]⟩
 
-theorem fixed_of_normal (e : Expr) (h : normal e = true) : fold e = e := by
+theorem fold_eq_self_of_normal (e : Expr) (h : normal e = true) : fold e = e := by
   induction e with
   | lit n => rfl
   | var x => rfl

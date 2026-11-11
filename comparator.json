@@ -1,5 +1,5 @@
 {
-  "challenge_module": "ConstantFoldingChallenge",
+  "challenge_module": "Challenge",
   "solution_module": "Examples.ConstantFolding.Solution",
   "theorem_names": [
     "Examples.ConstantFolding.fold_preserves_meaning",
@@ -13,7 +13,7 @@
   ],
   "definition_names": [
     "Examples.ConstantFolding.fold",
-    "Examples.ConstantFolding.Shell.output"
+    "Examples.ConstantFolding.output"
   ],
   "permitted_axioms": [
     "propext",

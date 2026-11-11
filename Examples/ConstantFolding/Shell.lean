@@ -5,7 +5,7 @@ public meta import SoftwareChallenge
 
 public section
 
-namespace Examples.ConstantFolding.Shell
+namespace Examples.ConstantFolding
 
 @[expose] def output (e : Expr) : String := toString (evalNative (fun _ => 0) (fold e))
 
@@ -16,6 +16,6 @@ def run (e : Expr) : IO Unit := IO.println (output e)
     for b in [7, 2 ^ 63] do
       unless nativeAdd a b - a == b do throw (IO.userError s!"nativeAdd {a} {b} disagrees")
 
-end Examples.ConstantFolding.Shell
+end Examples.ConstantFolding
 
-def main : IO Unit := Examples.ConstantFolding.Shell.run (.add (.lit 2) (.lit 3))
+def main : IO Unit := Examples.ConstantFolding.run (.add (.lit 2) (.lit 3))

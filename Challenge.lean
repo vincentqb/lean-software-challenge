@@ -17,7 +17,7 @@ namespace Examples.ConstantFolding
 
 def fold : Expr → Expr := sorry
 
-def Shell.output (e : Expr) : String := sorry
+def output (e : Expr) : String := sorry
 
 theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :
     eval env (fold e) = eval env e := by
@@ -30,7 +30,7 @@ theorem fold_idempotent (normalizes : Normalizes fold) (e : Expr) : fold (fold e
   sorry
 
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
-    Shell.output e = toString (eval (fun _ => 0) e) := by
+    output e = toString (eval (fun _ => 0) e) := by
   sorry
 
 theorem fold_preserves_meaning_rejects_constant :

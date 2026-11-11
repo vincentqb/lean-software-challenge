@@ -1,6 +1,6 @@
 # Working on Lean Software Challenge
 
-Do not edit `ConstantFoldingChallenge.lean`, `comparator.json`, `Audit.lean`,
+Do not edit `Challenge.lean`, `comparator.json`, `Audit.lean`,
 `Examples/ConstantFolding/Spec.lean`, or `Examples/ConstantFolding/Boundary.lean`; propose
 changes instead.
 
