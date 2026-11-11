@@ -12,7 +12,7 @@ inductive Role where
   | spec | boundary | core | shell | tooling
   deriving DecidableEq, Repr
 
-@[expose] def Role.Inner (role : Role) : Prop :=
+def Role.Inner (role : Role) : Prop :=
   role = .spec ∨ role = .boundary ∨ role = .core
 
 structure Project where
@@ -20,10 +20,10 @@ structure Project where
   trusted : Array Name := #[`Init, `Std, `Lean]
   entry : Option Name := some `main
 
-@[expose] def Project.role? (project : Project) (name : Name) : Option Role :=
+def Project.role? (project : Project) (name : Name) : Option Role :=
   ((project.layers.filter (·.1.isPrefixOf name)).getMax? (·.1.getNumParts < ·.1.getNumParts)).map (·.2)
 
-@[expose] def Project.Trusted (project : Project) (name : Name) : Prop :=
+def Project.Trusted (project : Project) (name : Name) : Prop :=
   ∃ root ∈ project.trusted, root.isPrefixOf name = true
 
 structure ImportFact where
@@ -53,7 +53,7 @@ structure Inventory where
   modules : Array ModuleFact
   declarations : Array DeclarationFact
 
-@[expose] def Inventory.RuntimeImport (inventory : Inventory) (source target : Name) : Prop :=
+def Inventory.RuntimeImport (inventory : Inventory) (source target : Name) : Prop :=
   ∃ fact ∈ inventory.modules, fact.name = source ∧
     ∃ dependency ∈ fact.imports, dependency.name = target ∧ dependency.comptime = false
 
@@ -71,25 +71,25 @@ structure Premise where
 def proved (premises : Array Premise) : Bool :=
   premises.all fun premise => premise.kind == .world || premise.dischargedBy.isSome
 
-@[expose] def Role.permits : Role → Role → Bool
+def Role.permits : Role → Role → Bool
   | .tooling, _ => true
   | .shell, target => target != .tooling
   | source, target => target == .spec || target == .boundary || target == source
 
-@[expose] def Project.trusts (project : Project) (name : Name) : Bool :=
+def Project.trusts (project : Project) (name : Name) : Bool :=
   project.trusted.any (·.isPrefixOf name)
 
-@[expose] def Project.admits (project : Project) (source : Role) (dependency : ImportFact) : Bool :=
+def Project.admits (project : Project) (source : Role) (dependency : ImportFact) : Bool :=
   dependency.comptime || match project.role? dependency.name with
     | some target => source.permits target
     | none => project.trusts dependency.name
 
-@[expose] def Project.moduleAdmitted (project : Project) (fact : ModuleFact) : Bool :=
+def Project.moduleAdmitted (project : Project) (fact : ModuleFact) : Bool :=
   match project.role? fact.name with
   | some role => fact.usesModuleSystem && fact.imports.all (project.admits role)
   | none => false
 
-@[expose] def DeclarationFact.reasons (role : Role) (fact : DeclarationFact) : List String :=
+def DeclarationFact.reasons (role : Role) (fact : DeclarationFact) : List String :=
   let flags := [(fact.isUnsafe, "unsafe"), (fact.isPartial, "partial"),
     (fact.external, "@[extern]"), (fact.replaced, "@[implemented_by]"),
     (fact.initializes, "initializer"), (fact.effects, "IO"), (fact.debug, "dbg builtin")]
@@ -104,7 +104,7 @@ def proved (premises : Array Premise) : Bool :=
       | .shell => raised ["partial", "initializer", "IO", "dbg builtin"]
       | .tooling => []
 
-@[expose] def Project.check (project : Project) (inventory : Inventory) : Bool :=
+def Project.check (project : Project) (inventory : Inventory) : Bool :=
   inventory.modules.all project.moduleAdmitted &&
     inventory.declarations.all fun fact => match project.role? fact.moduleName with
       | some role => (fact.reasons role).isEmpty
@@ -133,8 +133,6 @@ private theorem import_step {project : Project} {inventory : Inventory}
     exact ⟨fun _ found => permits_inner (by simpa [found] using permitted) (inner role owner),
       fun found => Array.any_eq_true'.mp (by simpa [found, Project.trusts] using permitted)⟩
 
-/-- Once the audit accepts, no chain of runtime imports leads from spec, boundary, or
-core code to the shell or to tooling. -/
 theorem layering_sound (project : Project) (inventory : Inventory)
     (accepted : project.check inventory = true) (source target : Name) (role : Role)
     (classified : project.role? source = some role) (inner : role.Inner)

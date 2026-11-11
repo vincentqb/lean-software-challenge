@@ -85,8 +85,6 @@ private def declaration (reachesIO terminating : NameSet) (info : ConstantInfo) 
     axioms := ← axiomsOf info.name
   }
 
-/-- `terminating` names the `partial_fixpoint` definitions whose termination a headline states;
-their compiled recursion is not reported `partial`. -/
 def collect (catalog : Array Name) (terminating : NameSet := {}) : CoreM Inventory := do
   modifyEnv (·.setExporting false)
   let env ← getEnv
@@ -103,7 +101,7 @@ def collect (catalog : Array Name) (terminating : NameSet := {}) : CoreM Invento
         imports := data.imports.map fun i => { name := i.module, comptime := i.isMeta } }
     declarations }
 
-def withEnvironment {α : Type} (modules : Array Name) (action : CoreM α) : IO α := do
+private def withEnvironment {α : Type} (modules : Array Name) (action : CoreM α) : IO α := do
   unsafe enableInitializersExecution
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := true)
   let (result, _) ← action.toIO { fileName := "<lean-software-challenge>", fileMap := default, maxHeartbeats := 0 } { env }
@@ -119,8 +117,7 @@ structure Config where
 
 def Config.holes (config : Config) : Array Name := config.definition_names.getD #[]
 
-/-- The `partial_fixpoint` holes paired with the headline that states each returns. -/
-def Config.terminating (config : Config) : Array (Name × Name) :=
+private def Config.terminating (config : Config) : Array (Name × Name) :=
   (config.terminates.getD {}).toList.toArray
 
 structure Termination where
@@ -275,7 +272,7 @@ def challengeImports (challenge : Name) : IO (Array Name) := do
     (modToFilePath "." challenge "lean")
   return (← parseImports' (← IO.FS.readFile path) path.toString).imports.map (·.module)
 
-def challengeDeclarations (challenge : Name) : IO (Array Name × Array Name) := do
+private def challengeDeclarations (challenge : Name) : IO (Array Name × Array Name) := do
   let file ← findOLean challenge
   let parts ← #[file, file.addExtension "server", file.addExtension "private"].filterM (·.pathExists)
   let some (data, _) := (← readModuleDataParts parts).back?
@@ -289,7 +286,7 @@ def challengeDeclarations (challenge : Name) : IO (Array Name × Array Name) := 
 private def sourceFile (module : Name) : String :=
   "/".intercalate (module.components.map toString) ++ ".lean"
 
-def ownedFiles (project : Project) (inventory : Inventory) (challenge : Name) : IO (Array String) := do
+private def ownedFiles (project : Project) (inventory : Inventory) (challenge : Name) : IO (Array String) := do
   let configuration ← #["comparator.json", "Audit.lean", "lakefile.lean", "lake-manifest.json",
     "lean-toolchain"].filterM fun (file : String) => System.FilePath.pathExists file
   let claimModules := inventory.modules.filter (project.role? ·.name matches some .spec | some .boundary)
@@ -306,7 +303,7 @@ private def describe (evidence : Array Evidence) (premise : Premise) : String :=
   s!"{status} [{count .test} tests, {count .check} checks" ++
     (if suites.isEmpty then "]" else s!", suites {", ".intercalate suites.toList}]")
 
-def gather (project : Project) (config : Config) (catalog : Array Name) : IO Facts := do
+private def gather (project : Project) (config : Config) (catalog : Array Name) : IO Facts := do
   let facts ← withEnvironment catalog <| Meta.MetaM.run' do
     let env ← getEnv
     let moduleOf := fun (name : Name) =>

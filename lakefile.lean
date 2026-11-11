@@ -20,6 +20,10 @@ lean_lib «Examples» where
   globs := #[.submodules `Examples.ConstantFolding]
   precompileModules := true
 
+@[default_target]
+lean_exe «constant_folding» where
+  root := `Examples.ConstantFolding.Shell
+
 lean_lib «ConstantFoldingChallenge» where
   leanOptions := #[⟨`warn.sorry, false⟩]
 

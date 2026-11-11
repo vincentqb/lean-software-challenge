@@ -25,7 +25,7 @@ private theorem eval_combine (env : Nat → Nat) (a b : Expr) :
     eval env (combine a b) = eval env a + eval env b := by
   cases a <;> cases b <;> rfl
 
-theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :
+theorem eval_fold (env : Nat → Nat) (e : Expr) :
     eval env (fold e) = eval env e := by
   induction e <;> simp_all [fold, eval, eval_combine]
 
@@ -38,7 +38,7 @@ theorem evalNative_eq (agrees : AddAgrees nativeAdd) (env : Nat → Nat) (e : Ex
     simp only [evalNative, eval, ha, hb]
     exact agrees _ _
 
-theorem fold_closed_literal (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n := by
+theorem fold_of_closed (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n := by
   induction e with
   | lit n => exact ⟨n, rfl⟩
   | var x => simp [closed] at h

@@ -4,11 +4,9 @@ public section
 
 namespace SoftwareChallengeTests.Fixtures.Fixpoint
 
-/-- Counts down to zero; a `partial_fixpoint`, so only a headline says it returns. -/
 def countdown (n : Nat) : Option Nat := if n = 0 then some 0 else countdown (n - 1)
 partial_fixpoint
 
-/-- Like `countdown`, with no headline that says it returns. -/
 def spin (n : Nat) : Option Nat := if n = 0 then some 0 else spin (n - 1)
 partial_fixpoint
 

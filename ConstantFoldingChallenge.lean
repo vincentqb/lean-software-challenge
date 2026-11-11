@@ -41,8 +41,10 @@ theorem fold_closed_literal_rejects_identity :
     ¬ ∀ (e : Expr), closed e = true → ∃ n, id e = .lit n := by
   sorry
 
-theorem fold_idempotent_rejects_bump :
-    ¬ (Normalizes bump → ∀ e : Expr, bump (bump e) = bump e) := by
+theorem fold_idempotent_rejects_increment :
+    ¬ (Normalizes (fun e => Expr.lit (eval (fun _ => 0) e + 1)) → ∀ e : Expr,
+      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =
+        (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) := by
   sorry
 
 theorem output_correct_rejects_suffix :

@@ -6,6 +6,13 @@ public section
 
 namespace Examples.ConstantFolding
 
+theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :
+    eval env (fold e) = eval env e :=
+  eval_fold env e
+
+theorem fold_closed_literal (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n :=
+  fold_of_closed e h
+
 theorem fold_idempotent (normalizes : Normalizes fold) (e : Expr) : fold (fold e) = fold e :=
   fixed_of_normal (fold e) (normalizes e)
 
@@ -24,11 +31,13 @@ theorem fold_closed_literal_rejects_identity :
   obtain ⟨n, hn⟩ := h (.add (.lit 1) (.lit 2)) rfl
   cases hn
 
-theorem fold_idempotent_rejects_bump :
-    ¬ (Normalizes bump → ∀ e : Expr, bump (bump e) = bump e) := by
+theorem fold_idempotent_rejects_increment :
+    ¬ (Normalizes (fun e => Expr.lit (eval (fun _ => 0) e + 1)) → ∀ e : Expr,
+      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =
+        (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) := by
   intro h
   have := h (fun _ => rfl) (.lit 0)
-  simp [bump, eval] at this
+  simp [eval] at this
 
 theorem output_correct_rejects_suffix :
     ¬ (AddAgrees Nat.add → ∀ e : Expr,

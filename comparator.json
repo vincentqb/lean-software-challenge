@@ -8,7 +8,7 @@
     "Examples.ConstantFolding.output_correct",
     "Examples.ConstantFolding.fold_preserves_meaning_rejects_constant",
     "Examples.ConstantFolding.fold_closed_literal_rejects_identity",
-    "Examples.ConstantFolding.fold_idempotent_rejects_bump",
+    "Examples.ConstantFolding.fold_idempotent_rejects_increment",
     "Examples.ConstantFolding.output_correct_rejects_suffix"
   ],
   "definition_names": [
