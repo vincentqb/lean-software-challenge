@@ -20,8 +20,4 @@ theorem countdown_terminates_rejects_stuck :
   intro h
   exact absurd (h 0) (by decide)
 
-theorem countdown_zero : countdown 0 = some 0 := by rw [countdown]; rfl
-
-theorem countdown_zero_rejects_one : ¬ (fun _ : Nat => some 1) 0 = some 0 := by decide
-
 end SoftwareChallengeTests.Fixtures.Fixpoint

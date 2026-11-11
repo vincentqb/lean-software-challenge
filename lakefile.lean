@@ -6,8 +6,8 @@ package «software_challenge» where
   fixedToolchain := true
   leanOptions := #[
     ⟨`autoImplicit, false⟩,
-    ⟨`linter.redundantVisibility, true⟩,
-    ⟨`linter.extra, true⟩
+    ⟨`linter.all, true⟩,
+    ⟨`linter.missingDocs, false⟩
   ]
 
 @[default_target]
