@@ -15,27 +15,16 @@ package «software_challenge» where
 lean_lib «SoftwareChallenge» where
   globs := #[.andSubmodules `SoftwareChallenge]
 
-@[default_target]
-lean_lib «Examples» where
-  roots := #[`Examples.ConstantFolding.Solution]
-  globs := #[.submodules `Examples.ConstantFolding]
-  precompileModules := true
-
-@[default_target]
-lean_exe «constant_folding» where
-  root := `Examples.ConstantFolding.Shell
-
-lean_lib «Challenge» where
-  leanOptions := #[⟨`warn.sorry, false⟩]
-
 lean_lib «SoftwareChallengeTests» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
 @[test_driver] script test do
   let lake := (← getLake).toString
-  for args in [#["build"], #["lint"], #["build", "SoftwareChallengeTests"], #["comparator"]] do
-    let code ← (← IO.Process.spawn { cmd := lake, args, cwd := (← getRootPackage).dir }).wait
+  let root := (← getRootPackage).dir
+  for (args, cwd) in [(#["build"], root), (#["lint"], root), (#["build", "SoftwareChallengeTests"], root),
+      (#["test"], root / "Examples" / "ConstantFolding")] do
+    let code ← (← IO.Process.spawn { cmd := lake, args, cwd }).wait
     unless code == 0 do return code
   return 0
 
@@ -43,6 +32,9 @@ script grade (args) do
   let [candidate] := args
     | do IO.eprintln "usage: lake script run software_challenge/grade <candidate commit>"; return 3
   let base := (← getRootPackage).dir
+  let gitPrefix : IO.Process.SpawnArgs :=
+    { cmd := "git", args := #["rev-parse", "--show-prefix"], cwd := some base }
+  let prefixInRepo := String.ofList ((← IO.Process.output gitPrefix).stdout.toList.filter (· != '\n'))
   let lake := (← getLake).toString
   let run (cmd : String) (args : Array String) (cwd : System.FilePath) : IO UInt32 := do
     (← IO.Process.spawn { cmd, args, cwd := some cwd }).wait
@@ -61,9 +53,10 @@ script grade (args) do
     IO.eprintln s!"refused: {candidate} changes files the owner decides"; return 1
   | _ => IO.eprintln s!"cannot grade: git cannot compare {candidate}"; return 3
   let scratch ← IO.FS.createTempDir
-  let checkout := scratch / "candidate"
+  let worktree := scratch / "candidate"
+  let checkout := worktree / prefixInRepo
   try
-    unless (← run "git" #["worktree", "add", "--detach", checkout.toString, candidate] base) == 0 do
+    unless (← run "git" #["worktree", "add", "--detach", worktree.toString, candidate] base) == 0 do
       return 3
     unless (← run lake #["build"] checkout) == 0 do return 1
     unless (← ownedFiles checkout) == owned do
@@ -72,7 +65,7 @@ script grade (args) do
       unless (← run lake step checkout) == 0 do return 1
     return 0
   finally
-    discard <| run "git" #["worktree", "remove", "--force", checkout.toString] base
+    discard <| run "git" #["worktree", "remove", "--force", worktree.toString] base
     IO.FS.removeDirAll scratch
 
 package_facet softwareChallenge pkg : Unit := do
@@ -99,7 +92,3 @@ package_facet softwareChallenge pkg : Unit := do
         env := ← getAugmentedEnv
       })
     unless upToDate do logInfo (← IO.FS.readFile report)
-
-@[default_target]
-target audit pkg : Unit := do
-  return (← pkg.fetchFacetJob `softwareChallenge).map (fun _ => ())

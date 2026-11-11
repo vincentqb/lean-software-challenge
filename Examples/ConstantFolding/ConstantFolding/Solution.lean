@@ -1,10 +1,10 @@
 module
 
-public import Examples.ConstantFolding.Shell
+public import ConstantFolding.Shell
 
 public section
 
-namespace Examples.ConstantFolding
+namespace ConstantFolding
 
 theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :
     eval env (fold e) = eval env e :=
@@ -46,4 +46,4 @@ theorem output_correct_rejects_suffix :
   have := congrArg String.length (h (fun _ _ => rfl) (.lit 0))
   simp at this
 
-end Examples.ConstantFolding
+end ConstantFolding

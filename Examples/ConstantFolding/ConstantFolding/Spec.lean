@@ -1,12 +1,12 @@
 module
 
-public import Examples.ConstantFolding.Boundary
-meta import Examples.ConstantFolding.Boundary
+public import ConstantFolding.Boundary
+meta import ConstantFolding.Boundary
 public meta import SoftwareChallenge
 
 public section
 
-namespace Examples.ConstantFolding
+namespace ConstantFolding
 
 inductive Expr where
   | lit (value : Nat)
@@ -39,4 +39,4 @@ Check AddAgrees nativeAdd : nativeAdd (2 ^ 70) (2 ^ 70) = 2 ^ 71
 
 Conjecture Normalizes (optimize : Expr → Expr) := ∀ e, normal (optimize e) = true
 
-end Examples.ConstantFolding
+end ConstantFolding

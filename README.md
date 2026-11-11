@@ -32,7 +32,7 @@ Requires **Lean 4.35.0**.
 
 Headlines are end-to-end theorems: they say what the program does in terms of the spec,
 assuming only named claims. In the [template](Examples/ConstantFolding), whose challenge is
-[`Challenge.lean`](Challenge.lean), `output_correct` says the
+[`Challenge.lean`](Examples/ConstantFolding/Challenge.lean), `output_correct` says the
 shell prints the true value of an expression, assuming native addition is correct.
 
 ## Syntax

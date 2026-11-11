@@ -1,8 +1,7 @@
 # Working on Lean Software Challenge
 
-Do not edit `Challenge.lean`, `comparator.json`, `Audit.lean`,
-`Examples/ConstantFolding/Spec.lean`, or `Examples/ConstantFolding/Boundary.lean`; propose
-changes instead.
+In `Examples/ConstantFolding/`, do not edit `Challenge.lean`, `comparator.json`, `Audit.lean`,
+`ConstantFolding/Spec.lean`, or `ConstantFolding/Boundary.lean`; propose changes instead.
 
 Add a check only if it makes a guarantee in `README.md` hold, or hold more strongly. Give it a
 fixture in `SoftwareChallengeTests/` that it rejects, keep `layering_sound` proved, and validate

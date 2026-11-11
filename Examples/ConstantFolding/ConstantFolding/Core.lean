@@ -1,11 +1,11 @@
 module
 
-public import Examples.ConstantFolding.Spec
+public import ConstantFolding.Spec
 public meta import SoftwareChallenge
 
 public section
 
-namespace Examples.ConstantFolding
+namespace ConstantFolding
 
 private def combine : Expr → Expr → Expr
   | .lit a, .lit b => .lit (a + b)
@@ -60,4 +60,4 @@ theorem fold_eq_self_of_normal (e : Expr) (h : normal e = true) : fold e = e := 
 
 Test Normalizes fold : normal (fold (.add (.add (.lit 1) (.lit 2)) (.var 0))) = true := by decide
 
-end Examples.ConstantFolding
+end ConstantFolding

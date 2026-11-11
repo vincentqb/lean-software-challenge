@@ -1,6 +1,6 @@
 module
 
-public import Examples.ConstantFolding.Spec
+public import ConstantFolding.Spec
 
 public section
 
@@ -13,7 +13,7 @@ to variables, which `Normalizes` only conjectures, or anything about the native 
 `AddAgrees nativeAdd`.
 -/
 
-namespace Examples.ConstantFolding
+namespace ConstantFolding
 
 def fold : Expr → Expr := sorry
 
@@ -52,4 +52,4 @@ theorem output_correct_rejects_suffix :
       (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e)) := by
   sorry
 
-end Examples.ConstantFolding
+end ConstantFolding
