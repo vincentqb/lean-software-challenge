@@ -8,8 +8,9 @@ Requires **Lean 4.35.0**.
 
 - **Its status is truthful.** ● means the kernel proved the headline; ◕ means it rests on a
   named open conjecture.
-- **The code that runs is the code proved.** Spec and core code is pure, foreign code enters only
-  through `@[extern] opaque` bindings, and `main` reaches every hole.
+- **The code that runs is the code proved.** Spec and core code is pure, its recursion is
+  structural, well-founded, or a `partial_fixpoint` hole whose return a headline states, foreign
+  code enters only through `@[extern] opaque` bindings, and `main` reaches every hole.
 - **Every headline can fail.** A kill proves it rejects a wrong implementation.
 - **Every assumption is named and tested.** A headline assumes only the world claims it takes as
   hypotheses, and each has a `Test`, `Check`, or live suite.
@@ -21,7 +22,7 @@ Requires **Lean 4.35.0**.
 | File | Contains | Approved by |
 |---|---|---|
 | `Challenge.lean` | the headline theorems and their kills, stated with `sorry` | you |
-| `comparator.json` | the headlines, kills, and holes `lake comparator` checks | you |
+| `comparator.json` | the headlines, kills, and holes `lake comparator` checks, and the `terminates` headlines | you |
 | `MyApp/Spec.lean` | types, reference definitions, and the claims headlines rest on | you |
 | `MyApp/Boundary.lean` | `@[extern] opaque` declarations for foreign code | you |
 | `Audit.lean` | the role of each module prefix | you |
@@ -92,7 +93,13 @@ public meta def main : List String → IO Unit := SoftwareChallenge.Audit.run {
 ```
 
 - `.spec` and `.core` code is pure: no `partial`, `unsafe`, `@[extern]`, `@[implemented_by]`,
-  initializers, IO, or `dbg*`.
+  initializers, IO, or `dbg*`. Recursion is structural, well-founded, or `partial_fixpoint`;
+  a `partial_fixpoint` definition counts as `partial` unless it is a hole and `comparator.json`
+  maps it under `terminates` to a headline that mentions it, has a kill, and states that it
+  returns, as in `"terminates": {"MyApp.loop": "MyApp.loop_terminates"}`. The kernel unfolds
+  such a definition by its fixpoint equation, so proofs about it are about the code that runs;
+  the headline says on which inputs it returns. The report lists it as
+  `MyApp.loop terminates via MyApp.loop_terminates`.
 - `.boundary` code is `@[extern] opaque` declarations only.
 - `.shell` code may do IO but not `unsafe`, `@[extern]`, or `@[implemented_by]`.
 - `.tooling` covers `Solution` and scripts; like every role, it may use only standard axioms.

@@ -9,4 +9,5 @@ fixture in `SoftwareChallengeTests/` that it rejects, keep `layering_sound` prov
 with `lake test`.
 
 What no check can decide: a statement says what its name says and does not restate the
-implementation, and `@[exercises]` marks only suites that exercise their claim.
+implementation, a headline listed under `terminates` states that its hole returns, and
+`@[exercises]` marks only suites that exercise their claim.

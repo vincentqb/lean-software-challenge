@@ -4,6 +4,7 @@ import all SoftwareChallengeTests.Fixtures.Spec
 import all SoftwareChallengeTests.Fixtures.Core
 import all SoftwareChallengeTests.Fixtures.Shell
 import all SoftwareChallengeTests.Fixtures.Rejected
+import all SoftwareChallengeTests.Fixtures.Fixpoint
 meta import SoftwareChallenge.Audit
 public meta import SoftwareChallenge
 
@@ -22,12 +23,17 @@ open Lean SoftwareChallenge
 private def project : Project := {
   layers := #[(`SoftwareChallengeTests.Fixtures.Spec, .spec),
     (`SoftwareChallengeTests.Fixtures.Boundary, .boundary), (`SoftwareChallengeTests.Fixtures.Core, .core),
-    (`SoftwareChallengeTests.Fixtures.Shell, .shell), (`SoftwareChallengeTests.Fixtures.Rejected, .core)]
+    (`SoftwareChallengeTests.Fixtures.Shell, .shell), (`SoftwareChallengeTests.Fixtures.Rejected, .core),
+    (`SoftwareChallengeTests.Fixtures.Fixpoint, .core)]
 }
 
 private def valid : Array Name := #[`SoftwareChallengeTests.Fixtures.Boundary,
   `SoftwareChallengeTests.Fixtures.Spec, `SoftwareChallengeTests.Fixtures.Core,
   `SoftwareChallengeTests.Fixtures.Shell]
+
+private def countdown : Name := `SoftwareChallengeTests.Fixtures.Fixpoint.countdown
+
+private def countdownTerminates : Name := `SoftwareChallengeTests.Fixtures.Fixpoint.countdown_terminates
 
 private def contains (text fragment : String) : Bool := (text.splitOn fragment).length > 1
 
@@ -77,6 +83,17 @@ run_cmd Elab.Command.liftCoreM do
       (`SoftwareChallengeTests.Fixtures.Rejected, .boundary, rejected, "bound",
         "@[extern] with a body the kernel unfolds")] do
     expect (violations (reassign module role) facts) name reason
+  let fixpoints := valid.push `SoftwareChallengeTests.Fixtures.Fixpoint
+  let unproved ← Audit.collect fixpoints
+  if project.check unproved then throwError "A partial_fixpoint without a termination headline passed"
+  expect (violations project unproved) "Fixpoint.countdown" "partial"
+  let covered ← Audit.collect fixpoints (NameSet.empty.insert countdown)
+  expect (violations project covered) "Fixpoint.spin" "partial"
+  if (violations project covered).any (contains · "countdown") then
+    throwError "A partial_fixpoint with a termination headline was reported partial"
+  let listedPartial ← Audit.collect (valid.push `SoftwareChallengeTests.Fixtures.Rejected)
+    (NameSet.empty.insert `SoftwareChallengeTests.Fixtures.Rejected.diverging)
+  expect (violations project listedPartial) "diverging" "partial"
   let legacy := { accepted with
     modules := accepted.modules.map ({ · with usesModuleSystem := false }) }
   if project.check legacy then throwError "A file without `module` passed"
@@ -172,6 +189,28 @@ run_cmd Elab.Command.liftTermElabM do
   expect (Audit.meaningful { holes := #[(`h, none)] }) "h" "no headline mentions this hole"
   if (Audit.meaningful { killsByHeadline := killed }).any (contains · "identity_fixed") then
     throwError "A killed headline was reported unkilled"
+  let fixpointKills ← Audit.killsOf (NameSet.empty.insert countdown) #[countdownTerminates,
+    `SoftwareChallengeTests.Fixtures.Fixpoint.countdown_terminates_rejects_stuck,
+    `SoftwareChallengeTests.Fixtures.bounded]
+  let env ← getEnv
+  let termination := fun (definition headline : Name) => Audit.sound project {
+    killsByHeadline := fixpointKills
+    holes := #[(countdown, some .core), (`SoftwareChallengeTests.Fixtures.identity, some .core)]
+    terminations := Audit.terminations env { config with
+      definition_names := some #[countdown, `SoftwareChallengeTests.Fixtures.identity]
+      terminates := some (({} : NameMap Name).insert definition headline) } }
+  unless (termination countdown countdownTerminates).isEmpty do
+    throwError "A listed termination headline was rejected: {termination countdown countdownTerminates}"
+  expect (termination `SoftwareChallengeTests.Fixtures.Fixpoint.spin countdownTerminates) "spin"
+    "not a definition hole"
+  expect (termination `SoftwareChallengeTests.Fixtures.Fixpoint.spin countdownTerminates) "spin"
+    "does not mention it"
+  expect (termination `SoftwareChallengeTests.Fixtures.identity `SoftwareChallengeTests.Fixtures.identity_fixed)
+    "identity" "not a partial_fixpoint definition"
+  expect (termination countdown `SoftwareChallengeTests.Fixtures.Fixpoint.countdown_terminates_rejects_stuck)
+    "countdown" "not a headline with a kill"
+  expect (termination countdown `SoftwareChallengeTests.Fixtures.bounded) "countdown" "not a headline with a kill"
+  expect (termination countdown `SoftwareChallengeTests.Fixtures.bounded) "bounded" "does not mention it"
 
 end
 

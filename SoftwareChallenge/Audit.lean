@@ -23,6 +23,9 @@ private def closure (next : Name → Array Name) (roots : Array Name) : NameSet 
 private def terminates (env : Environment) (name : Name) : Bool :=
   (Elab.Structural.eqnInfoExt.find? env name).isSome || (Elab.WF.eqnInfoExt.find? env name).isSome
 
+private def fixpoint (env : Environment) (name : Name) : Bool :=
+  (Elab.PartialFixpoint.eqnInfoExt.find? env name).isSome
+
 private def computational (info : ConstantInfo) : MetaM Bool := do
   unless info matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _ do return false
   if ← Meta.isProp info.type then return false
@@ -61,7 +64,7 @@ private partial def axiomsOf (name : Name) :
   modify (·.insert name found)
   return found
 
-private def declaration (reachesIO : NameSet) (info : ConstantInfo) (moduleName : Name) :
+private def declaration (reachesIO terminating : NameSet) (info : ConstantInfo) (moduleName : Name) :
     StateRefT (Std.HashMap Name (Array Name)) CoreM DeclarationFact := do
   let env ← getEnv
   let generated := (← findDeclarationRangesCore? info.name).isNone
@@ -71,8 +74,8 @@ private def declaration (reachesIO : NameSet) (info : ConstantInfo) (moduleName 
     moduleName
     computational := isComputational
     isUnsafe := info.isUnsafe
-    isPartial := info.isPartial &&
-      !(generated && (Compiler.isUnsafeRecName? info.name).any (terminates env))
+    isPartial := info.isPartial && !(generated && (Compiler.isUnsafeRecName? info.name).any fun source =>
+      terminates env source || terminating.contains source && fixpoint env source)
     external := isExtern env info.name
     unfoldable := info matches .defnInfo _
     replaced := (Compiler.getImplementedBy? env info.name).isSome
@@ -82,7 +85,9 @@ private def declaration (reachesIO : NameSet) (info : ConstantInfo) (moduleName 
     axioms := ← axiomsOf info.name
   }
 
-def collect (catalog : Array Name) : CoreM Inventory := do
+/-- `terminating` names the `partial_fixpoint` definitions whose termination a headline states;
+their compiled recursion is not reported `partial`. -/
+def collect (catalog : Array Name) (terminating : NameSet := {}) : CoreM Inventory := do
   modifyEnv (·.setExporting false)
   let env ← getEnv
   let modules ← catalog.mapM fun name => do
@@ -91,7 +96,7 @@ def collect (catalog : Array Name) : CoreM Inventory := do
   let types := modules.flatMap fun (_, data) => data.constants.flatMap (·.type.getUsedConstants)
   let reachesIO := dependingOn env types ``IO.RealWorld
   let declarations ← StateRefT'.run' (s := {}) <| modules.flatMapM fun (name, data) =>
-    data.constants.mapM fun info => declaration reachesIO info name
+    data.constants.mapM fun info => declaration reachesIO terminating info name
   return {
     modules := modules.map fun (name, data) =>
       { name, usesModuleSystem := data.isModule,
@@ -109,9 +114,26 @@ structure Config where
   solution_module : Name
   theorem_names : Array Name
   definition_names : Option (Array Name)
+  terminates : Option (NameMap Name) := none
   deriving FromJson
 
 def Config.holes (config : Config) : Array Name := config.definition_names.getD #[]
+
+/-- The `partial_fixpoint` holes paired with the headline that states each returns. -/
+def Config.terminating (config : Config) : Array (Name × Name) :=
+  (config.terminates.getD {}).toList.toArray
+
+structure Termination where
+  definition : Name
+  headline : Name
+  fixpoint : Bool
+  mentioned : Bool
+
+def terminations (env : Environment) (config : Config) : Array Termination :=
+  config.terminating.map fun (definition, headline) => {
+    definition, headline
+    fixpoint := fixpoint env definition
+    mentioned := ((env.find? headline).map (·.type.getUsedConstants.contains definition)).getD false }
 
 structure Headline where
   name : Name
@@ -183,6 +205,7 @@ structure Facts where
   challengeImports : Array Name := #[]
   challengeTheorems : Array Name := #[]
   challengeHoles : Array Name := #[]
+  terminations : Array Termination := #[]
 
 def sound (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
@@ -204,6 +227,14 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
   if let some (entry, role, unreached) := facts.entry then
     unless role matches some .shell do errors := errors.push s!"{entry}: declare it in a shell module"
     for hole in unreached do errors := errors.push s!"{hole}: {entry} never reaches this hole"
+  for t in facts.terminations do
+    unless t.fixpoint do
+      errors := errors.push s!"{t.definition}: listed under terminates but not a partial_fixpoint definition"
+    unless facts.holes.any (·.1 == t.definition) do
+      errors := errors.push s!"{t.definition}: listed under terminates but not a definition hole"
+    unless facts.killsByHeadline.any fun (name, found) => name == t.headline && !found.isEmpty do
+      errors := errors.push s!"{t.definition}: terminates names {t.headline}, which is not a headline with a kill"
+    unless t.mentioned do errors := errors.push s!"{t.definition}: {t.headline} does not mention it"
   for line in facts.headlines do
     for hypothesis in line.unnamed do
       errors := errors.push s!"{line.name}: hypothesis {hypothesis} is not a WorldClaim or Conjecture"
@@ -281,7 +312,7 @@ def gather (project : Project) (config : Config) (catalog : Array Name) : IO Fac
     let moduleOf := fun (name : Name) =>
       (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
     let roleOf := fun (name : Name) => (moduleOf name).bind project.role?
-    let inventory ← collect catalog
+    let inventory ← collect catalog (NameSet.ofList (config.terminating.map (·.1)).toList)
     let boundary := inventory.declarations.filter (project.role? ·.moduleName == some .boundary)
     let killsByHeadline ← killsOf (NameSet.ofList (config.holes ++ boundary.map (·.name)).toList)
       config.theorem_names
@@ -297,6 +328,7 @@ def gather (project : Project) (config : Config) (catalog : Array Name) : IO Fac
       registrations := catalog.flatMap fun module =>
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
           fun (claim, _) => (claim, project.role? module, moduleOf claim == some module)
+      terminations := terminations env config
       entry := entryOf project env roleOf running config.holes : Facts }
   let (challengeTheorems, challengeHoles) ← challengeDeclarations config.challenge_module
   return { facts with
@@ -318,6 +350,7 @@ def run (project : Project) (args : List String) : IO Unit := do
     let notes := line.premises.map (describe facts.evidence) |>.push
       s!"killed by {", ".intercalate (found.map toString).toList}"
     IO.println s!"{if proved line.premises then "●" else "◕"} {line.name}  ({"; ".intercalate notes.toList})"
+  for t in facts.terminations do IO.println s!"{t.definition} terminates via {t.headline}"
   IO.println s!"Owned: {" ".intercalate (← ownedFiles project facts.inventory config.challenge_module).toList}"
 
 end SoftwareChallenge.Audit
