@@ -7,7 +7,8 @@ package «software_challenge» where
   leanOptions := #[
     ⟨`autoImplicit, false⟩,
     ⟨`linter.all, true⟩,
-    ⟨`linter.missingDocs, false⟩
+    ⟨`linter.missingDocs, false⟩,
+    ⟨`linter.coreInternal, false⟩
   ]
 
 @[default_target]
