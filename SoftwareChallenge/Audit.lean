@@ -202,28 +202,42 @@ structure Facts where
   challengeImports : Array Name := #[]
   challengeTheorems : Array Name := #[]
   challengeHoles : Array Name := #[]
+  challengeFilled : Array Name := #[]
   terminations : Array Termination := #[]
+
+private def allowedImports : Role → String
+  | .spec | .boundary => "spec and boundary modules and trusted roots"
+  | .core => "core, spec and boundary modules and trusted roots"
+  | .shell => "any module but tooling"
+  | .tooling => "any module"
+
+private def remedy : Role → String
+  | .spec | .core => "spec and core code is pure: move effects and escape hatches to a shell module"
+  | .boundary => "a boundary module holds only `@[extern] opaque` declarations"
+  | .shell => "shell code may do IO but not `unsafe`, `@[extern]`, or `@[implemented_by]`"
+  | .tooling => "state an assumption as a WorldClaim hypothesis, not an axiom"
 
 def sound (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
   for fact in facts.inventory.modules do
     let some role := project.role? fact.name
-      | errors := errors.push s!"Unclassified module {fact.name}"
+      | errors := errors.push s!"Unclassified module {fact.name}; give it a role in Audit.lean"
     unless fact.usesModuleSystem do errors := errors.push s!"{fact.name}: start the file with `module`"
     for dependency in fact.imports do
       unless project.admits role dependency do
-        errors := errors.push s!"{fact.name} ({repr role}) may not import {dependency.name}"
+        errors := errors.push
+          s!"{fact.name} ({repr role}) may not import {dependency.name}; it may import {allowedImports role}"
   for fact in facts.inventory.declarations do
     if let some role := project.role? fact.moduleName then
       let reasons := fact.reasons role
       unless reasons.isEmpty do
-        errors := errors.push s!"{fact.name} ({repr role}): {", ".intercalate reasons}"
+        errors := errors.push s!"{fact.name} ({repr role}): {", ".intercalate reasons}; {remedy role}"
   for (hole, role) in facts.holes do
     unless role matches some .core | some .shell do
       errors := errors.push s!"{hole}: a definition hole must be a core or shell definition"
   if let some (entry, role, unreached) := facts.entry then
     unless role matches some .shell do errors := errors.push s!"{entry}: declare it in a shell module"
-    for hole in unreached do errors := errors.push s!"{hole}: {entry} never reaches this hole"
+    for hole in unreached do errors := errors.push s!"{hole}: {entry} never reaches this hole; call it from {entry}"
   for t in facts.terminations do
     unless t.fixpoint do
       errors := errors.push s!"{t.definition}: listed under terminates but not a partial_fixpoint definition"
@@ -234,13 +248,17 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
     unless t.mentioned do errors := errors.push s!"{t.definition}: {t.headline} does not mention it"
   for line in facts.headlines do
     for hypothesis in line.unnamed do
-      errors := errors.push s!"{line.name}: hypothesis {hypothesis} is not a WorldClaim or Conjecture"
+      errors := errors.push s!"{line.name}: hypothesis {hypothesis} is not a WorldClaim or Conjecture; \
+        declare it as one in a spec module"
   return errors
 
 def meaningful (facts : Facts) : Array String :=
   (facts.killsByHeadline.filterMap fun (headline, found) =>
-    if found.isEmpty then some s!"{headline}: no kill shows it rejects a wrong implementation" else none) ++
-  (facts.holes.filter (!facts.mentioned.contains ·.1)).map (s!"{·.1}: no headline mentions this hole")
+    if found.isEmpty then some s!"{headline}: no kill shows it rejects a wrong implementation; state \
+      `¬` the headline with its holes replaced by wrong ones in the challenge and comparator.json" else none) ++
+  (facts.holes.filter (!facts.mentioned.contains ·.1)).map fun (hole, _) =>
+    s!"{hole}: no headline mentions this hole; state one in the challenge, or drop it from comparator.json"
+
 
 def owned (project : Project) (config : Config) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
@@ -256,15 +274,30 @@ def owned (project : Project) (config : Config) (facts : Facts) : Array String :
   for (field, declared, listed) in #[("theorem_names", facts.challengeTheorems, config.theorem_names),
       ("definition_names", facts.challengeHoles, config.holes)] do
     for name in declared.filter (!listed.contains ·) do
-      errors := errors.push s!"{config.challenge_module} declares {name}, which comparator.json {field} omits"
-    for name in listed.filter (!declared.contains ·) do
-      errors := errors.push s!"comparator.json {field} lists {name}, which {config.challenge_module} does not declare"
+      errors := errors.push
+        s!"{config.challenge_module} declares {name}, which comparator.json {field} omits; list it there"
+    for name in listed.filter fun name => !declared.contains name && !facts.challengeFilled.contains name do
+      errors := errors.push s!"comparator.json {field} lists {name}, which {config.challenge_module} \
+        does not declare; declare it there with `sorry`, or drop it from comparator.json"
+  for name in facts.challengeFilled.filter config.holes.contains do
+    errors := errors.push s!"{config.challenge_module} implements {name}; it only declares it, so keep \
+      `sorry` there and implement it in a core or shell module"
   return errors
+
+def lockErrors (locked current : Array (String × UInt64)) (edit : Array String) : Array String :=
+  let instead := s!"it decides what is claimed, so restore it and edit {", ".intercalate edit.toList} instead; \
+    the owner deletes owned.lock to record a new statement"
+  (current.filterMap fun (file, digest) => match locked.find? (·.1 == file) with
+    | none => some s!"{file} is owned but owned.lock does not record it; {instead}"
+    | some (_, recorded) => if recorded == digest then none else some s!"{file} changed since owned.lock; {instead}") ++
+  (locked.filter fun (file, _) => !current.any (·.1 == file)).map fun (file, _) =>
+    s!"{file} is recorded in owned.lock but missing; {instead}"
 
 def evidenced (facts : Facts) : Array String :=
   facts.headlines.flatMap fun line => line.premises.filterMap fun premise =>
     if premise.kind == .world && !facts.evidence.any (·.claim == premise.claim) then
-      some s!"{line.name}: world assumption {premise.claim} has no Test, Check, or live suite"
+      some s!"{line.name}: world assumption {premise.claim} has no Test, Check, or live suite; add a Check \
+        to its spec module or mark a suite `@[exercises {premise.claim}]`"
     else none
 
 def challengeImports (challenge : Name) : IO (Array Name) := do
@@ -272,7 +305,7 @@ def challengeImports (challenge : Name) : IO (Array Name) := do
     (modToFilePath "." challenge "lean")
   return (← parseImports' (← IO.FS.readFile path) path.toString).imports.map (·.module)
 
-private def challengeDeclarations (challenge : Name) : IO (Array Name × Array Name) := do
+private def challengeDeclarations (challenge : Name) : IO (Array Name × Array Name × Array Name) := do
   let file ← findOLean challenge
   let parts ← #[file, file.addExtension "server", file.addExtension "private"].filterM (·.pathExists)
   let some (data, _) := (← readModuleDataParts parts).back?
@@ -281,16 +314,31 @@ private def challengeDeclarations (challenge : Name) : IO (Array Name × Array N
   let usesSorry := fun (info : ConstantInfo) =>
     (info.value?.map (·.getUsedConstants.contains ``sorryAx)).getD false
   return ((declared.filter (·.isTheorem)).map (·.name),
-    (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name))
+    (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name),
+    (declared.filter fun info => !info.isTheorem && !usesSorry info).map (·.name))
 
 private def sourceFile (module : Name) : String :=
   "/".intercalate (module.components.map toString) ++ ".lean"
 
 private def ownedFiles (project : Project) (inventory : Inventory) (challenge : Name) : IO (Array String) := do
   let configuration ← #["comparator.json", "Audit.lean", "lakefile.lean", "lake-manifest.json",
-    "lean-toolchain"].filterM fun (file : String) => System.FilePath.pathExists file
+    "lean-toolchain", "owned.lock"].filterM fun (file : String) => System.FilePath.pathExists file
   let claimModules := inventory.modules.filter (project.role? ·.name matches some .spec | some .boundary)
   return configuration ++ #[sourceFile challenge] ++ claimModules.map (sourceFile ·.name)
+
+private def editableFiles (project : Project) (inventory : Inventory) : Array String :=
+  (inventory.modules.filter (project.role? ·.name matches some .core | some .shell | some .tooling)).map
+    (sourceFile ·.name)
+
+private def readLock : IO (Option (Array (String × UInt64))) := do
+  unless ← System.FilePath.pathExists "owned.lock" do return none
+  return some <| ((← IO.FS.readFile "owned.lock").splitOn "\n").toArray.filterMap fun line =>
+    match line.splitOn " " with
+    | [digest, file] => digest.toNat?.map fun n => (file, n.toUInt64)
+    | _ => none
+
+private def digests (files : Array String) : IO (Array (String × UInt64)) :=
+  (files.filter (· != "owned.lock")).mapM fun (file : String) => return (file, hash (← IO.FS.readFile file))
 
 private def describe (evidence : Array Evidence) (premise : Premise) : String :=
   let found := evidence.filter (·.claim == premise.claim)
@@ -327,9 +375,9 @@ private def gather (project : Project) (config : Config) (catalog : Array Name) 
           fun (claim, _) => (claim, project.role? module, moduleOf claim == some module)
       terminations := terminations env config
       entry := entryOf project env roleOf running config.holes : Facts }
-  let (challengeTheorems, challengeHoles) ← challengeDeclarations config.challenge_module
+  let (challengeTheorems, challengeHoles, challengeFilled) ← challengeDeclarations config.challenge_module
   return { facts with
-    challengeTheorems, challengeHoles
+    challengeTheorems, challengeHoles, challengeFilled
     challengeImports := ← challengeImports config.challenge_module }
 
 def run (project : Project) (args : List String) : IO Unit := do
@@ -338,16 +386,24 @@ def run (project : Project) (args : List String) : IO Unit := do
   unless catalog.contains config.solution_module do
     throw <| .userError s!"solution_module {config.solution_module} is not built by a default target"
   let facts ← gather project config catalog
+  let edit := editableFiles project facts.inventory
+  let ownedNow ← ownedFiles project facts.inventory config.challenge_module
+  let current ← digests ownedNow
+  let locked ← readLock
   let failures := (sound project facts).map ("sound: " ++ ·) ++ (meaningful facts).map ("meaningful: " ++ ·) ++
-    (owned project config facts).map ("owned: " ++ ·) ++ (evidenced facts).map ("evidence: " ++ ·)
+    (owned project config facts ++ (locked.map (lockErrors · current edit)).getD #[]).map ("owned: " ++ ·) ++
+    (evidenced facts).map ("evidence: " ++ ·)
+  let files := s!"Edit: {" ".intercalate edit.toList}\nOwned: {" ".intercalate ownedNow.toList}"
   unless project.check facts.inventory && failures.isEmpty do
-    throw <| IO.userError ("SoftwareChallenge audit failed:\n" ++ "\n".intercalate failures.toList)
+    throw <| IO.userError ("SoftwareChallenge audit failed:\n" ++ "\n".intercalate failures.toList ++ "\n" ++ files)
+  if locked.isNone then
+    IO.FS.writeFile "owned.lock" ("\n".intercalate (current.map fun (file, digest) => s!"{digest} {file}").toList)
   IO.println s!"Checked {facts.inventory.modules.size} modules and {facts.inventory.declarations.size} declarations"
   for (line, (_, found)) in facts.headlines.zip facts.killsByHeadline do
     let notes := line.premises.map (describe facts.evidence) |>.push
       s!"killed by {", ".intercalate (found.map toString).toList}"
     IO.println s!"{if proved line.premises then "●" else "◕"} {line.name}  ({"; ".intercalate notes.toList})"
   for t in facts.terminations do IO.println s!"{t.definition} terminates via {t.headline}"
-  IO.println s!"Owned: {" ".intercalate (← ownedFiles project facts.inventory config.challenge_module).toList}"
+  IO.println files
 
 end SoftwareChallenge.Audit

@@ -81,8 +81,9 @@ package_facet softwareChallenge pkg : Unit := do
         catalog := catalog.push mod.name
         job := job.mix (← mod.leanArts.fetch)
   job.mapM fun _ => do
-    for file in [pkg.dir / "Audit.lean", pkg.dir / "comparator.json"] do
-      addTrace (← BuildTrace.compute (TextFilePath.mk file))
+    for file in ["Audit.lean", "comparator.json", "lakefile.lean", "lake-manifest.json", "lean-toolchain",
+        "owned.lock"] do
+      if ← (pkg.dir / file).pathExists then addTrace (← BuildTrace.compute (TextFilePath.mk (pkg.dir / file)))
     let report := pkg.buildDir / "softwareChallenge.txt"
     let upToDate ← buildUnlessUpToDate? report (← getTrace) (report.addExtension "trace") do
       IO.FS.writeFile report (← captureProc {

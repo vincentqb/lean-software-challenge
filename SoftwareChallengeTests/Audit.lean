@@ -112,6 +112,18 @@ run_cmd Elab.Command.liftCoreM do
   expect listing "declares B" "theorem_names omits"
   expect listing "declares g" "definition_names omits"
   expect listing "lists h" "does not declare"
+  let filled := Audit.owned project config
+    { challengeTheorems := #[`A], challengeHoles := #[], challengeFilled := #[`h] }
+  expect filled "implements h" "implement it in a core or shell module"
+  if filled.any (contains · "does not declare") then
+    throwError "A filled hole was reported undeclared: {filled}"
+  let locked := #[("Challenge.lean", (1 : UInt64)), ("Spec.lean", 2), ("Gone.lean", 3)]
+  let drifted := Audit.lockErrors locked #[("Challenge.lean", 1), ("Spec.lean", 5), ("New.lean", 4)]
+    #["Core.lean"]
+  expect drifted "Spec.lean changed" "edit Core.lean instead"
+  expect drifted "New.lean" "does not record it"
+  expect drifted "Gone.lean" "missing"
+  if drifted.any (contains · "Challenge.lean") then throwError "An unchanged owned file was reported"
   let env ← getEnv
   let reached := Audit.reachedFrom env fun name =>
     (env.getModuleIdxFor? name).any (valid.contains env.header.modules[·.toNat]!.module)

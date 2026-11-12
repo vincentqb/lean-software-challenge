@@ -26,6 +26,7 @@ Requires **Lean 4.35.0**.
 | `MyApp/Spec.lean` | types, reference definitions, and the claims headlines rest on | you |
 | `MyApp/Boundary.lean` | `@[extern] opaque` declarations for foreign code | you |
 | `Audit.lean` | the role of each module prefix | you |
+| `owned.lock` | a hash of each file above, which the first build records | you |
 | `MyApp/Core.lean` | pure code: public interface, private helpers, and their proofs | agents |
 | `MyApp/Shell.lean` | IO that connects the core to the world, and `main` | agents |
 | `MyApp/Solution.lean` | proofs of the headlines and kills | agents |
@@ -124,11 +125,12 @@ lake comparator   # MyApp/Solution.lean proves exactly the statements in Challen
 lake script run software_challenge/grade <commit>   # judge a candidate from this checkout
 ```
 
-The audit reruns and prints its report only when a module, `Audit.lean`, `comparator.json`, or
-`Challenge.lean` changes; `.lake/build/softwareChallenge.txt` keeps the last report.
+The audit reruns and prints its report only when a module or an owned file changes; `.lake/build/softwareChallenge.txt` keeps the last report.
 
-The report's `Owned:` line lists the files that decide what is claimed. `grade` refuses a
-candidate that changes or adds one, then builds it in a fresh worktree and runs `lake build`,
+The report's `Edit:` line lists the files agents change, and its `Owned:` line the files that
+decide what is claimed. A build fails when an owned file differs from `owned.lock`; delete the
+lock to record a new statement. `grade` refuses a
+candidate that changes or adds an owned file, then builds it in a fresh worktree and runs `lake build`,
 `lake comparator` and `lake test`; it exits 0 to accept, 1 to refuse, and 3 when it cannot
 judge. `Check` on foreign code needs `precompileModules`. `lake comparator` replays the
 headline proofs through the kernel in a separate process, which rejects proofs that skipped
