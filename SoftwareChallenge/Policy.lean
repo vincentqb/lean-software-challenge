@@ -9,22 +9,33 @@ open Lean
 namespace SoftwareChallenge
 
 inductive Role where
-  | spec | boundary | core | shell | tooling
+  | coreSpec | worldSpec | coreCode | worldCode | tooling
   deriving DecidableEq, Repr
 
+instance : ToString Role where
+  toString
+    | .coreSpec => "CoreSpec"
+    | .worldSpec => "WorldSpec"
+    | .coreCode => "CoreCode"
+    | .worldCode => "WorldCode"
+    | .tooling => "tooling"
+
 def Role.Inner (role : Role) : Prop :=
-  role = .spec ∨ role = .boundary ∨ role = .core
+  role = .coreSpec ∨ role = .worldSpec ∨ role = .coreCode
+
+def Role.ofName (name : Name) : Role :=
+  (name.components.findSome? fun component =>
+    [Role.coreSpec, .worldSpec, .coreCode, .worldCode].find? (toString · == component.toString)).getD .tooling
 
 structure Project where
-  layers : Array (Name × Role)
-  trusted : Array Name := #[`Init, `Std, `Lean]
-  entry : Option Name := some `main
+  modules : Array (Name × Role)
+  executable : Bool := false
+
+def Project.ofPackage (modules : Array Name) (executable : Bool) : Project :=
+  { modules := modules.map fun name => (name, Role.ofName name), executable }
 
 def Project.role? (project : Project) (name : Name) : Option Role :=
-  ((project.layers.filter (·.1.isPrefixOf name)).getMax? (·.1.getNumParts < ·.1.getNumParts)).map (·.2)
-
-def Project.Trusted (project : Project) (name : Name) : Prop :=
-  ∃ root ∈ project.trusted, root.isPrefixOf name = true
+  (project.modules.find? (·.1 == name)).map (·.2)
 
 structure ImportFact where
   name : Name
@@ -59,30 +70,17 @@ def Inventory.RuntimeImport (inventory : Inventory) (source target : Name) : Pro
 
 def standardAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
 
-inductive ClaimKind where
-  | world | conjecture
-  deriving BEq
-
-structure Premise where
-  claim : Name
-  kind : ClaimKind
-  dischargedBy : Option Name
-
-def proved (premises : Array Premise) : Bool :=
-  premises.all fun premise => premise.kind == .world || premise.dischargedBy.isSome
-
 def Role.permits : Role → Role → Bool
   | .tooling, _ => true
-  | .shell, target => target != .tooling
-  | source, target => target == .spec || target == .boundary || target == source
-
-def Project.trusts (project : Project) (name : Name) : Bool :=
-  project.trusted.any (·.isPrefixOf name)
+  | .worldCode, target => target != .tooling
+  | .worldSpec, target => target == .coreSpec || target == .worldSpec
+  | .coreCode, target => target == .coreSpec || target == .coreCode
+  | .coreSpec, target => target == .coreSpec
 
 def Project.admits (project : Project) (source : Role) (dependency : ImportFact) : Bool :=
   dependency.comptime || match project.role? dependency.name with
     | some target => source.permits target
-    | none => project.trusts dependency.name
+    | none => true
 
 def Project.moduleAdmitted (project : Project) (fact : ModuleFact) : Bool :=
   match project.role? fact.name with
@@ -95,19 +93,19 @@ def DeclarationFact.reasons (role : Role) (fact : DeclarationFact) : List String
     (fact.initializes, "initializer"), (fact.effects, "IO"), (fact.debug, "dbg builtin")]
   let raised := fun (allowed : List String) =>
     flags.filterMap fun (set, reason) => if set && !allowed.contains reason then some reason else none
-  (if fact.axioms.isEmpty then [] else [s!"axioms {fact.axioms}"]) ++
-    if !fact.computational then [] else match role with
-      | .spec | .core => raised []
-      | .boundary =>
-        if !fact.external then ["not an @[extern] binding"]
-        else if fact.unfoldable then ["@[extern] with a body the kernel unfolds"] else []
-      | .shell => raised ["partial", "initializer", "IO", "dbg builtin"]
-      | .tooling => []
+  if !fact.computational then [] else match role with
+    | .coreSpec | .coreCode => raised []
+    | .worldSpec =>
+      if !fact.external then raised []
+      else if fact.unfoldable then ["@[extern] with a body the kernel unfolds"]
+      else raised ["@[extern]", "IO"]
+    | .worldCode => raised ["partial", "initializer", "IO", "dbg builtin"]
+    | .tooling => []
 
 def Project.check (project : Project) (inventory : Inventory) : Bool :=
   inventory.modules.all project.moduleAdmitted &&
     inventory.declarations.all fun fact => match project.role? fact.moduleName with
-      | some role => (fact.reasons role).isEmpty
+      | some role => fact.axioms.isEmpty && (fact.reasons role).isEmpty
       | none => false
 
 private theorem permits_inner {source target : Role} (permitted : source.permits target = true)
@@ -118,29 +116,27 @@ private theorem import_step {project : Project} {inventory : Inventory}
     (accepted : project.check inventory = true) {source target : Name}
     (inner : ∀ role, project.role? source = some role → role.Inner)
     (edge : inventory.RuntimeImport source target) :
-    (∀ reached, project.role? target = some reached → reached.Inner) ∧
-      (project.role? target = none → project.Trusted target) := by
+    ∀ reached, project.role? target = some reached → reached.Inner := by
   obtain ⟨fact, member, rfl, dependency, imported, rfl, runtime⟩ := edge
   simp only [Project.check, Bool.and_eq_true, Array.all_eq_true'] at accepted
   have admitted := accepted.1 fact member
   unfold Project.moduleAdmitted at admitted
+  intro reached found
   cases owner : project.role? fact.name with
   | none => simp [owner] at admitted
   | some role =>
     simp only [owner, Bool.and_eq_true, Array.all_eq_true'] at admitted
     have permitted := admitted.2 dependency imported
-    simp only [Project.admits, runtime, Bool.false_or] at permitted
-    exact ⟨fun _ found => permits_inner (by simpa [found] using permitted) (inner role owner),
-      fun found => Array.any_eq_true'.mp (by simpa [found, Project.trusts] using permitted)⟩
+    simp only [Project.admits, runtime, Bool.false_or, found] at permitted
+    exact permits_inner permitted (inner role owner)
 
 theorem layering_sound (project : Project) (inventory : Inventory)
     (accepted : project.check inventory = true) (source target : Name) (role : Role)
     (classified : project.role? source = some role) (inner : role.Inner)
     (reaches : Relation.TransGen inventory.RuntimeImport source target) :
-    (∀ reached, project.role? target = some reached → reached.Inner) ∧
-      (project.role? target = none → project.Trusted target) := by
+    ∀ reached, project.role? target = some reached → reached.Inner := by
   induction reaches with
   | single edge => exact import_step accepted (fun _ owner => by simp_all) edge
-  | tail _ edge previous => exact import_step accepted previous.1 edge
+  | tail _ edge previous => exact import_step accepted previous edge
 
 end SoftwareChallenge

@@ -25,13 +25,9 @@ elab "rejects " reason:str " in " cmd:command : command => do
   unless diagnostics.any (fun text => (text.splitOn reason.getString).length > 1) do
     throwError "Expected rejection containing {reason.getString}, got {diagnostics}"
 
-elab "assert_evidence " n:ident " = " tests:num " tests " checks:num " checks " suites:num
-    " suites" : command => do
+elab "assert_evidence " n:ident " = " checks:num " checks" : command => do
   let name ← resolveGlobalConstNoOverload n
-  let found := (allEvidence (← getEnv)).filter (·.claim == name)
-  let count := fun kind => (found.filter (·.kind == kind)).size
-  unless count .test == tests.getNat && count .check == checks.getNat &&
-      count .suite == suites.getNat do
-    throwError "{name}: {count .test} tests, {count .check} checks, {count .suite} suites"
+  let found := ((allEvidence (← getEnv)).filter (·.claim == name)).size
+  unless found == checks.getNat do throwError "{name}: {found} checks"
 
 end SoftwareChallengeTests

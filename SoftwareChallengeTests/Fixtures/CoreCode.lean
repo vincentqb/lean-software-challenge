@@ -1,16 +1,11 @@
 module
 
-public import SoftwareChallengeTests.Fixtures.Spec
-public meta import SoftwareChallenge
+public import SoftwareChallengeTests.Fixtures.CoreSpec
+meta import SoftwareChallenge
 
 public section
 
 namespace SoftwareChallengeTests.Fixtures
-
-inductive Tree where
-  | leaf
-  | fork : Tree → Tree → Tree
-  deriving Repr
 
 def halve (n : Nat) : Nat :=
   if h : n < 2 then 0 else halve (n - 2) + 1
@@ -20,24 +15,6 @@ decreasing_by omega
 private def helper (n : Nat) : Nat := n
 
 def identity (n : Nat) : Nat := helper n
-
-def successor (n : Nat) : Nat := nativeSucc n
-
-theorem successor_grows (agrees : SuccAgrees) (n : Nat) : n < successor n := by
-  simp only [successor, agrees n]
-  omega
-
-theorem even_four : EvenFour := rfl
-
-Test Identity identity : identity 3 = 3 := by decide
-
-theorem uses_open (h : Identity identity) : identity 5 = 5 := h 5
-
-theorem uses_discharged (h : EvenFour) : 4 % 2 = 0 := h
-
-theorem uses_unchecked (h : Unchecked) : wrongSucc 0 = 1 := h 0
-
-theorem uses_live (now : Nat → Nat) (h : ClockAdvances now) (t : Nat) : t ≤ now t := h t
 
 theorem bounded (n : Nat) (h : n < 5) : n < 6 := by omega
 
@@ -55,8 +32,20 @@ theorem identity_three : identity 3 = 3 := by simp [identity, helper]
 
 theorem identity_three_rejects_successor : ¬ (fun n : Nat => n + 1) 3 = 3 := by decide
 
+theorem identity_twice (n : Nat) : identity (identity n) = identity n := by simp [identity, helper]
+
+theorem identity_twice_rejects_successor :
+    ¬ ∀ n : Nat, (fun n => n + 1) ((fun n => n + 1) n) = (fun n => n + 1) n := by
+  intro h
+  exact absurd (h 0) (by decide)
+
+theorem identity_twice_rejects_mixed : ¬ ∀ n : Nat, (fun n => n + 1) (id n) = id n := by
+  intro h
+  exact absurd (h 0) (by decide)
+
 theorem uses_unnamed (h : 1 = 2) : 1 = 2 := h
 
-Conjecture CoreClaim := 1 = 1
+/-- A claim outside a WorldSpec module. Declaring it here falsifies the audit. -/
+WorldClaim CoreClaim := 1 = 1
 
 end SoftwareChallengeTests.Fixtures

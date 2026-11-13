@@ -1,6 +1,7 @@
 module
 
-public import SoftwareChallengeTests.Fixtures.Shell
+public import SoftwareChallengeTests.Fixtures.CoreCode
+public import SoftwareChallengeTests.Fixtures.WorldSpec
 meta import SoftwareChallenge.Commands
 
 public section
@@ -24,6 +25,8 @@ initialize startup : Nat ← pure 0
 
 @[extern "lean_nat_succ"] def bound (n : Nat) : Nat := n + 1
 
+@[extern "lean_nat_succ"] opaque foreign : @& Nat → Nat
+
 def fast (n : Nat) : Nat := n + 1
 
 @[implemented_by fast] def replaced (n : Nat) : Nat := n + 1
@@ -40,7 +43,6 @@ private theorem chained : 1 = 2 := viaRaw.elim
 
 theorem hole : Identity identity := by sorry
 
-run_cmd Lean.modifyEnv (SoftwareChallenge.claimsExt.addEntry ·
-  (`SoftwareChallengeTests.Fixtures.Identity, SoftwareChallenge.ClaimKind.world))
+run_cmd Lean.modifyEnv (SoftwareChallenge.claimsExt.addEntry · `SoftwareChallengeTests.Fixtures.Identity)
 
 end SoftwareChallengeTests.Fixtures.Rejected

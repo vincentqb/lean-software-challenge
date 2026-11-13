@@ -39,7 +39,7 @@ shell prints the true value of an expression, assuming native addition is correc
 ## Syntax
 
 ```lean
-public meta import SoftwareChallenge
+meta import SoftwareChallenge
 
 /-- The adder agrees with `Nat.add`. A different sum for any pair falsifies it. -/
 WorldClaim AddAgrees (add : Nat → Nat → Nat) := ∀ a b, add a b = a + b

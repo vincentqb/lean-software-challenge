@@ -1,39 +1,37 @@
 module
 
-import all SoftwareChallengeTests.Fixtures.Spec
-import all SoftwareChallengeTests.Fixtures.Core
-import all SoftwareChallengeTests.Fixtures.Shell
+import all SoftwareChallengeTests.Fixtures.CoreSpec
+import all SoftwareChallengeTests.Fixtures.WorldSpec
+import all SoftwareChallengeTests.Fixtures.CoreCode
+import all SoftwareChallengeTests.Fixtures.WorldCode
+import all SoftwareChallengeTests.Fixtures.Sibling
 import all SoftwareChallengeTests.Fixtures.Rejected
 import all SoftwareChallengeTests.Fixtures.Fixpoint
 meta import SoftwareChallenge.Audit
-public meta import SoftwareChallenge
+meta import SoftwareChallenge
 
 public section
 
 namespace SoftwareChallengeTests.Audit
 
-open SoftwareChallengeTests.Fixtures
-
-Test Identity identity : identity 5 = 5 := by decide
-
 meta section
 
 open Lean SoftwareChallenge
 
+private def fixture (name : Name) : Name := `SoftwareChallengeTests.Fixtures ++ name
+
 private def project : Project := {
-  layers := #[(`SoftwareChallengeTests.Fixtures.Spec, .spec),
-    (`SoftwareChallengeTests.Fixtures.Boundary, .boundary), (`SoftwareChallengeTests.Fixtures.Core, .core),
-    (`SoftwareChallengeTests.Fixtures.Shell, .shell), (`SoftwareChallengeTests.Fixtures.Rejected, .core),
-    (`SoftwareChallengeTests.Fixtures.Fixpoint, .core)]
+  modules := #[(fixture `CoreSpec, .coreSpec), (fixture `WorldSpec, .worldSpec),
+    (fixture `CoreCode, .coreCode), (fixture `WorldCode, .worldCode), (fixture `Sibling, .worldCode), (fixture `Rejected, .coreCode),
+    (fixture `Fixpoint, .coreCode)]
 }
 
-private def valid : Array Name := #[`SoftwareChallengeTests.Fixtures.Boundary,
-  `SoftwareChallengeTests.Fixtures.Spec, `SoftwareChallengeTests.Fixtures.Core,
-  `SoftwareChallengeTests.Fixtures.Shell]
+private def valid : Array Name :=
+  #[fixture `CoreSpec, fixture `WorldSpec, fixture `CoreCode, fixture `WorldCode, fixture `Sibling]
 
-private def countdown : Name := `SoftwareChallengeTests.Fixtures.Fixpoint.countdown
+private def countdown : Name := fixture `Fixpoint.countdown
 
-private def countdownTerminates : Name := `SoftwareChallengeTests.Fixtures.Fixpoint.countdown_terminates
+private def countdownTerminates : Name := fixture `Fixpoint.countdown_terminates
 
 private def contains (text fragment : String) : Bool := (text.splitOn fragment).length > 1
 
@@ -45,45 +43,58 @@ private def violations (project : Project) (inventory : Inventory) : Array Strin
   Audit.sound project { inventory }
 
 private def config : Audit.Config := {
-  challenge_module := `SoftwareChallengeTests.Fixtures.Challenge
-  solution_module := `SoftwareChallengeTests.Fixtures.Core
+  challenge_module := fixture `Challenge
+  solution_module := fixture `CoreCode
   theorem_names := #[`A]
   definition_names := some #[`h] }
 
-#guard ({ layers := #[(`A, .tooling), (`A.B.C, .core), (`A.B, .spec)] } : Project).role?
-  `A.B.C.D == some .core
+#guard Role.ofName `A.CoreCode.B == .coreCode
+#guard Role.ofName `A.WorldSpec.CoreCode == .worldSpec
+#guard Role.ofName `A.Helpers == .tooling
+#guard Role.ofName `A.CoreCodeHelpers == .tooling
+
+#guard
+  let layout := Project.ofPackage #[`A.CoreCode.B, `A.Helpers, `A.WorldSpec] false
+  !layout.admits .coreCode { name := `A.Helpers, comptime := false } &&
+    !layout.admits .coreCode { name := `A.WorldSpec, comptime := false } &&
+    layout.admits .coreCode { name := `A.WorldSpec, comptime := true } &&
+    layout.admits .coreCode { name := `Lean.Data.Name, comptime := false } &&
+    layout.role? `A.CoreCode.B == some .coreCode && layout.role? `Lean.Data.Name == none
 
 run_cmd Elab.Command.liftCoreM do
   let accepted ← Audit.collect valid
   unless project.check accepted do
     throwError "Valid fixtures were rejected:\n{violations project accepted}"
   let reassign (module : Name) (role : Role) : Project :=
-    { layers := project.layers.map fun (name, r) => (name, if name == module then role else r) }
-  let rejected ← Audit.collect (valid.push `SoftwareChallengeTests.Fixtures.Rejected)
-  for layout in #[project, reassign `SoftwareChallengeTests.Fixtures.Rejected .spec] do
+    { modules := project.modules.map fun (name, r) => (name, if name == module then role else r) }
+  let rejected ← Audit.collect (valid.push (fixture `Rejected))
+  for layout in #[project, reassign (fixture `Rejected) .coreSpec] do
     if layout.check rejected then throwError "Rejected fixtures passed"
     for (name, reason) in #[("hiddenUnsafe", "unsafe"), ("diverging", "partial"),
         ("hiddenEffect", "IO"), ("packagedEffect", "IO"), ("startup", "initializer"),
-        ("bound", "@[extern]"), ("Rejected.replaced", "@[implemented_by]"),
-        ("traced", "dbg builtin"), ("traceValue", "dbg builtin"), ("Rejected.raw", "axioms"),
+        ("bound", "@[extern]"), ("Rejected.foreign", "@[extern]"), ("Rejected.replaced", "@[implemented_by]"),
+        ("traced", "dbg builtin"), ("traceValue", "dbg builtin"), ("Rejected.raw", "uses axiom"),
         ("chained", "Rejected.raw"), ("Rejected.hole", "sorryAx"),
-        ("Fixtures.Rejected", "may not import")] do
+        ("Fixtures.Rejected", "may not import SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec)")] do
       expect (violations layout rejected) name reason
+    if (violations layout rejected).any (contains · "_unsafe_rec") then
+      throwError "A partial definition was reported by its compiler name"
   for (module, role, facts, name, reason) in #[
-      (`SoftwareChallengeTests.Fixtures.Core, Role.boundary, accepted, "identity",
-        "not an @[extern] binding"),
-      (`SoftwareChallengeTests.Fixtures.Boundary, .core, accepted, "Fixtures.Spec", "may not import"),
-      (`SoftwareChallengeTests.Fixtures.Shell, .boundary, accepted, "Fixtures.Shell", "may not import"),
-      (`SoftwareChallengeTests.Fixtures.Core, .tooling, accepted, "Fixtures.Shell", "may not import"),
-      (`SoftwareChallengeTests.Fixtures.Rejected, .shell, rejected, "hiddenUnsafe", "unsafe"),
-      (`SoftwareChallengeTests.Fixtures.Rejected, .shell, rejected, "bound", "@[extern]"),
-      (`SoftwareChallengeTests.Fixtures.Rejected, .shell, rejected, "Rejected.replaced",
-        "@[implemented_by]"),
-      (`SoftwareChallengeTests.Fixtures.Rejected, .tooling, rejected, "Rejected.raw", "axioms"),
-      (`SoftwareChallengeTests.Fixtures.Rejected, .boundary, rejected, "bound",
-        "@[extern] with a body the kernel unfolds")] do
+      (fixture `CoreSpec, Role.coreCode, accepted, "Fixtures.WorldSpec", "may not import"),
+      (fixture `WorldCode, .worldSpec, accepted, "Fixtures.WorldCode", "may not import"),
+      (fixture `WorldCode, .worldSpec, accepted, "drain", "partial"),
+      (fixture `CoreCode, .tooling, accepted, "Fixtures.WorldCode", "may not import"),
+      (fixture `Rejected, .worldCode, rejected, "hiddenUnsafe", "unsafe"),
+      (fixture `Rejected, .worldCode, rejected, "bound", "@[extern]"),
+      (fixture `Rejected, .worldCode, rejected, "Rejected.foreign", "@[extern]"),
+      (fixture `Rejected, .worldCode, rejected, "Rejected.replaced", "@[implemented_by]"),
+      (fixture `Rejected, .tooling, rejected, "Rejected.raw", "uses axiom"),
+      (fixture `Rejected, .worldSpec, rejected, "bound", "@[extern] with a body the kernel unfolds"),
+      (fixture `Rejected, .worldSpec, rejected, "hiddenEffect", "IO")] do
     expect (violations (reassign module role) facts) name reason
-  let fixpoints := valid.push `SoftwareChallengeTests.Fixtures.Fixpoint
+  if (violations (reassign (fixture `Rejected) .worldSpec) rejected).any (contains · "Rejected.foreign") then
+    throwError "An @[extern] opaque declaration was rejected in a WorldSpec module"
+  let fixpoints := valid.push (fixture `Fixpoint)
   let unproved ← Audit.collect fixpoints
   if project.check unproved then throwError "A partial_fixpoint without a termination headline passed"
   expect (violations project unproved) "Fixpoint.countdown" "partial"
@@ -91,138 +102,131 @@ run_cmd Elab.Command.liftCoreM do
   expect (violations project covered) "Fixpoint.spin" "partial"
   if (violations project covered).any (contains · "countdown") then
     throwError "A partial_fixpoint with a termination headline was reported partial"
-  let listedPartial ← Audit.collect (valid.push `SoftwareChallengeTests.Fixtures.Rejected)
-    (NameSet.empty.insert `SoftwareChallengeTests.Fixtures.Rejected.diverging)
+  let listedPartial ← Audit.collect (valid.push (fixture `Rejected))
+    (NameSet.empty.insert (fixture `Rejected.diverging))
   expect (violations project listedPartial) "diverging" "partial"
   let legacy := { accepted with
     modules := accepted.modules.map ({ · with usesModuleSystem := false }) }
   if project.check legacy then throwError "A file without `module` passed"
-  expect (violations project legacy) "Fixtures.Core" "start the file with `module`"
-  let unlisted : Project :=
-    { layers := project.layers.filter (·.1 != `SoftwareChallengeTests.Fixtures.Shell) }
-  if unlisted.check accepted then throwError "An unclassified module passed"
-  expect (violations unlisted accepted) "Fixtures.Shell" "Unclassified"
+  expect (violations project legacy) "Fixtures.CoreCode" "start the file with `module`"
+  let outside : Project := { modules := project.modules.filter (·.1 != fixture `WorldCode) }
+  if outside.check accepted then throwError "A module outside the package was audited as one of it"
+  expect (violations outside accepted) "Fixtures.WorldCode" "not a module of the challenge package"
   let challenge := Audit.owned project config {
     challengeTheorems := #[`A]
     challengeHoles := #[`h]
-    challengeImports := ← Audit.challengeImports `SoftwareChallengeTests.Fixtures.Challenge }
-  expect challenge "Fixtures.Core" "may import only spec and boundary"
-  expect challenge "imports SoftwareChallenge;" "may import only spec and boundary"
+    challengeImports := ← Audit.challengeImports "SoftwareChallengeTests/Fixtures/Challenge.lean" }
+  expect challenge "Fixtures.CoreCode" "may import only CoreSpec and WorldSpec"
+  if challenge.any (contains · "imports SoftwareChallenge;") then
+    throwError "A challenge import from outside the package was rejected: {challenge}"
   let listing := Audit.owned project config { challengeTheorems := #[`A, `B], challengeHoles := #[`g] }
   expect listing "declares B" "theorem_names omits"
   expect listing "declares g" "definition_names omits"
   expect listing "lists h" "does not declare"
   let filled := Audit.owned project config
     { challengeTheorems := #[`A], challengeHoles := #[], challengeFilled := #[`h] }
-  expect filled "implements h" "implement it in a core or shell module"
+  expect filled "implements h" "implement it in a CoreCode or WorldCode module"
   if filled.any (contains · "does not declare") then
     throwError "A filled hole was reported undeclared: {filled}"
-  let locked := #[("Challenge.lean", (1 : UInt64)), ("Spec.lean", 2), ("Gone.lean", 3)]
-  let drifted := Audit.lockErrors locked #[("Challenge.lean", 1), ("Spec.lean", 5), ("New.lean", 4)]
-    #["Core.lean"]
-  expect drifted "Spec.lean changed" "edit Core.lean instead"
+  let locked := #[("Challenge.lean", (1 : UInt64)), ("CoreSpec.lean", 2), ("Gone.lean", 3)]
+  let drifted := Audit.lockErrors locked #[("Challenge.lean", 1), ("CoreSpec.lean", 5), ("New.lean", 4)]
+    #["CoreCode.lean"]
+  expect drifted "CoreSpec.lean changed" "edit CoreCode.lean instead"
   expect drifted "New.lean" "does not record it"
   expect drifted "Gone.lean" "missing"
   if drifted.any (contains · "Challenge.lean") then throwError "An unchanged owned file was reported"
   let env ← getEnv
   let reached := Audit.reachedFrom env fun name =>
     (env.getModuleIdxFor? name).any (valid.contains env.header.modules[·.toNat]!.module)
-  unless (reached `SoftwareChallengeTests.Fixtures.identity).toList.any
-      (privateToUserName · == `SoftwareChallengeTests.Fixtures.helper) &&
-      !(reached `SoftwareChallengeTests.Fixtures.identity).contains `SoftwareChallengeTests.Fixtures.successor &&
-      (reached `SoftwareChallengeTests.Fixtures.loopIdentity).contains `SoftwareChallengeTests.Fixtures.identity do
+  unless (reached (fixture `identity)).toList.any (privateToUserName · == fixture `helper) &&
+      !(reached (fixture `identity)).contains (fixture `successor) &&
+      (reached (fixture `loopIdentity)).contains (fixture `identity) do
     throwError "Runtime reachability misread a call"
-  expect (Audit.sound project { entry := some (`main, some .shell, #[`h]) }) "h" "main never reaches"
-  expect (Audit.sound project { entry := some (`main, some .tooling, #[]) }) "main" "shell module"
-  let roleOf := fun (_ : Name) => some Role.shell
-  let missing := Audit.entryOf project env roleOf (fun _ => true) #[`h]
-  unless missing matches some (`main, none, #[]) do throwError "A missing main passed"
-  expect (Audit.sound project { entry := missing }) "main" "shell module"
-  if (Audit.entryOf { project with entry := none } env roleOf (fun _ => true) #[`h]).isSome then
-    throwError "A library without an entry was required to have one"
-  let registrations := (valid.push `SoftwareChallengeTests.Fixtures.Rejected).flatMap fun module =>
+  expect (Audit.sound project { entry := some (some (fixture `WorldCode), #[`h]) }) "h" "main never reaches"
+  expect (Audit.sound project { entry := some (some (fixture `CoreCode), #[]) }) "main" "WorldCode module"
+  let moduleOf := fun (_ : Name) => some (fixture `WorldCode)
+  let missing := Audit.entryOf { project with executable := true } env moduleOf (fun _ => true) #[`h]
+  unless missing matches some (none, #[]) do throwError "A missing main passed"
+  expect (Audit.sound project { entry := missing }) "main" "declares a lean_exe"
+  if (Audit.entryOf project env moduleOf (fun _ => true) #[`h]).isSome then
+    throwError "A library without a lean_exe was required to have a main"
+  let registrations := (valid.push (fixture `Rejected)).flatMap fun module =>
     (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
-      fun (claim, _) => (claim, project.role? module, (env.getModuleIdxFor? claim).any
+      fun claim => (claim, project.role? module, (env.getModuleIdxFor? claim).any
         (env.header.modules[·.toNat]!.module == module))
   let registered := Audit.owned project config
     { registrations, challengeTheorems := #[`A], challengeHoles := #[`h] }
-  expect registered "CoreClaim" "declare claims in a spec module"
+  expect registered "CoreClaim" "declare WorldClaims in a WorldSpec module"
   expect registered "Identity" "registered outside the module that declares it"
+  if registered.any (contains · "SuccAgrees") then
+    throwError "A claim declared in a WorldSpec module was rejected: {registered}"
 
 run_cmd Elab.Command.liftTermElabM do
-  let listed := #[`SoftwareChallengeTests.Fixtures.even_four]
-  let world ← Audit.headline listed `SoftwareChallengeTests.Fixtures.successor_grows
-  let open_ ← Audit.headline listed `SoftwareChallengeTests.Fixtures.uses_open
-  let discharged ← Audit.headline listed `SoftwareChallengeTests.Fixtures.uses_discharged
-  let unlistedProof ← Audit.headline #[] `SoftwareChallengeTests.Fixtures.uses_discharged
-  let precondition ← Audit.headline listed `SoftwareChallengeTests.Fixtures.bounded
-  unless world.premises.map (·.claim) == #[`SoftwareChallengeTests.Fixtures.SuccAgrees] &&
-      proved world.premises do
-    throwError "A world premise was misread"
-  if proved open_.premises then throwError "An open conjecture was reported proved"
-  unless proved discharged.premises &&
-      discharged.premises.all (·.dischargedBy == some `SoftwareChallengeTests.Fixtures.even_four) do
-    throwError "A proved conjecture was not recognised"
-  if proved unlistedProof.premises then
-    throwError "A conjecture counted as proved by a theorem comparator.json does not list"
-  unless precondition.premises.isEmpty && precondition.unnamed.isEmpty do
+  let evidence := allEvidence (← getEnv)
+  let world ← Audit.headline evidence (fixture `successor_grows)
+  let precondition ← Audit.headline evidence (fixture `bounded)
+  unless world.assumptions.map (·.claim) == #[fixture `SuccAgrees] do throwError "A world claim was misread"
+  unless (evidence.filter (·.claim == fixture `SuccAgrees)).size == 3 && world.assumptions.map (·.checks) == #[2] do
+    throwError "A Check of another instance of a claim counted"
+  unless precondition.assumptions.isEmpty && precondition.unnamed.isEmpty do
     throwError "A precondition was read as an assumption"
-  let missing ← try discard <| Audit.headline listed `SoftwareChallengeTests.Missing; pure false catch _ => pure true
+  let missing ← try discard <| Audit.headline evidence `SoftwareChallengeTests.Missing; pure false
+    catch _ => pure true
   unless missing do throwError "A missing headline passed"
-  let headlines ← #[`SoftwareChallengeTests.Fixtures.uses_unchecked,
-    `SoftwareChallengeTests.Fixtures.uses_live, `SoftwareChallengeTests.Fixtures.uses_unnamed].mapM
-    fun name => Audit.headline listed name
+  let headlines ← #[fixture `uses_unchecked, fixture `uses_live, fixture `uses_unnamed].mapM
+    fun name => Audit.headline evidence name
   let facts : Audit.Facts := {
     headlines := headlines.push world
-    evidence := allEvidence (← getEnv)
-    holes := #[(`SoftwareChallengeTests.Fixtures.EvenFour, some .spec)] }
+    holes := #[(fixture `SuccAgrees, some (fixture `WorldSpec))] }
   let errors := Audit.sound project facts ++ Audit.evidenced facts
-  expect errors "Unchecked" "no Test, Check, or live suite"
-  expect errors "EvenFour" "core or shell definition"
-  expect errors "uses_unnamed" "not a WorldClaim or Conjecture"
-  if errors.any (fun e => contains e "ClockAdvances" || contains e "SuccAgrees") then
-    throwError "Evidence did not count: {errors}"
-  let replaceable := NameSet.empty.insert `SoftwareChallengeTests.Fixtures.identity
-  unless ← Audit.kills replaceable `SoftwareChallengeTests.Fixtures.identity_fixed
-      `SoftwareChallengeTests.Fixtures.identity_fixed_rejects_successor do
+  expect errors "Unchecked" "has no Check"
+  expect errors "SuccAgrees" "defined in SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec)"
+  expect errors "uses_unnamed" "not a WorldClaim"
+  if errors.any (fun e => contains e "ClockAdvances" || contains e "SuccAgrees has no Check") then
+    throwError "Checks did not count: {errors}"
+  let env ← getEnv
+  let replaceable := NameSet.empty.insert (fixture `identity)
+  unless Audit.kills env replaceable (fixture `identity_fixed) (fixture `identity_fixed_rejects_successor) do
     throwError "A kill was not recognised"
-  if ← Audit.kills replaceable `SoftwareChallengeTests.Fixtures.identity_fixed
-      `SoftwareChallengeTests.Fixtures.mismatched_negation then
+  if Audit.kills env replaceable (fixture `identity_fixed) (fixture `mismatched_negation) then
     throwError "A different statement counted as a kill"
-  unless ← Audit.kills replaceable `SoftwareChallengeTests.Fixtures.identity_three
-      `SoftwareChallengeTests.Fixtures.identity_three_rejects_successor do
+  unless Audit.kills env replaceable (fixture `identity_three) (fixture `identity_three_rejects_successor) do
     throwError "A kill of a headline about a concrete argument was not recognised"
-  let killed ← Audit.killsOf replaceable #[`SoftwareChallengeTests.Fixtures.identity_fixed,
-    `SoftwareChallengeTests.Fixtures.identity_fixed_rejects_successor, `SoftwareChallengeTests.Fixtures.bounded]
-  unless killed.map (·.1) == #[`SoftwareChallengeTests.Fixtures.identity_fixed,
-      `SoftwareChallengeTests.Fixtures.bounded] do
+  unless Audit.kills env replaceable (fixture `identity_twice) (fixture `identity_twice_rejects_successor) do
+    throwError "A kill that replaces a nested hole by a lambda was not recognised"
+  if Audit.kills env replaceable (fixture `identity_twice) (fixture `identity_twice_rejects_mixed) then
+    throwError "A kill that replaces one hole by two different functions counted"
+  let foreign := (NameSet.empty.insert (fixture `successor)).insert (fixture `nativeSucc)
+  unless Audit.kills env foreign (fixture `successor_correct) (fixture `successor_correct_rejects_identity) do
+    throwError "A kill that replaces a foreign constant was not recognised"
+  if Audit.kills env (NameSet.empty.insert (fixture `successor)) (fixture `successor_correct)
+      (fixture `successor_correct_rejects_identity) then
+    throwError "A kill that replaces a constant that is not replaceable counted"
+  let killed := Audit.killsOf env replaceable #[fixture `identity_fixed,
+    fixture `identity_fixed_rejects_successor, fixture `bounded]
+  unless killed.map (·.1) == #[fixture `identity_fixed, fixture `bounded] do
     throwError "A kill was reported as a headline: {killed.map (·.1)}"
   expect (Audit.meaningful { killsByHeadline := killed }) "bounded" "no kill"
   expect (Audit.meaningful { holes := #[(`h, none)] }) "h" "no headline mentions this hole"
   if (Audit.meaningful { killsByHeadline := killed }).any (contains · "identity_fixed") then
     throwError "A killed headline was reported unkilled"
-  let fixpointKills ← Audit.killsOf (NameSet.empty.insert countdown) #[countdownTerminates,
-    `SoftwareChallengeTests.Fixtures.Fixpoint.countdown_terminates_rejects_stuck,
-    `SoftwareChallengeTests.Fixtures.bounded]
-  let env ← getEnv
+  let fixpointKills := Audit.killsOf env (NameSet.empty.insert countdown) #[countdownTerminates,
+    fixture `Fixpoint.countdown_terminates_rejects_stuck, fixture `bounded]
   let termination := fun (definition headline : Name) => Audit.sound project {
     killsByHeadline := fixpointKills
-    holes := #[(countdown, some .core), (`SoftwareChallengeTests.Fixtures.identity, some .core)]
+    holes := #[(countdown, some (fixture `Fixpoint)), (fixture `identity, some (fixture `CoreCode))]
     terminations := Audit.terminations env { config with
-      definition_names := some #[countdown, `SoftwareChallengeTests.Fixtures.identity]
+      definition_names := some #[countdown, fixture `identity]
       terminates := some (({} : NameMap Name).insert definition headline) } }
   unless (termination countdown countdownTerminates).isEmpty do
     throwError "A listed termination headline was rejected: {termination countdown countdownTerminates}"
-  expect (termination `SoftwareChallengeTests.Fixtures.Fixpoint.spin countdownTerminates) "spin"
-    "not a definition hole"
-  expect (termination `SoftwareChallengeTests.Fixtures.Fixpoint.spin countdownTerminates) "spin"
-    "does not mention it"
-  expect (termination `SoftwareChallengeTests.Fixtures.identity `SoftwareChallengeTests.Fixtures.identity_fixed)
-    "identity" "not a partial_fixpoint definition"
-  expect (termination countdown `SoftwareChallengeTests.Fixtures.Fixpoint.countdown_terminates_rejects_stuck)
-    "countdown" "not a headline with a kill"
-  expect (termination countdown `SoftwareChallengeTests.Fixtures.bounded) "countdown" "not a headline with a kill"
-  expect (termination countdown `SoftwareChallengeTests.Fixtures.bounded) "bounded" "does not mention it"
+  expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "not a definition hole"
+  expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "does not mention it"
+  expect (termination (fixture `identity) (fixture `identity_fixed)) "identity" "not a partial_fixpoint definition"
+  expect (termination countdown (fixture `Fixpoint.countdown_terminates_rejects_stuck)) "countdown"
+    "not a headline with a kill"
+  expect (termination countdown (fixture `bounded)) "countdown" "not a headline with a kill"
+  expect (termination countdown (fixture `bounded)) "bounded" "does not mention it"
 
 end
 

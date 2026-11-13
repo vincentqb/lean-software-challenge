@@ -1,6 +1,6 @@
 module
 
-public import ConstantFolding.Shell
+public import ConstantFolding.WorldCode
 
 public section
 
@@ -13,8 +13,11 @@ theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :
 theorem fold_closed_literal (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n :=
   fold_eq_lit_of_closed e h
 
-theorem fold_idempotent (normalizes : Normalizes fold) (e : Expr) : fold (fold e) = fold e :=
-  fold_eq_self_of_normal (fold e) (normalizes e)
+theorem fold_normalizes (e : Expr) : normal (fold e) = true :=
+  normal_fold e
+
+theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=
+  fold_eq_self_of_normal (fold e) (normal_fold e)
 
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
     output e = toString (eval (fun _ => 0) e) := by
@@ -31,12 +34,15 @@ theorem fold_closed_literal_rejects_identity :
   obtain ⟨n, hn⟩ := h (.add (.lit 1) (.lit 2)) rfl
   cases hn
 
-theorem fold_idempotent_rejects_increment :
-    ¬ (Normalizes (fun e => Expr.lit (eval (fun _ => 0) e + 1)) → ∀ e : Expr,
-      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =
-        (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) := by
+theorem fold_normalizes_rejects_identity : ¬ ∀ e, normal (id e) = true := by
   intro h
-  have := h (fun _ => rfl) (.lit 0)
+  exact absurd (h (.add (.lit 1) (.lit 2))) (by decide)
+
+theorem fold_idempotent_rejects_increment :
+    ¬ ∀ e : Expr, (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =
+      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e := by
+  intro h
+  have := h (.lit 0)
   simp [eval] at this
 
 theorem output_correct_rejects_suffix :

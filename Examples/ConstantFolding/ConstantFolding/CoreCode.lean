@@ -1,7 +1,6 @@
 module
 
-public import ConstantFolding.Spec
-public meta import SoftwareChallenge
+public import ConstantFolding.CoreSpec
 
 public section
 
@@ -16,11 +15,6 @@ def fold : Expr → Expr
   | .var x => .var x
   | .add a b => combine (fold a) (fold b)
 
-def evalNative (env : Nat → Nat) : Expr → Nat
-  | .lit n => n
-  | .var x => env x
-  | .add a b => nativeAdd (evalNative env a) (evalNative env b)
-
 private theorem eval_combine (env : Nat → Nat) (a b : Expr) :
     eval env (combine a b) = eval env a + eval env b := by
   cases a <;> cases b <;> rfl
@@ -28,15 +22,6 @@ private theorem eval_combine (env : Nat → Nat) (a b : Expr) :
 theorem eval_fold (env : Nat → Nat) (e : Expr) :
     eval env (fold e) = eval env e := by
   induction e <;> simp_all [fold, eval, eval_combine]
-
-theorem evalNative_eq (agrees : AddAgrees nativeAdd) (env : Nat → Nat) (e : Expr) :
-    evalNative env e = eval env e := by
-  induction e with
-  | lit n => rfl
-  | var x => rfl
-  | add a b ha hb =>
-    simp only [evalNative, eval, ha, hb]
-    exact agrees _ _
 
 theorem fold_eq_lit_of_closed (e : Expr) (h : closed e = true) : ∃ n, fold e = .lit n := by
   induction e with
@@ -58,6 +43,14 @@ theorem fold_eq_self_of_normal (e : Expr) (h : normal e = true) : fold e = e := 
     simp only [fold, ha na, hb nb]
     cases a <;> cases b <;> simp_all [combine, Expr.isLit]
 
-Test Normalizes fold : normal (fold (.add (.add (.lit 1) (.lit 2)) (.var 0))) = true := by decide
+theorem normal_fold (e : Expr) : normal (fold e) = true := by
+  induction e with
+  | lit n => rfl
+  | var x => rfl
+  | add a b ha hb =>
+    simp only [fold]
+    generalize fold a = x at ha
+    generalize fold b = y at hb
+    cases x <;> cases y <;> simp_all [combine, normal, Expr.isLit]
 
 end ConstantFolding

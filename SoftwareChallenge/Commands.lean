@@ -10,30 +10,21 @@ open Lean Elab Command
 
 namespace SoftwareChallenge
 
-inductive EvidenceKind where
-  | test | check | suite
-  deriving BEq
-
 structure Evidence where
   claim : Name
-  kind : EvidenceKind
-  source : Name := .anonymous
+  statement : Expr
+  source : Name
+  line : Nat
 
-initialize claimsExt : SimplePersistentEnvExtension (Name × ClaimKind) (Array (Name × ClaimKind)) ←
+initialize claimsExt : SimplePersistentEnvExtension Name (Array Name) ←
   registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
 
 initialize evidenceExt : SimplePersistentEnvExtension Evidence (Array Evidence) ←
   registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
 
-def registeredClaims (env : Environment) : Array (Name × ClaimKind) := claimsExt.getState env
-
-def claimKind? (env : Environment) (name : Name) : Option ClaimKind :=
-  (registeredClaims env).findSome? fun (claim, kind) => if claim == name then some kind else none
+def isWorldClaim (env : Environment) (name : Name) : Bool := (claimsExt.getState env).contains name
 
 def allEvidence (env : Environment) : Array Evidence := evidenceExt.getState env
-
-def nonstandardAxioms (name : Name) : CoreM (Array Name) :=
-  return (← collectAxioms name).filter (!standardAxioms.contains ·)
 
 private def checked (cmd : Syntax) : CommandElabM Unit := do
   let errors := fun (messages : MessageLog) =>
@@ -43,63 +34,61 @@ private def checked (cmd : Syntax) : CommandElabM Unit := do
     elabCommand cmd
   if errors (← get).messages > before then throwError "declaration failed to elaborate"
 
-private def declareClaim (doc? : Option (TSyntax `Lean.Parser.Command.docComment)) (n : Ident)
-    (binders : TSyntaxArray `Lean.Parser.Term.bracketedBinder) (body : Term) (kind : ClaimKind) :
-    CommandElabM Unit := do
-  checked (← `($[$doc?]? @[expose, reducible] public def $n $binders* : Prop := $body))
-  let name ← resolveGlobalConstNoOverload n
-  modifyEnv (claimsExt.addEntry · (name, kind))
-
 elab doc?:(docComment)? "WorldClaim " n:ident bs:(ppSpace bracketedBinder)* " := " t:term : command => do
   unless doc?.isSome do
     throwError "WorldClaim {n} needs a doc comment naming the observation that would falsify it"
-  declareClaim doc? n bs t .world
+  checked (← `($[$doc?]? @[expose, reducible] public def $n $bs* : Prop := $t))
+  let name ← resolveGlobalConstNoOverload n
+  modifyEnv (claimsExt.addEntry · name)
 
-elab doc?:(docComment)? "Conjecture " n:ident bs:(ppSpace bracketedBinder)* " := " t:term : command =>
-  declareClaim doc? n bs t .conjecture
+private def claimOf (claim : Term) : CommandElabM (Name × Expr) := liftTermElabM do
+  let statement ← Term.elabTermEnsuringType claim (mkSort .zero)
+  Term.synthesizeSyntheticMVarsNoPostponing
+  let statement ← instantiateMVars statement
+  let head := statement.getAppFn.constName
+  unless isWorldClaim (← getEnv) head do throwError "{claim} is not a WorldClaim"
+  if statement.hasMVar then throwError "{claim}: give every argument of the claim"
+  return (head, statement)
 
-private def claimHead (claim : Term) : CommandElabM Name := liftTermElabM do
-  let head := (← instantiateMVars (← Term.elabTermEnsuringType claim (mkSort .zero))).getAppFn.constName
-  unless (claimKind? (← getEnv) head).isSome do throwError "{claim} is not a WorldClaim or Conjecture"
-  return head
-
-private def requireInstance (claim inst : Term) : CommandElabM Unit := do
-  try checked (← `(example : $claim → $inst := fun h => by first | exact h | apply h))
-  catch _ => throwError "{inst} is not an instance of {claim}"
-
-elab "Test " claim:term " : " inst:term " := " proof:term : command => do
-  let head ← claimHead claim
-  requireInstance claim inst
+private def register (claim : Name × Expr) (action : Term) : CommandElabM Unit := do
   let env ← getEnv
+  let base := claim.1 ++ env.mainModule
   let mut index := 1
-  while env.contains (mkPrivateName env (head ++ Name.mkSimple s!"test_{index}")) do
+  while env.contains (base ++ Name.mkSimple s!"check_{index}") do
     index := index + 1
-  let name := head ++ Name.mkSimple s!"test_{index}"
-  checked (← `(private theorem $(mkIdent (rootNamespace ++ name)) : $inst := $proof))
-  let axioms ← liftCoreM <| nonstandardAxioms (mkPrivateName env name)
-  unless axioms.isEmpty do
-    throwError "A Test must be kernel-checked; it depends on {axioms}. Use Check to run code."
-  modifyEnv (evidenceExt.addEntry · { claim := head, kind := .test })
+  let source := base ++ Name.mkSimple s!"check_{index}"
+  checked (← `(public def $(mkIdent (rootNamespace ++ source)) : IO Unit := $action))
+  let line := (← getRefPosition).line
+  modifyEnv (evidenceExt.addEntry · { claim := claim.1, statement := claim.2, source, line })
 
 elab "Check " claim:term " : " inst:term : command => do
-  let head ← claimHead claim
-  requireInstance claim inst
-  unless ← liftTermElabM (unsafe Term.evalTerm Bool (mkConst ``Bool) (← `(decide ($inst)))) do
-    throwError "Check failed: {inst} is false when compiled and run"
-  modifyEnv (evidenceExt.addEntry · { claim := head, kind := .check })
+  let found ← claimOf claim
+  let messages := (← get).messages
+  try checked (← `(example : $claim → $inst := fun h => by first | exact h | apply h))
+  catch _ =>
+    modify ({ · with messages })
+    throwError "{inst} is not an instance of {claim}"
+  let falsified := Syntax.mkStrLit s!"{← liftCoreM (PrettyPrinter.ppTerm inst)} is false"
+  register found (← `(unless decide ($inst) do throw (IO.userError $falsified)))
 
-syntax (name := exercises) "exercises " ident : attr
+elab "Check " claim:term " := " action:term : command => do
+  register (← claimOf claim) action
 
-initialize registerBuiltinAttribute {
-  name := `exercises
-  descr := "Marks a live suite as evidence for a claim it exercises at run time."
-  add := fun suite stx kind => do
-    unless kind == .global do throwError "exercises must be a global attribute"
-    let `(attr| exercises $claim:ident) := stx | throwUnsupportedSyntax
-    let name ← realizeGlobalConstNoOverloadWithInfo claim
-    unless (claimKind? (← getEnv) name).isSome do
-      throwError "{name} is not a WorldClaim or Conjecture"
-    modifyEnv (evidenceExt.addEntry · { claim := name, kind := .suite, source := suite })
-}
+def checkFailures (modules : Array Name) : CoreM (Array String) := do
+  let env ← getEnv
+  let mut failures := #[]
+  for evidence in allEvidence env do
+    let some index := env.getModuleIdxFor? evidence.source | continue
+    let module := env.header.modules[index.toNat]!.module
+    unless modules.contains module do continue
+    let action ← unsafe evalConst (IO Unit) evidence.source
+    if let .error error ← action.toBaseIO then
+      failures := failures.push s!"{module}, line {evidence.line}: the Check of {evidence.claim} failed: \
+        {error}; fix the check, or tell the owner that {evidence.claim} is false"
+  return failures
+
+def runChecks (modules : Array Name) : CommandElabM Unit := do
+  let failures ← liftCoreM (checkFailures modules)
+  unless failures.isEmpty do throwError ("\n".intercalate failures.toList)
 
 end SoftwareChallenge

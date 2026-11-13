@@ -1,9 +1,5 @@
 module
 
-public import ConstantFolding.Boundary
-meta import ConstantFolding.Boundary
-public meta import SoftwareChallenge
-
 public section
 
 namespace ConstantFolding
@@ -31,12 +27,5 @@ inductive Expr where
   | .lit _ => true
   | .var _ => false
   | .add a b => closed a && closed b
-
-/-- The adder agrees with `Nat.add`. A different sum for any pair falsifies it. -/
-WorldClaim AddAgrees (add : Nat → Nat → Nat) := ∀ a b, add a b = a + b
-
-Check AddAgrees nativeAdd : nativeAdd (2 ^ 70) (2 ^ 70) = 2 ^ 71
-
-Conjecture Normalizes (optimize : Expr → Expr) := ∀ e, normal (optimize e) = true
 
 end ConstantFolding

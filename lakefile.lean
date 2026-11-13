@@ -19,6 +19,39 @@ lean_lib «SoftwareChallengeTests» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
+def challengeModule (pkg : Package) : IO Name := do
+  let config ← IO.ofExcept <| Json.parse (← IO.FS.readFile (pkg.dir / "comparator.json"))
+  return (← IO.ofExcept <| config.getObjValAs? String "challenge_module").toName
+
+def packageModules (pkg : Package) (challenge : Lake.Module) : FetchM (Array Lake.Module) := do
+  let mut modules := #[]
+  for root in (← (← pkg.defaultModules.fetch).await).push challenge do
+    for mod in (← (← root.transImports.fetch).await).push root do
+      unless mod.pkg.keyName != pkg.keyName || mod.name == challenge.name || modules.any (·.name == mod.name) do
+        modules := modules.push mod
+  return modules
+
+script test_challenge do
+  let lake := (← getLake).toString
+  let pkg ← getRootPackage
+  let run := fun (args : Array String) => do (← IO.Process.spawn { cmd := lake, args, cwd := pkg.dir }).wait
+  for args in [#["build"], #["lint"]] do
+    let code ← run args
+    unless code == 0 do return code
+  let challenge ← challengeModule pkg
+  let some challenge ← findModule? challenge
+    | do IO.eprintln s!"{challenge} is unavailable; check challenge_module in comparator.json and the lean_lib that builds it"; return 1
+  let modules := (← runBuild do return Job.pure (← packageModules pkg challenge)).map (·.name)
+  let runner := pkg.buildDir / "softwareChallenge" / "Checks.lean"
+  IO.FS.createDirAll (pkg.buildDir / "softwareChallenge")
+  IO.FS.writeFile runner <| "\n".intercalate <| ["import SoftwareChallenge"] ++
+    (modules.map (s!"import {·}")).toList ++
+    [s!"run_cmd SoftwareChallenge.runChecks #[{", ".intercalate (modules.map (s!"`{·}")).toList}]", ""]
+  for args in [#["lean", runner.toString], #["comparator"]] do
+    let code ← run args
+    unless code == 0 do return code
+  return 0
+
 @[test_driver] script test do
   let lake := (← getLake).toString
   let root := (← getRootPackage).dir
@@ -61,35 +94,40 @@ script grade (args) do
     unless (← run lake #["build"] checkout) == 0 do return 1
     unless (← ownedFiles checkout) == owned do
       IO.eprintln s!"refused: {candidate} adds files the owner decides"; return 1
-    for step in [#["comparator"], #["test"]] do
-      unless (← run lake step checkout) == 0 do return 1
-    return 0
+    if (← run lake #["test"] checkout) == 0 then return 0 else return 1
   finally
     discard <| run "git" #["worktree", "remove", "--force", worktree.toString] base
     IO.FS.removeDirAll scratch
 
 package_facet softwareChallenge pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error "SoftwareChallenge.Audit is unavailable"
-  let config ← IO.ofExcept <| Json.parse (← IO.FS.readFile (pkg.dir / "comparator.json"))
-  let challenge ← IO.ofExcept <| config.getObjValAs? String "challenge_module"
-  let some manifest ← findModule? challenge.toName | error s!"{challenge} is unavailable"
-  let mut catalog : Array Name := #[]
-  let mut job := (Job.nil.mix (← audit.leanArts.fetch)).mix (← manifest.leanArts.fetch)
-  for root in ← (← pkg.defaultModules.fetch).await do
-    for mod in (← (← root.transImports.fetch).await).push root do
-      unless mod.pkg.keyName != pkg.keyName || catalog.contains mod.name do
-        catalog := catalog.push mod.name
-        job := job.mix (← mod.leanArts.fetch)
+  let challenge ← challengeModule pkg
+  let some challenge ← findModule? challenge
+    | error s!"{challenge} is unavailable; check challenge_module in comparator.json and the lean_lib that builds it"
+  let catalog ← packageModules pkg challenge
+  for mod in catalog do
+    if (← (← mod.imports.fetch).await).any (·.name == challenge.name) then
+      error s!"{mod.name} imports {challenge.name}, which the comparator checks the solution against; \
+        import the CoreSpec and WorldSpec modules it imports instead"
+  let mut job := (Job.nil.mix (← audit.leanArts.fetch)).mix (← challenge.leanArts.fetch)
+  for mod in catalog do
+    job := job.mix (← mod.leanArts.fetch)
   job.mapM fun _ => do
-    for file in ["Audit.lean", "comparator.json", "lakefile.lean", "lake-manifest.json", "lean-toolchain",
-        "owned.lock"] do
+    addTrace (← BuildTrace.compute (TextFilePath.mk (__dir__ / "Audit.lean")))
+    for file in ["comparator.json", "lakefile.lean", "lake-manifest.json", "lean-toolchain", "owned.lock"] do
       if ← (pkg.dir / file).pathExists then addTrace (← BuildTrace.compute (TextFilePath.mk (pkg.dir / file)))
     let report := pkg.buildDir / "softwareChallenge.txt"
-    let upToDate ← buildUnlessUpToDate? report (← getTrace) (report.addExtension "trace") do
-      IO.FS.writeFile report (← captureProc {
+    buildUnlessUpToDate report (← getTrace) (report.addExtension "trace") do
+      let out ← IO.Process.output {
         cmd := (← getLean).toString
-        args := #["--run", (pkg.dir / "Audit.lean").toString] ++ catalog.map Name.toString
+        args := #["--run", (__dir__ / "Audit.lean").toString] ++
+          (if pkg.leanExes.isEmpty then #[] else #["--executable"]) ++ #[challenge.relLeanFile.toString] ++
+          catalog.map fun mod => s!"{mod.name}={mod.relLeanFile}"
         cwd := some pkg.dir
         env := ← getAugmentedEnv
-      })
-    unless upToDate do logInfo (← IO.FS.readFile report)
+      }
+      unless out.exitCode == 0 do
+        logError (out.stdout ++ out.stderr)
+        error "the challenge audit failed; fix the errors above"
+      IO.FS.writeFile report out.stdout
+      logInfo ("\n" ++ out.stdout)
