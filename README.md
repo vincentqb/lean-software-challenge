@@ -64,53 +64,50 @@ theorem output_correct_rejects_suffix :
 - A headline takes the world claims it rests on as hypotheses; the report lists them after
   `assumes`, with how many checks each has.
 - A kill is `¬` a headline with its holes and WorldSpec foreign constants replaced by wrong
-  ones; every headline needs one in `comparator.json`.
+  ones, marked `@[kills headline]`; every headline needs one.
 
 ## Setup
 
 In `lakefile.lean`:
 
 ```lean
+package «my_app» where
+  testDriver := "software_challenge/test_challenge"
+
 require software_challenge from git "https://github.com/vincentqb/lean-software-challenge" @ "main"
+
+@[default_target]
+lean_lib «MyApp» where
+  roots := #[`MyApp.Solution]
+  globs := #[.submodules `MyApp]
+  precompileModules := true
+
+lean_lib «Challenge» where
+  leanOptions := #[⟨`warn.sorry, false⟩]
 
 @[default_target]
 target audit pkg : Unit := do
   return (← pkg.fetchFacetJob `softwareChallenge).map (fun _ => ())
 ```
 
-In `Audit.lean`, the longest matching prefix gives each module its role:
+A program adds a `lean_exe` whose root is a WorldCode module; then `main` must reach every hole.
+`Challenge` stays out of the default targets, since its holes share names with the solution's
+definitions. Add `/comparator.json` to `.gitignore`: the build writes it from `Challenge.lean`.
 
-```lean
-module
-public meta import SoftwareChallenge.Audit
+A module's role comes from its name: the first component that is `CoreSpec`, `WorldSpec`,
+`CoreCode`, or `WorldCode`. Any other module, like `MyApp.Solution`, is tooling.
 
-public meta def main : List String → IO Unit := SoftwareChallenge.Audit.run {
-  layers := #[(`MyApp, .tooling), (`MyApp.Spec, .spec), (`MyApp.Boundary, .boundary),
-    (`MyApp.Core, .core), (`MyApp.Shell, .shell)] }
-```
+- CoreSpec and CoreCode are pure: no `partial`, `unsafe`, `@[extern]`, `@[implemented_by]`,
+  initializers, IO, or `dbg*`. CoreCode imports only CoreSpec and CoreCode.
+- WorldSpec holds `@[extern] opaque` declarations and world claims, and is otherwise pure.
+- WorldCode may do IO and call foreign code, but not use `unsafe`, `@[extern]`, or
+  `@[implemented_by]`.
+- Every role uses only the standard axioms. Modules outside the package are trusted.
+- Recursion is structural, well-founded, or `partial_fixpoint`. A `partial_fixpoint` hole needs a
+  headline marked `@[terminates hole]` that states on which inputs it returns.
 
-- `.spec` and `.core` code is pure: no `partial`, `unsafe`, `@[extern]`, `@[implemented_by]`,
-  initializers, IO, or `dbg*`. Recursion is structural, well-founded, or `partial_fixpoint`;
-  a `partial_fixpoint` definition counts as `partial` unless it is a hole and `comparator.json`
-  maps it under `terminates` to a headline that mentions it, has a kill, and states that it
-  returns, as in `"terminates": {"MyApp.loop": "MyApp.loop_terminates"}`. The kernel unfolds
-  such a definition by its fixpoint equation, so proofs about it are about the code that runs;
-  the headline says on which inputs it returns. The report lists it as
-  `MyApp.loop terminates via MyApp.loop_terminates`.
-- `.boundary` code is `@[extern] opaque` declarations only.
-- `.shell` code may do IO but not `unsafe`, `@[extern]`, or `@[implemented_by]`.
-- `.tooling` covers `Solution` and scripts; like every role, it may use only standard axioms.
-- Non-`meta` imports run from tooling to shell to core to spec and boundary, never back;
-  other libraries must be listed in `trusted`, which defaults to `Init`, `Std`, and `Lean`.
-- `entry` names the program's entry point, `main` by default, which must be declared in a
-  shell module. A library, whose users call its holes directly, sets `entry := none`.
-
-`Challenge.lean` imports only spec and boundary modules and declares each core or shell
-function a headline mentions as a hole with the code's exact type, `def name : T := sorry`;
-[`comparator.json`](comparator.json) lists exactly its theorems and holes. Put `Solution` in a
-default target, and declare `Challenge` as a `lean_lib` that is not one, with
-`leanOptions := #[⟨`warn.sorry, false⟩]`. The audit imports every module of the default
-targets into one environment, so only one of them may define `main`.
+`Challenge.lean` meta-imports `SoftwareChallenge`, imports only CoreSpec and WorldSpec, and
+declares each hole with the code's exact type, `def name : T := sorry`.
 
 ## Run
 
