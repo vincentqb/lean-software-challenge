@@ -6,35 +6,34 @@ Requires **Lean 4.35.0**.
 
 ## What an accepted solution guarantees
 
-- **Its status is truthful.** ● means the kernel proved the headline; ◕ means it rests on a
-  named open conjecture.
-- **The code that runs is the code proved.** Spec and core code is pure, its recursion is
+- **Every headline is proved.** The kernel checked each proof, and `lake comparator` replays it.
+- **The code that runs is the code proved.** CoreSpec and CoreCode are pure, their recursion is
   structural, well-founded, or a `partial_fixpoint` hole whose return a headline states, foreign
-  code enters only through `@[extern] opaque` bindings, and `main` reaches every hole.
+  code enters only through `@[extern] opaque` declarations in WorldSpec, CoreCode never calls
+  it, and `main` reaches every hole.
 - **Every headline can fail.** A kill proves it rejects a wrong implementation.
 - **Every assumption is named and tested.** A headline assumes only the world claims it takes as
-  hypotheses, and each has a `Test`, `Check`, or live suite.
-- **What is claimed did not change.** `grade` refuses a candidate that edits a file listed on
-  the report's `Owned:` line.
+  hypotheses, and `lake test` runs at least one `Check` of each.
+- **What is claimed did not change.** A build fails when a file on the report's `Owned:` line
+  differs from `owned.lock`, and `grade` refuses a candidate that edits one.
 
 ## Files
 
 | File | Contains | Approved by |
 |---|---|---|
-| `Challenge.lean` | the headline theorems and their kills, stated with `sorry` | you |
+| `Challenge.lean` | the headlines, holes, and kills, stated with `sorry` | you |
 | `comparator.json` | the headlines, kills, and holes `lake comparator` checks, and the `terminates` headlines | you |
-| `MyApp/Spec.lean` | types, reference definitions, and the claims headlines rest on | you |
-| `MyApp/Boundary.lean` | `@[extern] opaque` declarations for foreign code | you |
-| `Audit.lean` | the role of each module prefix | you |
+| `MyApp/CoreSpec.lean` | types and the reference meaning headlines are stated in | you |
+| `MyApp/WorldSpec.lean` | `@[extern] opaque` declarations for foreign code, and the world claims about them | you |
 | `owned.lock` | a hash of each file above, which the first build records | you |
-| `MyApp/Core.lean` | pure code: public interface, private helpers, and their proofs | agents |
-| `MyApp/Shell.lean` | IO that connects the core to the world, and `main` | agents |
+| `MyApp/CoreCode.lean` | pure code: public interface, private helpers, and their proofs | agents |
+| `MyApp/WorldCode.lean` | IO, calls to foreign code, `main`, and the `Check`s of world claims | agents |
 | `MyApp/Solution.lean` | proofs of the headlines and kills | agents |
 
 Headlines are end-to-end theorems: they say what the program does in terms of the spec,
 assuming only named claims. In the [template](Examples/ConstantFolding), whose challenge is
 [`Challenge.lean`](Examples/ConstantFolding/Challenge.lean), `output_correct` says the
-shell prints the true value of an expression, assuming native addition is correct.
+output is the true value of an expression, assuming native addition is correct.
 
 ## Syntax
 
@@ -43,11 +42,11 @@ meta import SoftwareChallenge
 
 /-- The adder agrees with `Nat.add`. A different sum for any pair falsifies it. -/
 WorldClaim AddAgrees (add : Nat → Nat → Nat) := ∀ a b, add a b = a + b
-Check AddAgrees nativeAdd : nativeAdd (2 ^ 70) (2 ^ 70) = 2 ^ 71
-@[exercises AddAgrees] def nativeAddSuite : IO Unit := ...
 
-Conjecture Normalizes (optimize : Expr → Expr) := ∀ e, normal (optimize e) = true
-Test Normalizes fold : normal (fold (.add (.add (.lit 1) (.lit 2)) (.var 0))) = true := by decide
+Check AddAgrees nativeAdd : nativeAdd (2 ^ 70) (2 ^ 70) = 2 ^ 71
+Check AddAgrees nativeAdd := do
+  for a in [0, 1, 2 ^ 64] do
+    unless nativeAdd a 7 - a == 7 do throw (.userError s!"nativeAdd {a} 7 disagrees")
 
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
     output e = toString (eval (fun _ => 0) e)
@@ -56,19 +55,16 @@ theorem output_correct_rejects_suffix :
       (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e))
 ```
 
-- `WorldClaim Name := P` names an assumption about the world; its doc comment names the
-  observation that would falsify it, and the foreign code it constrains is a parameter.
-- `Check Claim : instance` runs one instance of a claim during the build, foreign code included.
-- `@[exercises Claim]` marks a live suite that exercises a claim; the report names it.
-- `Conjecture Name := P` names a claim not yet proved; a theorem of type `Name` listed in
-  `comparator.json` proves it.
-- `Test Claim : instance := proof` proves one instance of a claim in the kernel.
-- A headline takes the claims it rests on as hypotheses; `lake build` reports it proved (●)
-  once its conjectures are proved and derived (◕) until then.
-- A kill is `¬` a headline with its holes and boundary constants replaced by wrong ones; every
-  headline needs one in `comparator.json`.
-
-Claims live in spec modules.
+- `WorldClaim Name := P`, in a WorldSpec module, names an assumption about the world; its doc
+  comment names the observation that would falsify it, and the foreign code it constrains is a
+  parameter.
+- `Check`, in a WorldCode module, tests a world claim against the real foreign code: the first
+  form one instance that must follow from the claim, the second any IO action, which throws to
+  fail. The build only registers checks; `lake test` runs them all.
+- A headline takes the world claims it rests on as hypotheses; the report lists them after
+  `assumes`, with how many checks each has.
+- A kill is `¬` a headline with its holes and WorldSpec foreign constants replaced by wrong
+  ones; every headline needs one in `comparator.json`.
 
 ## Setup
 
