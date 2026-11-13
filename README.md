@@ -95,6 +95,8 @@ target audit pkg : Unit := do
 A program adds a `lean_exe` whose root is a WorldCode module; then `main` must reach every hole.
 `Challenge` stays out of the default targets, since its holes share names with the solution's
 definitions. Add `/comparator.json` to `.gitignore`: the build writes it from `Challenge.lean`.
+Commit `lean-toolchain` and `lake-manifest.json`: they pin Lean and the exact LSC commit, and they
+are owned.
 
 A module's role comes from its name: the first component that is `CoreSpec`, `WorldSpec`,
 `CoreCode`, or `WorldCode`. Any other module, like `MyApp.Solution`, is tooling.
