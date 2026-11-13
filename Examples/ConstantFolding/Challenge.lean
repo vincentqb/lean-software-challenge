@@ -2,6 +2,7 @@ module
 
 public import ConstantFolding.CoreSpec
 public import ConstantFolding.WorldSpec
+meta import SoftwareChallenge
 
 public section
 
@@ -36,23 +37,23 @@ theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
     output e = toString (eval (fun _ => 0) e) := by
   sorry
 
-theorem fold_preserves_meaning_rejects_constant :
+@[kills fold_preserves_meaning] theorem fold_preserves_meaning_rejects_constant :
     ¬ ∀ (env : Nat → Nat) (e : Expr), eval env ((fun _ => Expr.lit 0) e) = eval env e := by
   sorry
 
-theorem fold_closed_literal_rejects_identity :
+@[kills fold_closed_literal] theorem fold_closed_literal_rejects_identity :
     ¬ ∀ (e : Expr), closed e = true → ∃ n, id e = .lit n := by
   sorry
 
-theorem fold_normalizes_rejects_identity : ¬ ∀ e, normal (id e) = true := by
+@[kills fold_normalizes] theorem fold_normalizes_rejects_identity : ¬ ∀ e, normal (id e) = true := by
   sorry
 
-theorem fold_idempotent_rejects_increment :
+@[kills fold_idempotent] theorem fold_idempotent_rejects_increment :
     ¬ ∀ e : Expr, (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =
       (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e := by
   sorry
 
-theorem output_correct_rejects_suffix :
+@[kills output_correct] theorem output_correct_rejects_suffix :
     ¬ (AddAgrees Nat.add → ∀ e : Expr,
       (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e)) := by
   sorry

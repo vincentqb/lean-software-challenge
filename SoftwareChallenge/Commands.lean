@@ -22,6 +22,27 @@ initialize claimsExt : SimplePersistentEnvExtension Name (Array Name) ←
 initialize evidenceExt : SimplePersistentEnvExtension Evidence (Array Evidence) ←
   registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
 
+initialize killsExt : SimplePersistentEnvExtension (Name × Name) (Array (Name × Name)) ←
+  registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
+
+initialize terminatesExt : SimplePersistentEnvExtension (Name × Name) (Array (Name × Name)) ←
+  registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
+
+syntax (name := Link.kills) "kills " ident : attr
+
+syntax (name := Link.terminates) "terminates " ident : attr
+
+private def link (ext : SimplePersistentEnvExtension (Name × Name) (Array (Name × Name))) (name : Name)
+    (descr : String) : IO Unit := registerBuiltinAttribute {
+  name, descr
+  add := fun declaration stx _ => do
+    let target ← realizeGlobalConstNoOverloadWithInfo stx[1]
+    modifyEnv (ext.addEntry · (declaration, target)) }
+
+initialize link killsExt `kills "marks a theorem of the challenge as a kill of the headline it names"
+
+initialize link terminatesExt `terminates "marks a headline as stating that the partial_fixpoint hole it names returns"
+
 def isWorldClaim (env : Environment) (name : Name) : Bool := (claimsExt.getState env).contains name
 
 def allEvidence (env : Environment) : Array Evidence := evidenceExt.getState env

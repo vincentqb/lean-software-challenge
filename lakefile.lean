@@ -19,9 +19,8 @@ lean_lib «SoftwareChallengeTests» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
-def challengeModule (pkg : Package) : IO Name := do
-  let config ← IO.ofExcept <| Json.parse (← IO.FS.readFile (pkg.dir / "comparator.json"))
-  return (← IO.ofExcept <| config.getObjValAs? String "challenge_module").toName
+def challengeMissing : String :=
+  "Challenge is unavailable; state the challenge in Challenge.lean and declare `lean_lib «Challenge»` in lakefile.lean"
 
 def packageModules (pkg : Package) (challenge : Lake.Module) : FetchM (Array Lake.Module) := do
   let mut modules := #[]
@@ -38,9 +37,7 @@ script test_challenge do
   for args in [#["build"], #["lint"]] do
     let code ← run args
     unless code == 0 do return code
-  let challenge ← challengeModule pkg
-  let some challenge ← findModule? challenge
-    | do IO.eprintln s!"{challenge} is unavailable; check challenge_module in comparator.json and the lean_lib that builds it"; return 1
+  let some challenge ← findModule? `Challenge | do IO.eprintln challengeMissing; return 1
   let modules := (← runBuild do return Job.pure (← packageModules pkg challenge)).map (·.name)
   let runner := pkg.buildDir / "softwareChallenge" / "Checks.lean"
   IO.FS.createDirAll (pkg.buildDir / "softwareChallenge")
@@ -101,9 +98,7 @@ script grade (args) do
 
 package_facet softwareChallenge pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error "SoftwareChallenge.Audit is unavailable"
-  let challenge ← challengeModule pkg
-  let some challenge ← findModule? challenge
-    | error s!"{challenge} is unavailable; check challenge_module in comparator.json and the lean_lib that builds it"
+  let some challenge ← findModule? `Challenge | error challengeMissing
   let catalog ← packageModules pkg challenge
   for mod in catalog do
     if (← (← mod.imports.fetch).await).any (·.name == challenge.name) then
@@ -114,9 +109,11 @@ package_facet softwareChallenge pkg : Unit := do
     job := job.mix (← mod.leanArts.fetch)
   job.mapM fun _ => do
     addTrace (← BuildTrace.compute (TextFilePath.mk (__dir__ / "Audit.lean")))
-    for file in ["comparator.json", "lakefile.lean", "lake-manifest.json", "lean-toolchain", "owned.lock"] do
+    for file in ["lakefile.lean", "lake-manifest.json", "lean-toolchain", "owned.lock"] do
       if ← (pkg.dir / file).pathExists then addTrace (← BuildTrace.compute (TextFilePath.mk (pkg.dir / file)))
     let report := pkg.buildDir / "softwareChallenge.txt"
+    unless ← (pkg.dir / "comparator.json").pathExists do
+      if ← (report.addExtension "trace").pathExists then IO.FS.removeFile (report.addExtension "trace")
     buildUnlessUpToDate report (← getTrace) (report.addExtension "trace") do
       let out ← IO.Process.output {
         cmd := (← getLean).toString

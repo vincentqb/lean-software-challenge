@@ -7,6 +7,7 @@ import all SoftwareChallengeTests.Fixtures.WorldCode
 import all SoftwareChallengeTests.Fixtures.Sibling
 import all SoftwareChallengeTests.Fixtures.Rejected
 import all SoftwareChallengeTests.Fixtures.Fixpoint
+import SoftwareChallengeTests.Fixtures.Challenge
 meta import SoftwareChallenge.Audit
 meta import SoftwareChallenge
 
@@ -42,11 +43,28 @@ private def expect (errors : Array String) (name reason : String) : CoreM Unit :
 private def violations (project : Project) (inventory : Inventory) : Array String :=
   Audit.sound project { inventory }
 
-private def config : Audit.Config := {
-  challenge_module := fixture `Challenge
-  solution_module := fixture `CoreCode
-  theorem_names := #[`A]
-  definition_names := some #[`h] }
+private def expectedConfig : String := "{
+  \"challenge_module\": \"Challenge\",
+  \"solution_module\": \"A.Solution\",
+  \"theorem_names\": [
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_even\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_even_rejects_identity\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_even_rejects_nothing\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.triple_rejects_nothing\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_zero\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_one\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_one_rejects_one\"
+  ],
+  \"definition_names\": [
+    \"SoftwareChallengeTests.Fixtures.Challenge.double\"
+  ],
+  \"permitted_axioms\": [
+    \"propext\",
+    \"Classical.choice\",
+    \"Quot.sound\"
+  ]
+}
+"
 
 #guard Role.ofName `A.CoreCode.B == .coreCode
 #guard Role.ofName `A.WorldSpec.CoreCode == .worldSpec
@@ -112,22 +130,11 @@ run_cmd Elab.Command.liftCoreM do
   let outside : Project := { modules := project.modules.filter (·.1 != fixture `WorldCode) }
   if outside.check accepted then throwError "A module outside the package was audited as one of it"
   expect (violations outside accepted) "Fixtures.WorldCode" "not a module of the challenge package"
-  let challenge := Audit.owned project config {
-    challengeTheorems := #[`A]
-    challengeHoles := #[`h]
+  let challenge := Audit.owned project {
     challengeImports := ← Audit.challengeImports "SoftwareChallengeTests/Fixtures/Challenge.lean" }
   expect challenge "Fixtures.CoreCode" "may import only CoreSpec and WorldSpec"
   if challenge.any (contains · "imports SoftwareChallenge;") then
     throwError "A challenge import from outside the package was rejected: {challenge}"
-  let listing := Audit.owned project config { challengeTheorems := #[`A, `B], challengeHoles := #[`g] }
-  expect listing "declares B" "theorem_names omits"
-  expect listing "declares g" "definition_names omits"
-  expect listing "lists h" "does not declare"
-  let filled := Audit.owned project config
-    { challengeTheorems := #[`A], challengeHoles := #[], challengeFilled := #[`h] }
-  expect filled "implements h" "implement it in a CoreCode or WorldCode module"
-  if filled.any (contains · "does not declare") then
-    throwError "A filled hole was reported undeclared: {filled}"
   let locked := #[("Challenge.lean", (1 : UInt64)), ("CoreSpec.lean", 2), ("Gone.lean", 3)]
   let drifted := Audit.lockErrors locked #[("Challenge.lean", 1), ("CoreSpec.lean", 5), ("New.lean", 4)]
     #["CoreCode.lean"]
@@ -154,8 +161,7 @@ run_cmd Elab.Command.liftCoreM do
     (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
       fun claim => (claim, project.role? module, (env.getModuleIdxFor? claim).any
         (env.header.modules[·.toNat]!.module == module))
-  let registered := Audit.owned project config
-    { registrations, challengeTheorems := #[`A], challengeHoles := #[`h] }
+  let registered := Audit.owned project { registrations }
   expect registered "CoreClaim" "declare WorldClaims in a WorldSpec module"
   expect registered "Identity" "registered outside the module that declares it"
   if registered.any (contains · "SuccAgrees") then
@@ -202,22 +208,21 @@ run_cmd Elab.Command.liftTermElabM do
   if Audit.kills env (NameSet.empty.insert (fixture `successor)) (fixture `successor_correct)
       (fixture `successor_correct_rejects_identity) then
     throwError "A kill that replaces a constant that is not replaceable counted"
-  let killed := Audit.killsOf env replaceable #[fixture `identity_fixed,
-    fixture `identity_fixed_rejects_successor, fixture `bounded]
-  unless killed.map (·.1) == #[fixture `identity_fixed, fixture `bounded] do
-    throwError "A kill was reported as a headline: {killed.map (·.1)}"
-  expect (Audit.meaningful { killsByHeadline := killed }) "bounded" "no kill"
+  let killed : Audit.Challenge := {
+    theorems := #[fixture `identity_fixed, fixture `identity_fixed_rejects_successor, fixture `bounded]
+    kills := #[(fixture `identity_fixed_rejects_successor, fixture `identity_fixed)] }
+  unless killed.headlines == #[fixture `identity_fixed, fixture `bounded] do
+    throwError "A kill was reported as a headline: {killed.headlines}"
+  expect (Audit.meaningful { challenge := killed }) "bounded" "no kill"
   expect (Audit.meaningful { holes := #[(`h, none)] }) "h" "no headline mentions this hole"
-  if (Audit.meaningful { killsByHeadline := killed }).any (contains · "identity_fixed") then
+  if (Audit.meaningful { challenge := killed }).any (contains · "identity_fixed") then
     throwError "A killed headline was reported unkilled"
-  let fixpointKills := Audit.killsOf env (NameSet.empty.insert countdown) #[countdownTerminates,
-    fixture `Fixpoint.countdown_terminates_rejects_stuck, fixture `bounded]
+  let stuck := fixture `Fixpoint.countdown_terminates_rejects_stuck
   let termination := fun (definition headline : Name) => Audit.sound project {
-    killsByHeadline := fixpointKills
+    challenge := { theorems := #[countdownTerminates, stuck, fixture `bounded]
+                   kills := #[(stuck, countdownTerminates)] }
     holes := #[(countdown, some (fixture `Fixpoint)), (fixture `identity, some (fixture `CoreCode))]
-    terminations := Audit.terminations env { config with
-      definition_names := some #[countdown, fixture `identity]
-      terminates := some (({} : NameMap Name).insert definition headline) } }
+    terminations := Audit.terminations env #[(definition, headline)] }
   unless (termination countdown countdownTerminates).isEmpty do
     throwError "A listed termination headline was rejected: {termination countdown countdownTerminates}"
   expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "not a definition hole"
@@ -227,6 +232,39 @@ run_cmd Elab.Command.liftTermElabM do
     "not a headline with a kill"
   expect (termination countdown (fixture `bounded)) "countdown" "not a headline with a kill"
   expect (termination countdown (fixture `bounded)) "bounded" "does not mention it"
+  let marked ← Audit.readChallenge project (fixture `Challenge)
+  let member := fun (name : Name) => fixture (`Challenge ++ name)
+  unless marked.theorems == #[member `double_even, member `double_even_rejects_identity,
+      member `double_even_rejects_nothing, member `triple_rejects_nothing, member `double_zero, member `double_one,
+      member `double_one_rejects_one] &&
+      marked.holes == #[member `double] && marked.filled == #[member `triple] &&
+      marked.terminating == #[(member `triple, member `double_zero)] do
+    throwError "The challenge was misread: {marked.theorems} {marked.holes} {marked.filled} {marked.terminating}"
+  let markedFacts : Audit.Facts := {
+    challenge := marked
+    holes := marked.holes.map (·, some (fixture `CoreCode))
+    terminations := Audit.terminations env marked.terminating }
+  let misread := Audit.meaningful markedFacts
+  expect misread "double_zero" "no kill"
+  expect misread "double_one:" "mark SoftwareChallengeTests.Fixtures.Challenge.double_one_rejects_one `@[kills"
+  if misread.any (contains · "double_one_rejects_one: no kill") then
+    throwError "An unmarked kill was reported as a headline without a kill: {misread}"
+  expect misread "double_even_rejects_nothing" "but it is not `¬` SoftwareChallengeTests.Fixtures.Challenge.double_even"
+  expect misread "triple_rejects_nothing" "is not a headline of Challenge.lean"
+  if misread.any fun error => contains error "double_even:" || contains error "rejects_identity" then
+    throwError "A marked kill was rejected: {misread}"
+  expect (Audit.sound project markedFacts) "triple" "but it is not a definition hole"
+  expect (Audit.owned project markedFacts) "implements SoftwareChallengeTests.Fixtures.Challenge.triple"
+    "implement it in a CoreCode or WorldCode module"
+  unless (Audit.solutionOf #[`A.CoreCode, `A.Solution]).toOption == some `A.Solution do
+    throwError "The Solution module was not found"
+  for catalog in #[#[`A.CoreCode], #[`A.Solution, `B.Solution]] do
+    let .error error := Audit.solutionOf catalog | throwError "{catalog} named one Solution module"
+    unless contains error "name only the module that proves the headlines and kills Solution" ||
+        contains error "name the module that proves the headlines and kills Solution" do
+      throwError "A Solution error was unclear: {error}"
+  let generated := Audit.comparatorConfig `A.Solution marked
+  unless generated == expectedConfig do throwError "Generated comparator.json:\n{generated}"
 
 end
 

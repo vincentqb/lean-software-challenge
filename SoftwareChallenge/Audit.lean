@@ -110,18 +110,22 @@ private def withEnvironment {α : Type} (modules : Array Name) (action : CoreM �
   let (result, _) ← action.toIO { fileName := "<lean-software-challenge>", fileMap := default, maxHeartbeats := 0 } { env }
   return result
 
-structure Config where
-  challenge_module : Name
-  solution_module : Name
-  theorem_names : Array Name
-  definition_names : Option (Array Name)
-  terminates : Option (NameMap Name) := none
-  deriving FromJson
+def challengeModule : Name := `Challenge
 
-def Config.holes (config : Config) : Array Name := config.definition_names.getD #[]
+structure Challenge where
+  theorems : Array Name := #[]
+  holes : Array Name := #[]
+  filled : Array Name := #[]
+  kills : Array (Name × Name) := #[]
+  terminating : Array (Name × Name) := #[]
+  misshapen : Array (Name × Name) := #[]
+  unmarked : Array (Name × Name) := #[]
 
-private def Config.terminating (config : Config) : Array (Name × Name) :=
-  (config.terminates.getD {}).toList.toArray
+def Challenge.headlines (challenge : Challenge) : Array Name :=
+  challenge.theorems.filter fun name => !challenge.kills.any (·.1 == name)
+
+def Challenge.killsOf (challenge : Challenge) (headline : Name) : Array Name :=
+  (challenge.kills.filter (·.2 == headline)).map (·.1)
 
 structure Termination where
   definition : Name
@@ -129,8 +133,8 @@ structure Termination where
   fixpoint : Bool
   mentioned : Bool
 
-def terminations (env : Environment) (config : Config) : Array Termination :=
-  config.terminating.map fun (definition, headline) => {
+def terminations (env : Environment) (terminating : Array (Name × Name)) : Array Termination :=
+  terminating.map fun (definition, headline) => {
     definition, headline
     fixpoint := fixpoint env definition
     mentioned := ((env.find? headline).map (·.type.getUsedConstants.contains definition)).getD false }
@@ -187,10 +191,56 @@ def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : B
     ((replacing replaceable headlineInfo.type rejected).run {}).isSome
   | _, _ => false
 
-def killsOf (env : Environment) (replaceable : NameSet) (theorems : Array Name) : Array (Name × Array Name) :=
-  let found := theorems.map fun headline => (headline, theorems.filter (kills env replaceable headline))
-  let killers := found.flatMap (·.2)
-  found.filter (!killers.contains ·.1)
+private def line (name : Name) : CoreM Nat :=
+  return ((← findDeclarationRangesCore? name).map (·.range.pos.line)).getD 0
+
+def readChallenge (project : Project) (challenge : Name) : IO Challenge := do
+  let file ← findOLean challenge
+  let parts ← #[file, file.addExtension "server", file.addExtension "private"].filterM (·.pathExists)
+  let some (data, _) := (← readModuleDataParts parts).back?
+    | throw <| .userError s!"{challenge} is not compiled"
+  withEnvironment #[challenge] do
+    let env ← getEnv
+    let some index := env.getModuleIdx? challenge | throwError "{challenge} is not compiled"
+    let declared := (← (data.constants.filter (!·.name.isInternal)).mapM fun info =>
+      return (← line info.name, info)).qsort (·.1 < ·.1) |>.map (·.2)
+    let usesSorry := fun (info : ConstantInfo) =>
+      (info.value?.map (·.getUsedConstants.contains ``sorryAx)).getD false
+    let foreign := (env.header.modules.zip env.header.moduleData).flatMap fun (module, data) =>
+      if project.role? module.module == some .worldSpec then
+        (data.constants.filter (isExtern env ·.name)).map (·.name)
+      else #[]
+    let holes := (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name)
+    let found : Challenge := {
+      theorems := (declared.filter (·.isTheorem)).map (·.name), holes
+      filled := (declared.filter fun info => !info.isTheorem && !usesSorry info).map (·.name)
+      kills := PersistentEnvExtension.getModuleEntries killsExt env index
+      terminating := (PersistentEnvExtension.getModuleEntries terminatesExt env index).map
+        fun (headline, hole) => (hole, headline) }
+    let replaceable := NameSet.ofList (holes ++ foreign).toList
+    let headlines := found.headlines
+    return { found with
+      misshapen := found.kills.filter fun (kill, headline) =>
+        !headlines.contains headline || !kills env replaceable headline kill
+      unmarked := headlines.flatMap fun headline =>
+        (headlines.filter (kills env replaceable headline)).map (·, headline) }
+
+def solutionOf (catalog : Array Name) : Except String Name :=
+  match catalog.filter (· matches .str _ "Solution") with
+  | #[solution] => .ok solution
+  | #[] => .error "no module named Solution is built by a default target; name the module that proves \
+      the headlines and kills Solution, e.g. MyApp.Solution, and build it from a default lean_lib"
+  | several => .error s!"{", ".intercalate (several.map toString).toList} are all named Solution; \
+      name only the module that proves the headlines and kills Solution"
+
+def comparatorConfig (solution : Name) (challenge : Challenge) : String :=
+  let quoted := fun (name : Name) => (toJson name).compress
+  let names := fun (names : Array Name) => if names.isEmpty then "[]" else
+    "[\n" ++ ",\n".intercalate (names.map (s!"    {quoted ·}")).toList ++ "\n  ]"
+  let fields := [("challenge_module", quoted challengeModule), ("solution_module", quoted solution),
+    ("theorem_names", names challenge.theorems), ("definition_names", names challenge.holes),
+    ("permitted_axioms", names standardAxioms)]
+  "{\n" ++ ",\n".intercalate (fields.map fun (key, value) => s!"  \"{key}\": {value}") ++ "\n}\n"
 
 private def compiledCallees (env : Environment) (name : Name) : Array Name :=
   let compiled := (env.find? (Compiler.mkUnsafeRecName name)).orElse fun _ => env.find? name
@@ -208,16 +258,13 @@ def entryOf (project : Project) (env : Environment) (moduleOf : Name → Option 
 
 structure Facts where
   inventory : Inventory := ⟨#[], #[]⟩
+  challenge : Challenge := {}
   headlines : Array Headline := #[]
-  killsByHeadline : Array (Name × Array Name) := #[]
   mentioned : NameSet := {}
   holes : Array (Name × Option Name) := #[]
   registrations : Array (Name × Option Role × Bool) := #[]
   entry : Option (Option Name × Array Name) := none
   challengeImports : Array Name := #[]
-  challengeTheorems : Array Name := #[]
-  challengeHoles : Array Name := #[]
-  challengeFilled : Array Name := #[]
   terminations : Array Termination := #[]
 
 private def roleRule : String :=
@@ -278,18 +325,19 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
       errors := errors.push s!"main: the package declares a lean_exe, so declare main in a WorldCode module"
     for hole in unreached do errors := errors.push s!"{hole}: main never reaches this hole; call it from main"
   for t in facts.terminations do
+    let marked := s!"@[terminates {t.definition}] on {t.headline} in Challenge.lean"
     unless t.fixpoint do
-      errors := errors.push s!"{t.definition}: listed under terminates but not a partial_fixpoint definition; \
-        define it with partial_fixpoint, or ask the owner to drop it from terminates in comparator.json"
+      errors := errors.push s!"{t.definition}: {marked} names it, but it is not a partial_fixpoint definition; \
+        define it with partial_fixpoint, or ask the owner to drop the @[terminates]"
     unless facts.holes.any (·.1 == t.definition) do
-      errors := errors.push s!"{t.definition}: listed under terminates but not a definition hole; \
-        ask the owner to fix terminates in comparator.json"
-    unless facts.killsByHeadline.any fun (name, found) => name == t.headline && !found.isEmpty do
-      errors := errors.push s!"{t.definition}: terminates names {t.headline}, which is not a headline with \
-        a kill; ask the owner to fix terminates in comparator.json"
+      errors := errors.push s!"{t.definition}: {marked} names it, but it is not a definition hole; \
+        ask the owner to name a hole declared with `sorry` in Challenge.lean"
+    unless facts.challenge.headlines.contains t.headline && !(facts.challenge.killsOf t.headline).isEmpty do
+      errors := errors.push s!"{t.definition}: {marked}, but {t.headline} is not a headline with a kill; \
+        ask the owner to move the @[terminates] to a headline with a kill"
     unless t.mentioned do
-      errors := errors.push s!"{t.definition}: {t.headline} does not mention it; \
-        ask the owner to fix terminates in comparator.json"
+      errors := errors.push s!"{t.definition}: {marked}, but {t.headline} does not mention it; \
+        ask the owner to move the @[terminates] to a headline that states it returns"
   for line in facts.headlines do
     for hypothesis in line.unnamed do
       errors := errors.push s!"{line.name}: hypothesis {hypothesis} is not a WorldClaim; \
@@ -297,13 +345,24 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
   return distinct errors
 
 def meaningful (facts : Facts) : Array String :=
-  (facts.killsByHeadline.filterMap fun (headline, found) =>
-    if found.isEmpty then some s!"{headline}: no kill shows it rejects a wrong implementation; state \
-      `¬` the headline with its holes replaced by wrong ones in the challenge and comparator.json" else none) ++
+  let challenge := facts.challenge
+  (challenge.headlines.filterMap fun headline =>
+    if !(challenge.killsOf headline).isEmpty || challenge.unmarked.any (·.1 == headline) then none
+    else match challenge.unmarked.find? (·.2 == headline) with
+      | some (kill, _) => some s!"{headline}: no kill shows it rejects a wrong implementation; \
+          in Challenge.lean, mark {kill} `@[kills {headline}]`"
+      | none => some s!"{headline}: no kill shows it rejects a wrong implementation; in Challenge.lean, \
+          state `¬` {headline} with its holes replaced by wrong ones and mark it `@[kills {headline}]`") ++
+  (challenge.misshapen.map fun (kill, headline) =>
+    if challenge.headlines.contains headline then s!"{kill}: marked `@[kills {headline}]`, but it is not \
+      `¬` {headline} with holes and WorldSpec foreign constants replaced by wrong ones; in Challenge.lean, \
+      restate it as that negation, or name the headline it rejects"
+    else s!"{kill}: marked `@[kills {headline}]`, but {headline} is not a headline of Challenge.lean; \
+      name the headline it rejects") ++
   (facts.holes.filter (!facts.mentioned.contains ·.1)).map fun (hole, _) =>
-    s!"{hole}: no headline mentions this hole; state one in the challenge, or drop it from comparator.json"
+    s!"{hole}: no headline mentions this hole; state one in Challenge.lean, or drop the hole"
 
-def owned (project : Project) (config : Config) (facts : Facts) : Array String := Id.run do
+def owned (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
   for (claim, role, declaredThere) in facts.registrations do
     if role != some .worldSpec then
@@ -313,18 +372,10 @@ def owned (project : Project) (config : Config) (facts : Facts) : Array String :
         register it with WorldClaim in the module that declares it"
   for dependency in facts.challengeImports do
     unless project.admits .worldSpec { name := dependency, comptime := false } do
-      errors := errors.push s!"{config.challenge_module} imports {dependency}; \
+      errors := errors.push s!"{challengeModule} imports {dependency}; \
         a challenge may import only CoreSpec and WorldSpec modules and modules outside the package"
-  for (field, declared, listed) in #[("theorem_names", facts.challengeTheorems, config.theorem_names),
-      ("definition_names", facts.challengeHoles, config.holes)] do
-    for name in declared.filter (!listed.contains ·) do
-      errors := errors.push
-        s!"{config.challenge_module} declares {name}, which comparator.json {field} omits; list it there"
-    for name in listed.filter fun name => !declared.contains name && !facts.challengeFilled.contains name do
-      errors := errors.push s!"comparator.json {field} lists {name}, which {config.challenge_module} \
-        does not declare; declare it there with `sorry`, or drop it from comparator.json"
-  for name in facts.challengeFilled.filter config.holes.contains do
-    errors := errors.push s!"{config.challenge_module} implements {name}; it only declares it, so keep \
+  for name in facts.challenge.filled do
+    errors := errors.push s!"{challengeModule} implements {name}; it only declares holes, so keep \
       `sorry` there and implement it in a CoreCode or WorldCode module"
   return errors
 
@@ -349,21 +400,9 @@ def evidenced (facts : Facts) : Array String :=
 def challengeImports (file : System.FilePath) : IO (Array Name) := do
   return (← parseImports' (← IO.FS.readFile file) file.toString).imports.map (·.module)
 
-private def challengeDeclarations (challenge : Name) : IO (Array Name × Array Name × Array Name) := do
-  let file ← findOLean challenge
-  let parts ← #[file, file.addExtension "server", file.addExtension "private"].filterM (·.pathExists)
-  let some (data, _) := (← readModuleDataParts parts).back?
-    | throw <| .userError s!"{challenge} is not compiled"
-  let declared := data.constants.filter (!·.name.isInternal)
-  let usesSorry := fun (info : ConstantInfo) =>
-    (info.value?.map (·.getUsedConstants.contains ``sorryAx)).getD false
-  return ((declared.filter (·.isTheorem)).map (·.name),
-    (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name),
-    (declared.filter fun info => !info.isTheorem && !usesSorry info).map (·.name))
-
 private def ownedFiles (project : Project) (sources : Array (Name × String)) (challengeFile : String) :
     IO (Array String) := do
-  let configuration ← #["comparator.json", "lakefile.lean", "lake-manifest.json", "lean-toolchain"].filterM
+  let configuration ← #["lakefile.lean", "lake-manifest.json", "lean-toolchain"].filterM
     fun (file : String) => System.FilePath.pathExists file
   let claimModules := sources.filter (project.role? ·.1 matches some .coreSpec | some .worldSpec)
   return configuration ++ #["owned.lock", challengeFile] ++ claimModules.map (·.2)
@@ -400,34 +439,27 @@ private def describe (short : Name → String) (line : Headline) : String :=
     s!"{label} ({assumption.checks} {if assumption.checks == 1 then "check" else "checks"})"
   if assumed.isEmpty then short line.name else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
 
-private def gather (project : Project) (config : Config) (catalog : Array Name) (challengeFile : String) :
-    IO Facts := do
+private def gather (project : Project) (catalog : Array Name) (challengeFile : String) : IO Facts := do
+  let challenge ← readChallenge project challengeModule
   let facts ← withEnvironment catalog <| Meta.MetaM.run' do
     let env ← getEnv
     let moduleOf := fun (name : Name) =>
       (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
-    let inventory ← collect catalog (NameSet.ofList (config.terminating.map (·.1)).toList)
-    let foreign := inventory.declarations.filter fun fact =>
-      fact.external && project.role? fact.moduleName == some .worldSpec
-    let killsByHeadline := killsOf env (NameSet.ofList (config.holes ++ foreign.map (·.name)).toList)
-      config.theorem_names
+    let inventory ← collect catalog (NameSet.ofList (challenge.terminating.map (·.1)).toList)
     let running := fun name => (moduleOf name).any catalog.contains
     let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any catalog.contains
     return {
-      inventory, killsByHeadline
-      headlines := ← killsByHeadline.mapM (headline evidence ·.1)
-      mentioned := NameSet.ofList <| (killsByHeadline.flatMap fun (name, _) =>
+      inventory, challenge
+      headlines := ← challenge.headlines.mapM (headline evidence ·)
+      mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
         ((env.find? name).map (·.type.getUsedConstants)).getD #[]).toList
-      holes := config.holes.map fun hole => (hole, moduleOf hole)
+      holes := challenge.holes.map fun hole => (hole, moduleOf hole)
       registrations := catalog.flatMap fun module =>
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
           fun claim => (claim, project.role? module, moduleOf claim == some module)
-      terminations := terminations env config
-      entry := entryOf project env moduleOf running config.holes : Facts }
-  let (challengeTheorems, challengeHoles, challengeFilled) ← challengeDeclarations config.challenge_module
-  return { facts with
-    challengeTheorems, challengeHoles, challengeFilled
-    challengeImports := ← challengeImports challengeFile }
+      terminations := terminations env challenge.terminating
+      entry := entryOf project env moduleOf running challenge.holes : Facts }
+  return { facts with challengeImports := ← challengeImports challengeFile }
 
 private def audit (executable : Bool) (challengeFile : String) (modules : List String) : IO UInt32 := do
   let sources := modules.toArray.map fun module => match module.splitOn "=" with
@@ -435,23 +467,24 @@ private def audit (executable : Bool) (challengeFile : String) (modules : List S
     | _ => (module.toName, module)
   let catalog := sources.map (·.1)
   let project := Project.ofPackage catalog executable
-  let config : Config ← IO.ofExcept <| Json.parse (← IO.FS.readFile "comparator.json") >>= fromJson?
-  let facts ← gather project config catalog challengeFile
+  let facts ← gather project catalog challengeFile
   let edit := editableFiles project sources
   let ownedNow ← ownedFiles project sources challengeFile
   let current ← digests ownedNow
   let locked ← readLock
-  let solution := if catalog.contains config.solution_module then #[] else
-    #[s!"comparator.json solution_module {config.solution_module} is not built by a default target; \
-      ask the owner to add it to a default lean_lib in lakefile.lean"]
+  let solution := solutionOf catalog
   let failures := (sound project facts).map ("sound: " ++ ·) ++ (meaningful facts).map ("meaningful: " ++ ·) ++
-    (solution ++ owned project config facts ++ (locked.map (lockErrors · current edit)).getD #[]).map
+    ((match solution with | .ok _ => #[] | .error error => #[error]) ++ owned project facts ++ (locked.map (lockErrors · current edit)).getD #[]).map
       ("owned: " ++ ·) ++
     (evidenced facts).map ("evidence: " ++ ·)
   let files := s!"Edit: {" ".intercalate edit.toList}\nOwned: {" ".intercalate ownedNow.toList}"
   unless project.check facts.inventory && failures.isEmpty do
     IO.println ("\n".intercalate failures.toList ++ "\n" ++ files)
     return 1
+  if let .ok solution := solution then
+    let config := comparatorConfig solution facts.challenge
+    unless (← try some <$> IO.FS.readFile "comparator.json" catch _ => pure none) == some config do
+      IO.FS.writeFile "comparator.json" config
   if locked.isNone then
     IO.FS.writeFile "owned.lock" ("\n".intercalate (current.map fun (file, digest) => s!"{digest} {file}").toList)
   let short := shorten (sharedNamespace (facts.headlines.map (·.name)))
