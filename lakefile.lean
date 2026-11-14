@@ -44,10 +44,17 @@ script test_challenge do
   IO.FS.writeFile runner <| "\n".intercalate <| ["import SoftwareChallenge"] ++
     (modules.map (s!"import {·}")).toList ++
     [s!"run_cmd SoftwareChallenge.runChecks #[{", ".intercalate (modules.map (s!"`{·}")).toList}]", ""]
-  for args in [#["lean", runner.toString], #["comparator"]] do
-    let code ← run args
-    unless code == 0 do return code
-  return 0
+  let code ← run #["lean", runner.toString]
+  unless code == 0 do return code
+  -- The comparator needs every headline proved; name the ones that are not instead of letting it
+  -- fail on a constant the solution does not declare.
+  let report ← IO.FS.readFile (pkg.buildDir / "softwareChallenge.txt")
+  let unproved := (report.splitOn "\n").filter (·.endsWith "(not yet proved)")
+  unless unproved.isEmpty do
+    IO.eprintln s!"{unproved.length} headlines are not yet proved, so the solution is not accepted:"
+    for line in unproved do IO.eprintln s!"  {line}"
+    return 1
+  run #["comparator"]
 
 @[test_driver] script test do
   let lake := (← getLake).toString
