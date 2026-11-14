@@ -37,7 +37,7 @@ script test_challenge do
   for args in [#["build"], #["lint"]] do
     let code ← run args
     unless code == 0 do return code
-  let some challenge ← findModule? `Challenge | do IO.eprintln challengeMissing; return 1
+  let some challenge := pkg.findModule? `Challenge | do IO.eprintln challengeMissing; return 1
   let modules := (← runBuild do return Job.pure (← packageModules pkg challenge)).map (·.name)
   let runner := pkg.buildDir / "softwareChallenge" / "Checks.lean"
   IO.FS.createDirAll (pkg.buildDir / "softwareChallenge")
@@ -105,7 +105,7 @@ script grade (args) do
 
 package_facet softwareChallenge pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error "SoftwareChallenge.Audit is unavailable"
-  let some challenge ← findModule? `Challenge | error challengeMissing
+  let some challenge := pkg.findModule? `Challenge | error challengeMissing
   let catalog ← packageModules pkg challenge
   for mod in catalog do
     if (← (← mod.imports.fetch).await).any (·.name == challenge.name) then
@@ -125,7 +125,8 @@ package_facet softwareChallenge pkg : Unit := do
       let out ← IO.Process.output {
         cmd := (← getLean).toString
         args := #["--run", (__dir__ / "Audit.lean").toString] ++
-          (if pkg.leanExes.isEmpty then #[] else #["--executable"]) ++ #[challenge.relLeanFile.toString] ++
+          (if pkg.leanExes.isEmpty then #[] else #["--executable"]) ++
+            #[challenge.relLeanFile.toString, challenge.oleanFile.toString] ++
           catalog.map fun mod => s!"{mod.name}={mod.relLeanFile}"
         cwd := some pkg.dir
         env := ← getAugmentedEnv

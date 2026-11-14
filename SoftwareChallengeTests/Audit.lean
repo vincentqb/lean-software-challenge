@@ -167,6 +167,34 @@ run_cmd Elab.Command.liftCoreM do
   if registered.any (contains · "SuccAgrees") then
     throwError "A claim declared in a WorldSpec module was rejected: {registered}"
 
+run_cmd Elab.Command.liftCoreM do
+  let challenge := fixture `Challenge
+  let olean ← findOLean challenge
+  let some library := (olean.parent.bind (·.parent)).bind (·.parent) | throwError "{olean} has no library"
+  let dependency ← IO.FS.createTempDir
+  let shadow := dependency / "SoftwareChallengeTests" / "Fixtures" / "Challenge.olean"
+  let saved ← searchPathRef.get
+  try
+    for file in ← (library / "SoftwareChallengeTests").walkDir do
+      unless ← file.isDir do
+        let some relative := file.toString.dropPrefix? library.toString | throwError "{file} is outside {library}"
+        let copy : System.FilePath := dependency.toString ++ relative.toString
+        IO.FS.createDirAll (copy.parent.getD dependency)
+        IO.FS.writeBinFile copy (← IO.FS.readBinFile file)
+    let other ← findOLean (fixture `CoreSpec)
+    for extension in ["olean", "olean.server", "olean.private", "ir", "ir.sig"] do
+      if ← (other.withExtension extension).pathExists then
+        IO.FS.writeBinFile (shadow.withExtension extension) (← IO.FS.readBinFile (other.withExtension extension))
+    searchPathRef.set (dependency :: saved)
+    unless (← findOLean challenge) == shadow do
+      throwError "The dependency's {challenge} does not come first on the search path"
+    let read ← Audit.readChallenge project challenge olean
+    unless read.holes == #[challenge ++ `double] do
+      throwError "The audit read a dependency's {challenge}, not the root package's: holes {read.holes}"
+  finally
+    searchPathRef.set saved
+    IO.FS.removeDirAll dependency
+
 run_cmd Elab.Command.liftTermElabM do
   let evidence := allEvidence (← getEnv)
   let world ← Audit.headline evidence (fixture `successor_grows)
@@ -207,6 +235,12 @@ run_cmd Elab.Command.liftTermElabM do
     throwError "A kill that replaces a nested hole by a lambda was not recognised"
   if Audit.kills env replaceable (fixture `identity_twice) (fixture `identity_twice_rejects_mixed) then
     throwError "A kill that replaces one hole by two different functions counted"
+  if Audit.kills env replaceable (fixture `identity_fixed) (fixture `identity_fixed_rejects_bound) then
+    throwError "A kill whose witness depends on a bound variable counted"
+  unless Audit.kills env replaceable (fixture `identity_succ) (fixture `identity_succ_rejects_successor) do
+    throwError "A kill whose statement carries metadata the headline's does not was not recognised"
+  unless Audit.kills env replaceable (fixture `identity_twice) (fixture `identity_twice_rejects_marked) do
+    throwError "A kill that carries metadata on one occurrence of its witness was not recognised"
   let foreign := (NameSet.empty.insert (fixture `successor)).insert (fixture `nativeSucc)
   unless Audit.kills env foreign (fixture `successor_correct) (fixture `successor_correct_rejects_identity) do
     throwError "A kill that replaces a foreign constant was not recognised"
@@ -242,7 +276,7 @@ run_cmd Elab.Command.liftTermElabM do
     "not a headline with a kill"
   expect (termination countdown (fixture `bounded)) "countdown" "not a headline with a kill"
   expect (termination countdown (fixture `bounded)) "bounded" "does not mention it"
-  let marked ← Audit.readChallenge project (fixture `Challenge)
+  let marked ← Audit.readChallenge project (fixture `Challenge) (← findOLean (fixture `Challenge))
   let member := fun (name : Name) => fixture (`Challenge ++ name)
   unless marked.theorems == #[member `double_even, member `double_even_rejects_identity,
       member `double_even_rejects_nothing, member `triple_rejects_nothing, member `double_zero, member `double_one,

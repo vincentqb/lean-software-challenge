@@ -24,6 +24,10 @@ theorem identity_fixed_rejects_successor : ¬ ∀ n : Nat, (fun n => n + 1) n = 
   intro h
   exact absurd (h 0) (by decide)
 
+theorem identity_fixed_rejects_bound : ¬ ∀ n : Nat, (fun _ => n + 1) n = n := by
+  intro h
+  exact absurd (h 0) (by decide)
+
 theorem mismatched_negation : ¬ ∀ n : Nat, n = n + 1 := by
   intro h
   exact absurd (h 0) (by decide)
@@ -40,6 +44,18 @@ theorem identity_twice_rejects_successor :
   exact absurd (h 0) (by decide)
 
 theorem identity_twice_rejects_mixed : ¬ ∀ n : Nat, (fun n => n + 1) (id n) = id n := by
+  intro h
+  exact absurd (h 0) (by decide)
+
+theorem identity_twice_rejects_marked :
+    ¬ ∀ n : Nat, (no_index (fun n => n + 1)) ((fun n => n + 1) n) = (fun n => n + 1) n := by
+  intro h
+  exact absurd (h 0) (by decide)
+
+theorem identity_succ (n : Nat) : identity (Nat.succ n) = Nat.succ n := by simp [identity, helper]
+
+theorem identity_succ_rejects_successor :
+    ¬ ∀ n : Nat, (fun n => n + 1) ((no_index Nat.succ) n) = Nat.succ n := by
   intro h
   exact absurd (h 0) (by decide)
 

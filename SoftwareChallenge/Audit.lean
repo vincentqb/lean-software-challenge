@@ -104,9 +104,10 @@ def collect (catalog : Array Name) (terminating : NameSet := {}) : CoreM Invento
         imports := data.imports.map fun i => { name := i.module, comptime := i.isMeta } }
     declarations }
 
-private def withEnvironment {α : Type} (modules : Array Name) (action : CoreM α) : IO α := do
+private def withEnvironment {α : Type} (modules : Array Name) (action : CoreM α)
+    (artifacts : NameMap ImportArtifacts := {}) : IO α := do
   unsafe enableInitializersExecution
-  let env ← importModules (modules.map ({ module := · })) {} (loadExts := true)
+  let env ← importModules (modules.map ({ module := · })) {} (loadExts := true) (arts := artifacts)
   let (result, _) ← action.toIO { fileName := "<lean-software-challenge>", fileMap := default, maxHeartbeats := 0 } { env }
   return result
 
@@ -128,7 +129,6 @@ def Challenge.headlines (challenge : Challenge) : Array Name :=
 def Challenge.killsOf (challenge : Challenge) (headline : Name) : Array Name :=
   (challenge.kills.filter (·.2 == headline)).map (·.1)
 
-/-- The statement Challenge.lean gives a theorem. -/
 def Challenge.statement? (challenge : Challenge) (name : Name) : Option Expr :=
   (challenge.statements.find? (·.1 == name)).map (·.2)
 
@@ -159,8 +159,6 @@ structure Headline where
   stated headline is proved; `lake comparator` replays the proof. -/
   proved : Bool := true
 
-/-- Read a headline: from the solution when it states it, and otherwise from `stated`, its
-statement in Challenge.lean, as a headline not yet proved. -/
 def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := none) :
     MetaM Headline := do
   let env ← getEnv
@@ -186,36 +184,47 @@ def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := 
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
     return { name, assumptions, unnamed, proved }
 
-private partial def replacing (replaceable : NameSet) :
-    Expr → Expr → StateT (NameMap Expr) Option Unit
-  | .const name levels, target =>
-    if replaceable.contains name then do
-      guard !target.hasLooseBVars
-      match (← get).find? name with
-      | some witness => guard (witness == target)
-      | none => modify (·.insert name target)
-    else guard (target == .const name levels)
-  | .app f a, .app g b => do replacing replaceable f g; replacing replaceable a b
-  | .lam _ t b _, .lam _ u c _ | .forallE _ t b _, .forallE _ u c _ => do
-    replacing replaceable t u; replacing replaceable b c
-  | .mdata _ pattern, target | pattern, .mdata _ target => replacing replaceable pattern target
-  | pattern, target => guard (pattern == target)
+def toUniverse : Level → Universe
+  | .zero => .zero
+  | .succ level => .succ (toUniverse level)
+  | .max left right => .max (toUniverse left) (toUniverse right)
+  | .imax left right => .imax (toUniverse left) (toUniverse right)
+  | .param name => .param name
+  | .mvar id => .mvar id.name
+
+@[expose] def toShape : Expr → Shape
+  | .bvar index => .bvar index
+  | .fvar id => .fvar id.name
+  | .mvar id => .mvar id.name
+  | .sort level => .sort (toUniverse level)
+  | .const name levels => .const name (levels.map toUniverse)
+  | .app function argument => .app (toShape function) (toShape argument)
+  | .lam _ type body _ => .lam (toShape type) (toShape body)
+  | .forallE _ type body _ => .forallE (toShape type) (toShape body)
+  | .letE _ type value body _ => .letE (toShape type) (toShape value) (toShape body)
+  | .lit (.natVal value) => .natLit value
+  | .lit (.strVal value) => .strLit value
+  | .mdata _ expr => toShape expr
+  | .proj structureName index value => .proj structureName index (toShape value)
+
+theorem toShape_mdata (data : MData) (expr : Expr) : toShape (.mdata data expr) = toShape expr := rfl
 
 def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : Bool :=
-  match env.find? headline, (env.find? kill).map (·.type) with
-  | some headlineInfo, some (Expr.app (.const ``Not _) rejected) =>
-    ((replacing replaceable headlineInfo.type rejected).run {}).isSome
+  match env.find? headline, (env.find? kill).map (toShape ·.type) with
+  | some headlineInfo, some (.app (.const ``Not _) rejected) =>
+    ((toShape headlineInfo.type).witnesses? replaceable.contains rejected).isSome
   | _, _ => false
 
 private def line (name : Name) : CoreM Nat :=
   return ((← findDeclarationRangesCore? name).map (·.range.pos.line)).getD 0
 
-def readChallenge (project : Project) (challenge : Name) : IO Challenge := do
-  let file ← findOLean challenge
-  let parts ← #[file, file.addExtension "server", file.addExtension "private"].filterM (·.pathExists)
+def readChallenge (project : Project) (challenge : Name) (olean : System.FilePath) : IO Challenge := do
+  let parts ← #[olean, olean.addExtension "server", olean.addExtension "private"].filterM (·.pathExists)
+  let ir ← #[olean.withExtension "ir.sig", olean.withExtension "ir"].filterM (·.pathExists)
   let some (data, _) := (← readModuleDataParts parts).back?
     | throw <| .userError s!"{challenge} is not compiled"
-  withEnvironment #[challenge] do
+  let artifacts : NameMap ImportArtifacts := .insert {} challenge (.ofArrays #[parts, ir])
+  withEnvironment (artifacts := artifacts) #[challenge] do
     let env ← getEnv
     let some index := env.getModuleIdx? challenge | throwError "{challenge} is not compiled"
     let declared := (← (data.constants.filter (!·.name.isInternal)).mapM fun info =>
@@ -458,8 +467,9 @@ private def describe (short : Name → String) (line : Headline) : String :=
     else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
   if line.proved then stated else s!"{stated}  (not yet proved)"
 
-private def gather (project : Project) (catalog : Array Name) (challengeFile : String) : IO Facts := do
-  let challenge ← readChallenge project challengeModule
+private def gather (project : Project) (catalog : Array Name) (challengeFile : String)
+    (challengeOLean : System.FilePath) : IO Facts := do
+  let challenge ← readChallenge project challengeModule challengeOLean
   let facts ← withEnvironment catalog <| Meta.MetaM.run' do
     let env ← getEnv
     let moduleOf := fun (name : Name) =>
@@ -480,13 +490,14 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
       entry := entryOf project env moduleOf running challenge.holes : Facts }
   return { facts with challengeImports := ← challengeImports challengeFile }
 
-private def audit (executable : Bool) (challengeFile : String) (modules : List String) : IO UInt32 := do
+private def audit (executable : Bool) (challengeFile challengeOLean : String) (modules : List String) :
+    IO UInt32 := do
   let sources := modules.toArray.map fun module => match module.splitOn "=" with
     | [name, file] => (name.toName, file)
     | _ => (module.toName, module)
   let catalog := sources.map (·.1)
   let project := Project.ofPackage catalog executable
-  let facts ← gather project catalog challengeFile
+  let facts ← gather project catalog challengeFile challengeOLean
   let edit := editableFiles project sources
   let ownedNow ← ownedFiles project sources challengeFile
   let current ← digests ownedNow
@@ -515,10 +526,10 @@ private def audit (executable : Bool) (challengeFile : String) (modules : List S
   return 0
 
 def run : List String → IO UInt32
-  | "--executable" :: challengeFile :: modules => audit true challengeFile modules
-  | challengeFile :: modules => audit false challengeFile modules
-  | [] => do
-    IO.println "usage: lean --run Audit.lean [--executable] <challenge file> <module>=<file>..."
+  | "--executable" :: challengeFile :: challengeOLean :: modules => audit true challengeFile challengeOLean modules
+  | challengeFile :: challengeOLean :: modules => audit false challengeFile challengeOLean modules
+  | _ => do
+    IO.println "usage: lean --run Audit.lean [--executable] <challenge file> <challenge olean> <module>=<file>..."
     return 2
 
 end SoftwareChallenge.Audit
