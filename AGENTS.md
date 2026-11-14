@@ -13,6 +13,8 @@ In `Examples/ConstantFolding/`, the template, do not edit `Challenge.lean`, `own
 - The audit checks structure and reports status; acceptance is `lake comparator` and `grade`.
   A challenge in progress must build: a headline the solution does not prove yet is reported, not
   an error. Never let the audit accept `sorry` or an axiom beyond the standard ones.
+- Names and structure carry the meaning. Write no comment or doc comment that restates the code;
+  a `WorldClaim` keeps its required doc comment.
 
 What no audit rule can decide: a statement says what its name says and does not restate the
 implementation, a headline marked `@[terminates]` states that its hole returns, and a `Check`
