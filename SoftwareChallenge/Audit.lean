@@ -114,6 +114,7 @@ def challengeModule : Name := `Challenge
 
 structure Challenge where
   theorems : Array Name := #[]
+  statements : Array (Name × Expr) := #[]
   holes : Array Name := #[]
   filled : Array Name := #[]
   kills : Array (Name × Name) := #[]
@@ -127,17 +128,23 @@ def Challenge.headlines (challenge : Challenge) : Array Name :=
 def Challenge.killsOf (challenge : Challenge) (headline : Name) : Array Name :=
   (challenge.kills.filter (·.2 == headline)).map (·.1)
 
+/-- The statement Challenge.lean gives a theorem. -/
+def Challenge.statement? (challenge : Challenge) (name : Name) : Option Expr :=
+  (challenge.statements.find? (·.1 == name)).map (·.2)
+
 structure Termination where
   definition : Name
   headline : Name
   fixpoint : Bool
   mentioned : Bool
 
-def terminations (env : Environment) (terminating : Array (Name × Name)) : Array Termination :=
+def terminations (env : Environment) (terminating : Array (Name × Name))
+    (stated : Name → Option Expr := fun _ => none) : Array Termination :=
   terminating.map fun (definition, headline) => {
     definition, headline
     fixpoint := fixpoint env definition
-    mentioned := ((env.find? headline).map (·.type.getUsedConstants.contains definition)).getD false }
+    mentioned := (((env.find? headline).map (·.type) <|> stated headline).map
+      (·.getUsedConstants.contains definition)).getD false }
 
 structure Assumption where
   claim : Name
@@ -148,12 +155,21 @@ structure Headline where
   name : Name
   assumptions : Array Assumption
   unnamed : Array String
+  /-- Whether the solution states the headline. The audit rejects `sorry` in every role, so a
+  stated headline is proved; `lake comparator` replays the proof. -/
+  proved : Bool := true
 
-def headline (evidence : Array Evidence) (name : Name) : MetaM Headline := do
+/-- Read a headline: from the solution when it states it, and otherwise from `stated`, its
+statement in Challenge.lean, as a headline not yet proved. -/
+def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := none) :
+    MetaM Headline := do
   let env ← getEnv
-  let some info := env.find? name | throwError "Headline {name} is not compiled"
-  let (patterns, _, _) ← Meta.forallMetaTelescope info.type
-  Meta.forallTelescope info.type fun binders _ => do
+  let (type, proved) ← match env.find? name, stated with
+    | some info, _ => pure (info.type, true)
+    | none, some type => pure (type, false)
+    | none, none => throwError "Headline {name} is not compiled"
+  let (patterns, _, _) ← Meta.forallMetaTelescope type
+  Meta.forallTelescope type fun binders _ => do
     let mut assumptions := #[]
     let mut unnamed := #[]
     for (binder, pattern) in binders.zip patterns do
@@ -168,7 +184,7 @@ def headline (evidence : Array Evidence) (name : Name) : MetaM Headline := do
           assumptions := assumptions.push { claim, statement := shown, checks := checks.size }
       else if !statement.hasFVar && (← Meta.isProp statement) then
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
-    return { name, assumptions, unnamed }
+    return { name, assumptions, unnamed, proved }
 
 private partial def replacing (replaceable : NameSet) :
     Expr → Expr → StateT (NameMap Expr) Option Unit
@@ -213,6 +229,7 @@ def readChallenge (project : Project) (challenge : Name) : IO Challenge := do
     let holes := (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name)
     let found : Challenge := {
       theorems := (declared.filter (·.isTheorem)).map (·.name), holes
+      statements := (declared.filter (·.isTheorem)).map fun info => (info.name, info.type)
       filled := (declared.filter fun info => !info.isTheorem && !usesSorry info).map (·.name)
       kills := PersistentEnvExtension.getModuleEntries killsExt env index
       terminating := (PersistentEnvExtension.getModuleEntries terminatesExt env index).map
@@ -437,7 +454,9 @@ private def describe (short : Name → String) (line : Headline) : String :=
     let label := if (line.assumptions.filter (·.claim == assumption.claim)).size > 1 then assumption.statement
       else short assumption.claim
     s!"{label} ({assumption.checks} {if assumption.checks == 1 then "check" else "checks"})"
-  if assumed.isEmpty then short line.name else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
+  let stated := if assumed.isEmpty then short line.name
+    else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
+  if line.proved then stated else s!"{stated}  (not yet proved)"
 
 private def gather (project : Project) (catalog : Array Name) (challengeFile : String) : IO Facts := do
   let challenge ← readChallenge project challengeModule
@@ -450,14 +469,14 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
     let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any catalog.contains
     return {
       inventory, challenge
-      headlines := ← challenge.headlines.mapM (headline evidence ·)
+      headlines := ← challenge.headlines.mapM fun name => headline evidence name (challenge.statement? name)
       mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
-        ((env.find? name).map (·.type.getUsedConstants)).getD #[]).toList
+        (((env.find? name).map (·.type) <|> challenge.statement? name).map (·.getUsedConstants)).getD #[]).toList
       holes := challenge.holes.map fun hole => (hole, moduleOf hole)
       registrations := catalog.flatMap fun module =>
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
           fun claim => (claim, project.role? module, moduleOf claim == some module)
-      terminations := terminations env challenge.terminating
+      terminations := terminations env challenge.terminating challenge.statement?
       entry := entryOf project env moduleOf running challenge.holes : Facts }
   return { facts with challengeImports := ← challengeImports challengeFile }
 
@@ -489,6 +508,8 @@ private def audit (executable : Bool) (challengeFile : String) (modules : List S
     IO.FS.writeFile "owned.lock" ("\n".intercalate (current.map fun (file, digest) => s!"{digest} {file}").toList)
   let short := shorten (sharedNamespace (facts.headlines.map (·.name)))
   for line in facts.headlines do IO.println (describe short line)
+  let proved := (facts.headlines.filter (·.proved)).size
+  IO.println s!"Proved: {proved} of {facts.headlines.size} headlines"
   for t in facts.terminations do IO.println s!"{short t.definition} terminates via {short t.headline}"
   IO.println files
   return 0

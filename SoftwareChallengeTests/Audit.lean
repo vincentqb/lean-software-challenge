@@ -179,6 +179,11 @@ run_cmd Elab.Command.liftTermElabM do
   let missing ← try discard <| Audit.headline evidence `SoftwareChallengeTests.Missing; pure false
     catch _ => pure true
   unless missing do throwError "A missing headline passed"
+  let stated := (← getConstInfo (fixture `successor_grows)).type
+  let unproved ← Audit.headline evidence `SoftwareChallengeTests.Missing (some stated)
+  unless !unproved.proved && unproved.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
+    throwError "A headline the solution does not state was not read from its Challenge statement"
+  unless world.proved do throwError "A headline the solution states was reported unproved"
   let headlines ← #[fixture `uses_unchecked, fixture `uses_live, fixture `uses_unnamed].mapM
     fun name => Audit.headline evidence name
   let facts : Audit.Facts := {
@@ -223,6 +228,11 @@ run_cmd Elab.Command.liftTermElabM do
                    kills := #[(stuck, countdownTerminates)] }
     holes := #[(countdown, some (fixture `Fixpoint)), (fixture `identity, some (fixture `CoreCode))]
     terminations := Audit.terminations env #[(definition, headline)] }
+  let terminatesType := (← getConstInfo countdownTerminates).type
+  let fromStatement := Audit.terminations env #[(countdown, `SoftwareChallengeTests.Missing)]
+    fun _ => some terminatesType
+  unless fromStatement.all (·.mentioned) do
+    throwError "A termination headline the solution does not state was not read from its statement"
   unless (termination countdown countdownTerminates).isEmpty do
     throwError "A listed termination headline was rejected: {termination countdown countdownTerminates}"
   expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "not a definition hole"
