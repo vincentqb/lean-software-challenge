@@ -30,6 +30,47 @@ def packageModules (pkg : Package) (challenge : Lake.Module) : FetchM (Array Lak
         modules := modules.push mod
   return modules
 
+def tenths (ms : Nat) : String := s!"{ms / 1000}.{ms % 1000 / 100} s"
+
+def replayEach (lake : String) (dir buildDir : System.FilePath) : IO UInt32 := do
+  let config ← IO.ofExcept <| Json.parse (← IO.FS.readFile (dir / "comparator.json"))
+  let theorems ← IO.ofExcept <| config.getObjValAs? (Array String) "theorem_names"
+  let configs := buildDir / "softwareChallenge" / "comparator"
+  IO.FS.createDirAll configs
+  let next ← IO.mkRef 0
+  let results ← IO.mkRef (#[] : Array (String × IO.Process.Output × Nat))
+  let worker : IO Unit := do
+    repeat
+      let index ← next.modifyGet fun index => (index, index + 1)
+      let some name := theorems[index]? | break
+      let file := configs / s!"{index}.json"
+      IO.FS.writeFile file (config.setObjVal! "theorem_names" (toJson #[name])).pretty
+      let start ← IO.monoMsNow
+      let output ← IO.Process.output { cmd := lake, args := #["comparator", "--config", file.toString], cwd := dir }
+      let elapsed := (← IO.monoMsNow) - start
+      results.modify (·.push (name, output, elapsed))
+  let start ← IO.monoMsNow
+  let threads := min 16 (System.Platform.Internal.getHardwareConcurrency ()).toNat
+  let jobs := ((← IO.getEnv "SOFTWARE_CHALLENGE_JOBS").bind (·.toNat?)).getD threads
+  let slots := min theorems.size (max 1 jobs)
+  let workers ← (List.range slots).mapM fun _ => IO.asTask worker (prio := .dedicated)
+  for task in workers do IO.ofExcept task.get
+  let total := (← IO.monoMsNow) - start
+  let done := (← results.get).qsort fun a b => a.2.2 > b.2.2
+  for (name, output, _) in done do
+    unless output.exitCode == 0 do IO.eprintln s!"lake comparator on {name}:\n{output.stdout}{output.stderr}"
+  let lines := done.map fun (name, output, elapsed) =>
+    if output.exitCode == 0 then s!"{name}  {tenths elapsed}"
+    else if output.exitCode == 1 then s!"{name}  {tenths elapsed}  (rejected)"
+    else s!"{name}  {tenths elapsed}  (could not run, exit {output.exitCode})"
+  let accepted := (done.filter (·.2.1.exitCode == 0)).size
+  let report := "\n".intercalate (lines.push s!"Replayed: {accepted} of {theorems.size} theorems in {tenths total}").toList
+  IO.FS.writeFile (buildDir / "comparator.txt") (report ++ "\n")
+  IO.println report
+  if done.any (·.2.1.exitCode == 1) then return 1
+  if done.any (·.2.1.exitCode != 0) then return 2
+  return 0
+
 script test_challenge do
   let lake := (← getLake).toString
   let pkg ← getRootPackage
@@ -54,15 +95,36 @@ script test_challenge do
     IO.eprintln s!"{unproved.length} headlines or their witnesses are not yet proved, so the solution is not accepted:"
     for line in unproved do IO.eprintln s!"  {line}"
     return 1
-  run #["comparator"]
+  replayEach lake pkg.dir pkg.buildDir
+
+def replayTimes (report : String) : Array (String × Nat) :=
+  (report.splitOn "\n").toArray.filterMap fun line =>
+    match (line.splitOn "  ", line.splitOn " in ") with
+    | ([name, time], _) | (_, [name, time]) =>
+      ((time.dropEnd 2).toString.replace "." "").toNat?.map (name, ·)
+    | _ => none
+
+def replayedInParallel (report : String) : Bool :=
+  let times := replayTimes report
+  let time := fun (name : String) => (times.find? (·.1 == name)).map (·.2)
+  match time "SlowKills.double_correct_rejects_identity", time "SlowKills.triple_correct_rejects_identity",
+      times.back? with
+  | some double, some triple, some (_, total) => 2 * total ≤ 2 * max double triple + min double triple
+  | _, _, _ => false
 
 @[test_driver] script test do
   let lake := (← getLake).toString
   let root := (← getRootPackage).dir
+  let slow := root / "SoftwareChallengeTests" / "SlowKills"
   for (args, cwd) in [(#["build"], root), (#["lint"], root), (#["build", "SoftwareChallengeTests"], root),
-      (#["test"], root / "Examples" / "ConstantFolding"), (#["script", "run", "test_grade"], root)] do
+      (#["test"], root / "Examples" / "ConstantFolding"), (#["test"], slow),
+      (#["script", "run", "test_grade"], root)] do
     let code ← (← IO.Process.spawn { cmd := lake, args, cwd }).wait
     unless code == 0 do return code
+  let report ← IO.FS.readFile (slow / ".lake" / "build" / "comparator.txt")
+  unless replayedInParallel report do
+    IO.eprintln s!"the two slow kills did not replay in about the time of the slower one:\n{report}"
+    return 1
   return 0
 
 def gradeCandidates : List (String × System.FilePath × String × UInt32) := [

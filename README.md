@@ -139,9 +139,15 @@ needs a headline marked `@[terminates hole]` that states on which inputs it retu
 
 ```sh
 lake build        # audit, report, and comparator.json
-lake test         # build, lint, every Check, and lake comparator
+lake test         # build, lint, every Check, and lake comparator on each theorem
 lake script run software_challenge/grade <commit>   # judge a candidate from this checkout
 ```
+
+`lake test` runs `lake comparator` once for each theorem, several at a time, and writes the time
+each run took, slowest first, to `.lake/build/comparator.txt`: a slow proof shows at the top before
+it reaches a time limit. `SOFTWARE_CHALLENGE_JOBS` sets how many run at a time (default: the
+hardware threads, at most 16). A run's time includes the comparator's checks of the build and its
+export, not only the kernel's replay.
 
 `grade` refuses a candidate that changes or adds an owned file, then runs `lake test` in a fresh
 worktree of it. It exits 0 to accept, 1 to refuse, and 3 when it cannot judge.
