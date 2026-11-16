@@ -34,7 +34,7 @@ script test_challenge do
   let lake := (← getLake).toString
   let pkg ← getRootPackage
   let run := fun (args : Array String) => do (← IO.Process.spawn { cmd := lake, args, cwd := pkg.dir }).wait
-  for args in [#["build"], #["lint"]] do
+  for args in [#["build"], #["lint", "--builtin-lint"]] do
     let code ← run args
     unless code == 0 do return code
   let some challenge := pkg.findModule? `Challenge | do IO.eprintln challengeMissing; return 1

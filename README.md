@@ -8,17 +8,18 @@ about the code that runs, and on which assumptions. Requires **Lean 4.35.0**.
 
 You write the statement of the challenge, then review only changes to it.
 
-- `Challenge.lean`: the headlines, theorems about the program stated with `sorry`, no two the
-  same; a hole, `def name : T := sorry`, for each function a headline mentions; and for each
-  headline a kill, `¬` the headline with its holes replaced by a wrong implementation, marked
-  `@[kills headline]`. A kill may instead state `¬ H ∧ H₂ ∧ … ∧ Hₙ`: the negated headline, then
-  every other headline in file order, all with the same replacement. The headline is then
-  independent: a wrong implementation fails it and passes all the others.
+- `Challenge.lean`: the headlines, theorems about the program stated with `sorry`; a hole,
+  `def name : T := sorry`, for each function a headline mentions; and for each headline a kill,
+  `¬` the headline with its holes replaced by a wrong implementation, marked `@[kills headline]`.
 - `MyApp/CoreSpec.lean`: the types and reference definitions the headlines are stated in.
 - `MyApp/WorldSpec.lean`: each foreign function the program calls, as an `@[extern] opaque`
   declaration, and a `WorldClaim` for each assumption about one. A world claim's doc comment
   names the observation that would falsify it.
 - `lakefile.lean`, `lean-toolchain`, and `lake-manifest.json`, as in [Setup](#setup).
+
+To show a headline independent of the others, state its kill as `¬ H ∧ H₂ ∧ … ∧ Hₙ`: the negated
+headline, then every other headline in file order, all with the same replacement. Its wrong
+implementation is then close to a correct one, and it is public.
 
 The first build records a hash of each of these files in `owned.lock`. After that, a build fails
 if one of them changes. To record a new statement, delete `owned.lock` and build.
@@ -44,17 +45,14 @@ When `lake test` passes, or `grade` accepts a candidate:
 - Every headline is proved, and `lake comparator` replays each proof through the kernel.
 - The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, foreign code
   enters only through WorldSpec, CoreCode never calls it, and `main` reaches every hole.
-- Every headline rejects a wrong implementation: each kill is proved. No two headlines state the
-  same, up to binder names.
+- Every headline rejects a wrong implementation: each kill is proved.
+- No two headlines state the same, up to binder names.
 - Every headline assumes only the world claims it takes as hypotheses, and a `Check` tested each
   of them against the real foreign code.
 - The statement did not change: no owned file differs from `owned.lock`.
 
-No check decides whether a headline says what its name says, or whether a `Check` exercises its
-claim. You judge both. The report helps: `(one instance)` marks a headline that quantifies over
-no input, so it states one case; `unused by the proof` marks a world claim a headline assumes but
-its proof does not use, which only you can drop; `Independent` counts the headlines whose kill
-shows the others do not imply them.
+No check decides whether a headline says what its name says, whether it is as general as it
+could be, or whether a `Check` exercises its claim. You judge those; the report helps.
 
 Every build prints the report:
 
@@ -69,6 +67,12 @@ Edit: ConstantFolding/CoreCode.lean ConstantFolding/WorldCode.lean ConstantFoldi
 Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean ...
 ```
 
+- `(not yet proved)`: the solution does not state the headline yet.
+- `(one instance)`: the headline quantifies over no input, so it states one case.
+- `unused by the proof`: the proof does not use this world claim, so the headline holds
+  without it; only you can drop it.
+- `Independent`: how many headlines have a kill showing that the others do not imply them.
+
 The [template](Examples/ConstantFolding) is a complete challenge.
 
 ## Setup
@@ -78,6 +82,12 @@ In `lakefile.lean`:
 ```lean
 package «my_app» where
   testDriver := "software_challenge/test_challenge"
+  leanOptions := #[
+    ⟨`autoImplicit, false⟩,
+    ⟨`linter.all, true⟩,
+    ⟨`linter.missingDocs, false⟩,
+    ⟨`linter.coreInternal, false⟩
+  ]
 
 require software_challenge from git "https://github.com/vincentqb/lean-software-challenge" @ "main"
 
@@ -96,7 +106,9 @@ target audit pkg : Unit := do
 ```
 
 A program adds a `lean_exe` whose root is a WorldCode module. `Challenge` stays out of the
-default targets because its holes share names with the solution's definitions. Commit
+default targets because its holes share names with the solution's definitions. `lake test` runs
+Lean's linters, and these options turn all of them on except `missingDocs`, which asks for doc
+comments, and `coreInternal`, which is meant for Lean's own repository. Commit
 `lean-toolchain` and `lake-manifest.json`, and add `/comparator.json` to `.gitignore`: the build
 writes it from `Challenge.lean`.
 
