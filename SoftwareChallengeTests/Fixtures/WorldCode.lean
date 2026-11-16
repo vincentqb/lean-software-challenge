@@ -23,6 +23,8 @@ theorem successor_grows (agrees : SuccAgrees nativeSucc) (n : Nat) : n < success
   simp only [successor, agrees n]
   omega
 
+theorem successor_positive (_agrees : SuccAgrees nativeSucc) (n : Nat) : 0 < n + 1 := Nat.succ_pos n
+
 theorem successor_correct (agrees : SuccAgrees nativeSucc) (n : Nat) : successor n = n + 1 := agrees n
 
 theorem successor_correct_rejects_identity :

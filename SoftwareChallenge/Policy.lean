@@ -352,6 +352,43 @@ theorem witnesses?_isSome_iff {replaceable : Name → Bool} {pattern target : Sh
   · rintro ⟨σ, closed, instantiates⟩
     exact witnesses?_complete (fun entry member _ => closed entry member) instantiates
 
+def negation (statement : Shape) : Shape := .app (.const ``Not []) statement
+
+def conjunction : List Shape → Shape
+  | [] => .const ``True []
+  | [statement] => statement
+  | statement :: rest => .app (.app (.const ``And []) statement) (conjunction rest)
+
+def independence (headline : Shape) (others : List Shape) : Shape :=
+  conjunction (headline.negation :: others)
+
+def independent (replaceable : Name → Bool) (headline : Shape) (others : List Shape) (kill : Shape) : Bool :=
+  !replaceable ``And && !replaceable ``Not && !replaceable ``True && !others.isEmpty &&
+    ((independence headline others).witnesses? replaceable kill).isSome
+
+private theorem subst_conjunction {replaceable : Name → Bool} {σ : Witnesses}
+    (fixed : replaceable ``And = false ∧ replaceable ``True = false) (statements : List Shape) :
+    (conjunction statements).subst replaceable σ =
+      conjunction (statements.map (·.subst replaceable σ)) := by
+  induction statements with
+  | nil => simp [conjunction, subst, fixed.2]
+  | cons statement rest ih =>
+    cases rest with
+    | nil => rfl
+    | cons next rest => simp only [conjunction, subst, fixed.1] at ih ⊢; simp only [ih, List.map_cons]; rfl
+
+theorem independent_sound {replaceable : Name → Bool} {headline kill : Shape} {others : List Shape}
+    (accepted : independent replaceable headline others kill = true) :
+    others ≠ [] ∧ ∃ σ : Witnesses, (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧
+      kill = conjunction ((headline.subst replaceable σ).negation :: others.map (·.subst replaceable σ)) := by
+  simp only [independent, Bool.and_eq_true, Bool.not_eq_true', List.isEmpty_eq_false_iff] at accepted
+  obtain ⟨⟨⟨⟨noAnd, noNot⟩, noTrue⟩, nonempty⟩, found⟩ := accepted
+  obtain ⟨σ, found⟩ := Option.isSome_iff_exists.mp found
+  obtain ⟨closed, instantiates⟩ := witnesses?_sound found
+  refine ⟨nonempty, σ, closed, ?_⟩
+  rw [← instantiates, independence, subst_conjunction ⟨noAnd, noTrue⟩]
+  simp [negation, subst, noNot]
+
 end Shape
 
 end SoftwareChallenge

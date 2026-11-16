@@ -119,6 +119,7 @@ structure Challenge where
   holes : Array Name := #[]
   filled : Array Name := #[]
   kills : Array (Name × Name) := #[]
+  independent : Array Name := #[]
   terminating : Array (Name × Name) := #[]
   misshapen : Array (Name × Name) := #[]
   unmarked : Array (Name × Name) := #[]
@@ -150,6 +151,7 @@ structure Assumption where
   claim : Name
   statement : String
   checks : Nat
+  unused : Bool := false
 
 structure Headline where
   name : Name
@@ -158,6 +160,8 @@ structure Headline where
   /-- Whether the solution states the headline. The audit rejects `sorry` in every role, so a
   stated headline is proved; `lake comparator` replays the proof. -/
   proved : Bool := true
+  oneInstance : Bool := false
+  unlinted : Option Name := none
 
 def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := none) :
     MetaM Headline := do
@@ -166,23 +170,30 @@ def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := 
     | some info, _ => pure (info.type, true)
     | none, some type => pure (type, false)
     | none, none => throwError "Headline {name} is not compiled"
+  let prover := if proved then (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module) else none
+  let record := prover.bind (premiseRecord? env · name)
   let (patterns, _, _) ← Meta.forallMetaTelescope type
   Meta.forallTelescope type fun binders _ => do
-    let mut assumptions := #[]
+    let mut assumptions : Array Assumption := #[]
     let mut unnamed := #[]
-    for (binder, pattern) in binders.zip patterns do
+    let mut oneInstance := true
+    for ((binder, pattern), index) in (binders.zip patterns).zipIdx do
       let statement ← Meta.inferType binder
       let claim := statement.getAppFn.constName
+      unless ← Meta.isProp statement do oneInstance := false
       if isWorldClaim env claim then
         let expected ← Meta.inferType pattern
         let checks ← (evidence.filter (·.claim == claim)).filterM fun found =>
           withoutModifyingState (Meta.isDefEq expected found.statement)
         let shown := toString (← Meta.ppExpr statement)
-        unless assumptions.any (·.statement == shown) do
-          assumptions := assumptions.push { claim, statement := shown, checks := checks.size }
+        let unused := record.any (·.contains (index, false))
+        match assumptions.findIdx? (·.statement == shown) with
+        | some known => assumptions := assumptions.modify known fun a => { a with unused := a.unused && unused }
+        | none => assumptions := assumptions.push { claim, statement := shown, checks := checks.size, unused }
       else if !statement.hasFVar && (← Meta.isProp statement) then
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
-    return { name, assumptions, unnamed, proved }
+    return { name, assumptions, unnamed, proved, oneInstance
+             unlinted := if record.isNone then prover else none }
 
 def toUniverse : Level → Universe
   | .zero => .zero
@@ -215,6 +226,13 @@ def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : B
     ((toShape headlineInfo.type).witnesses? replaceable.contains rejected).isSome
   | _, _ => false
 
+def independent (env : Environment) (replaceable : NameSet) (headlines : Array Name) (headline kill : Name) :
+    Bool :=
+  let shape := fun name => (env.find? name).map (toShape ·.type)
+  match shape headline, shape kill, (headlines.filter (· != headline)).mapM shape with
+  | some stated, some rejected, some others => stated.independent replaceable.contains others.toList rejected
+  | _, _, _ => false
+
 private def line (name : Name) : CoreM Nat :=
   return ((← findDeclarationRangesCore? name).map (·.range.pos.line)).getD 0
 
@@ -246,8 +264,10 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
     let replaceable := NameSet.ofList (holes ++ foreign).toList
     let headlines := found.headlines
     return { found with
-      misshapen := found.kills.filter fun (kill, headline) =>
-        !headlines.contains headline || !kills env replaceable headline kill
+      misshapen := found.kills.filter fun (kill, headline) => !headlines.contains headline ||
+        !(kills env replaceable headline kill || independent env replaceable headlines headline kill)
+      independent := headlines.filter fun headline => found.kills.any fun (kill, target) =>
+        target == headline && independent env replaceable headlines headline kill
       unmarked := headlines.flatMap fun headline =>
         (headlines.filter (kills env replaceable headline)).map (·, headline) }
 
@@ -372,6 +392,9 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
 
 def meaningful (facts : Facts) : Array String :=
   let challenge := facts.challenge
+  let stated := challenge.headlines.filterMap fun name => (challenge.statement? name).map (name, toShape ·)
+  (stated.mapIdx fun index (later, shape) => ((stated.extract 0 index).find? (·.2 == shape)).map fun (earlier, _) =>
+    s!"{later} states the same as {earlier}; ask the owner to drop one from Challenge.lean").filterMap id ++
   (challenge.headlines.filterMap fun headline =>
     if !(challenge.killsOf headline).isEmpty || challenge.unmarked.any (·.1 == headline) then none
     else match challenge.unmarked.find? (·.2 == headline) with
@@ -381,8 +404,9 @@ def meaningful (facts : Facts) : Array String :=
           state `¬` {headline} with its holes replaced by wrong ones and mark it `@[kills {headline}]`") ++
   (challenge.misshapen.map fun (kill, headline) =>
     if challenge.headlines.contains headline then s!"{kill}: marked `@[kills {headline}]`, but it is not \
-      `¬` {headline} with holes and WorldSpec foreign constants replaced by wrong ones; in Challenge.lean, \
-      restate it as that negation, or name the headline it rejects"
+      `¬` {headline} with holes and WorldSpec foreign constants replaced by wrong ones, nor that negation `∧` \
+      every other headline in Challenge.lean order under the same replacement; in Challenge.lean, \
+      restate it as one of these, or name the headline it rejects"
     else s!"{kill}: marked `@[kills {headline}]`, but {headline} is not a headline of Challenge.lean; \
       name the headline it rejects") ++
   (facts.holes.filter (!facts.mentioned.contains ·.1)).map fun (hole, _) =>
@@ -418,10 +442,13 @@ def lockErrors (locked current : Array (String × UInt64)) (edit : Array String)
     s!"{file} is recorded in owned.lock but missing; it decides what is claimed, so {restore}"
 
 def evidenced (facts : Facts) : Array String :=
-  facts.headlines.flatMap fun line => line.assumptions.filterMap fun assumption =>
-    if assumption.checks > 0 then none
-    else some s!"{line.name}: world claim {assumption.statement} has no Check; \
-      add `Check {assumption.statement} ...` to a WorldCode module"
+  facts.headlines.flatMap fun line => (line.unlinted.map fun module =>
+    s!"{line.name}: the unused-premise linter did not run on {module}, which proves it; \
+      add `meta import SoftwareChallenge` to {module}").toArray ++
+    line.assumptions.filterMap fun assumption =>
+      if assumption.checks > 0 then none
+      else some s!"{line.name}: world claim {assumption.statement} has no Check; \
+        add `Check {assumption.statement} ...` to a WorldCode module"
 
 def challengeImports (file : System.FilePath) : IO (Array Name) := do
   return (← parseImports' (← IO.FS.readFile file) file.toString).imports.map (·.module)
@@ -458,13 +485,15 @@ def shorten (shared : Name) (name : Name) : String :=
     toString (name.replacePrefix shared .anonymous)
   else toString name
 
-private def describe (short : Name → String) (line : Headline) : String :=
+def describe (short : Name → String) (line : Headline) : String :=
   let assumed := line.assumptions.map fun assumption =>
     let label := if (line.assumptions.filter (·.claim == assumption.claim)).size > 1 then assumption.statement
       else short assumption.claim
-    s!"{label} ({assumption.checks} {if assumption.checks == 1 then "check" else "checks"})"
+    let unused := if assumption.unused then ", unused by the proof" else ""
+    s!"{label} ({assumption.checks} {if assumption.checks == 1 then "check" else "checks"}{unused})"
   let stated := if assumed.isEmpty then short line.name
     else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
+  let stated := if line.oneInstance then s!"{stated}  (one instance)" else stated
   if line.proved then stated else s!"{stated}  (not yet proved)"
 
 private def gather (project : Project) (catalog : Array Name) (challengeFile : String)
@@ -521,6 +550,8 @@ private def audit (executable : Bool) (challengeFile challengeOLean : String) (m
   for line in facts.headlines do IO.println (describe short line)
   let proved := (facts.headlines.filter (·.proved)).size
   IO.println s!"Proved: {proved} of {facts.headlines.size} headlines"
+  let independent := facts.challenge.independent.size
+  if independent > 0 then IO.println s!"Independent: {independent} of {facts.headlines.size} headlines"
   for t in facts.terminations do IO.println s!"{short t.definition} terminates via {short t.headline}"
   IO.println files
   return 0

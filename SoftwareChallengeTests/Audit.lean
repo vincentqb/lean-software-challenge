@@ -50,6 +50,9 @@ private def expectedConfig : String := "{
     \"SoftwareChallengeTests.Fixtures.Challenge.double_even\",
     \"SoftwareChallengeTests.Fixtures.Challenge.double_even_rejects_identity\",
     \"SoftwareChallengeTests.Fixtures.Challenge.double_even_rejects_nothing\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_even_independent\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_even_partly_independent\",
+    \"SoftwareChallengeTests.Fixtures.Challenge.double_even_independent_mixed\",
     \"SoftwareChallengeTests.Fixtures.Challenge.triple_rejects_nothing\",
     \"SoftwareChallengeTests.Fixtures.Challenge.double_zero\",
     \"SoftwareChallengeTests.Fixtures.Challenge.double_one\",
@@ -212,6 +215,28 @@ run_cmd Elab.Command.liftTermElabM do
   unless !unproved.proved && unproved.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
     throwError "A headline the solution does not state was not read from its Challenge statement"
   unless world.proved do throwError "A headline the solution states was reported unproved"
+  let single ← Audit.headline evidence (fixture `identity_three)
+  let unnamed ← Audit.headline evidence (fixture `uses_unnamed)
+  unless single.oneInstance && unnamed.oneInstance && !world.oneInstance && !precondition.oneInstance do
+    throwError "A headline was misread as quantifying over inputs, or as not"
+  unless (Audit.describe toString single).endsWith "  (one instance)" &&
+      !contains (Audit.describe toString world) "one instance" do
+    throwError "The report misstated one instance: {Audit.describe toString single}"
+  let ignored ← Audit.headline evidence (fixture `successor_positive)
+  let correct ← Audit.headline evidence (fixture `successor_correct)
+  unless ignored.assumptions.map (·.unused) == #[true] && correct.assumptions.map (·.unused) == #[false] &&
+      world.assumptions.map (·.unused) == #[false] do
+    throwError "The premise linter misread which proofs use their world claim"
+  unless contains (Audit.describe toString ignored) "assumes SoftwareChallengeTests.Fixtures.SuccAgrees \
+      (2 checks, unused by the proof)" && !contains (Audit.describe toString correct) "unused" do
+    throwError "The report misstated an unused premise: {Audit.describe toString ignored}"
+  let unlinted ← Audit.headline evidence countdownTerminates
+  unless unlinted.unlinted == some (fixture `Fixpoint) && world.unlinted.isNone do
+    throwError "A headline proved without the premise linter was not found: {unlinted.unlinted}"
+  expect (Audit.evidenced { headlines := #[unlinted, world] }) "countdown_terminates"
+    "add `meta import SoftwareChallenge` to SoftwareChallengeTests.Fixtures.Fixpoint"
+  if (Audit.evidenced { headlines := #[world] }).any (contains · "linter") then
+    throwError "A headline proved with the premise linter was rejected"
   let headlines ← #[fixture `uses_unchecked, fixture `uses_live, fixture `uses_unnamed].mapM
     fun name => Audit.headline evidence name
   let facts : Audit.Facts := {
@@ -247,6 +272,28 @@ run_cmd Elab.Command.liftTermElabM do
   if Audit.kills env (NameSet.empty.insert (fixture `successor)) (fixture `successor_correct)
       (fixture `successor_correct_rejects_identity) then
     throwError "A kill that replaces a constant that is not replaceable counted"
+  let statements := fun (names : Array Name) => names.mapM fun name => return (name, (← getConstInfo name).type)
+  let restated : Audit.Challenge := {
+    theorems := #[fixture `identity_fixed, fixture `identity_fixed_again, fixture `identity_three]
+    statements := ← statements #[fixture `identity_fixed, fixture `identity_fixed_again, fixture `identity_three] }
+  let repeated := Audit.meaningful { challenge := restated }
+  expect repeated "identity_fixed_again states the same as SoftwareChallengeTests.Fixtures.identity_fixed;"
+    "ask the owner to drop one from Challenge.lean"
+  if repeated.any (contains · "identity_three states") then
+    throwError "A headline with a different statement was reported as a duplicate: {repeated}"
+  let order := #[fixture `identity_fixed, fixture `identity_twice]
+  let independently := fixture `identity_fixed_rejects_independently
+  unless Audit.independent env replaceable order (fixture `identity_fixed) independently do
+    throwError "An independence kill was not recognised"
+  if Audit.kills env replaceable (fixture `identity_fixed) independently then
+    throwError "An independence kill was read as a plain kill"
+  if Audit.independent env replaceable (order.push (fixture `identity_three)) (fixture `identity_fixed) independently then
+    throwError "An independence kill missing a headline counted"
+  if Audit.independent env replaceable order (fixture `identity_fixed) (fixture `identity_fixed_rejects_independently_mixed) then
+    throwError "An independence kill with a different witness in one conjunct counted"
+  if Audit.independent env replaceable #[fixture `identity_fixed] (fixture `identity_fixed)
+      (fixture `identity_fixed_rejects_successor) then
+    throwError "A plain kill of the only headline counted as independent"
   let killed : Audit.Challenge := {
     theorems := #[fixture `identity_fixed, fixture `identity_fixed_rejects_successor, fixture `bounded]
     kills := #[(fixture `identity_fixed_rejects_successor, fixture `identity_fixed)] }
@@ -279,7 +326,8 @@ run_cmd Elab.Command.liftTermElabM do
   let marked ← Audit.readChallenge project (fixture `Challenge) (← findOLean (fixture `Challenge))
   let member := fun (name : Name) => fixture (`Challenge ++ name)
   unless marked.theorems == #[member `double_even, member `double_even_rejects_identity,
-      member `double_even_rejects_nothing, member `triple_rejects_nothing, member `double_zero, member `double_one,
+      member `double_even_rejects_nothing, member `double_even_independent, member `double_even_partly_independent,
+      member `double_even_independent_mixed, member `triple_rejects_nothing, member `double_zero, member `double_one,
       member `double_one_rejects_one] &&
       marked.holes == #[member `double] && marked.filled == #[member `triple] &&
       marked.terminating == #[(member `triple, member `double_zero)] do
@@ -295,6 +343,12 @@ run_cmd Elab.Command.liftTermElabM do
     throwError "An unmarked kill was reported as a headline without a kill: {misread}"
   expect misread "double_even_rejects_nothing" "but it is not `¬` SoftwareChallengeTests.Fixtures.Challenge.double_even"
   expect misread "triple_rejects_nothing" "is not a headline of Challenge.lean"
+  for kill in ["double_even_partly_independent", "double_even_independent_mixed"] do
+    expect misread kill "nor that negation `∧` every other headline"
+  if misread.any (contains · "double_even_independent:") then
+    throwError "An independence kill was rejected: {misread}"
+  unless marked.independent == #[member `double_even] do
+    throwError "Independence was misread: {marked.independent}"
   if misread.any fun error => contains error "double_even:" || contains error "rejects_identity" then
     throwError "A marked kill was rejected: {misread}"
   expect (Audit.sound project markedFacts) "triple" "but it is not a definition hole"

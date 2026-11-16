@@ -8,9 +8,12 @@ about the code that runs, and on which assumptions. Requires **Lean 4.35.0**.
 
 You write the statement of the challenge, then review only changes to it.
 
-- `Challenge.lean`: the headlines, theorems about the program stated with `sorry`; a hole,
-  `def name : T := sorry`, for each function a headline mentions; and for each headline a kill,
-  `¬` the headline with its holes replaced by a wrong implementation, marked `@[kills headline]`.
+- `Challenge.lean`: the headlines, theorems about the program stated with `sorry`, no two the
+  same; a hole, `def name : T := sorry`, for each function a headline mentions; and for each
+  headline a kill, `¬` the headline with its holes replaced by a wrong implementation, marked
+  `@[kills headline]`. A kill may instead state `¬ H ∧ H₂ ∧ … ∧ Hₙ`: the negated headline, then
+  every other headline in file order, all with the same replacement. The headline is then
+  independent: a wrong implementation fails it and passes all the others.
 - `MyApp/CoreSpec.lean`: the types and reference definitions the headlines are stated in.
 - `MyApp/WorldSpec.lean`: each foreign function the program calls, as an `@[extern] opaque`
   declaration, and a `WorldClaim` for each assumption about one. A world claim's doc comment
@@ -27,7 +30,8 @@ Agents write everything else:
 - `MyApp/CoreCode.lean`: pure code, and lemmas about it.
 - `MyApp/WorldCode.lean`: IO, calls to foreign functions, `main`, and at least one `Check` of
   each world claim a headline assumes.
-- `MyApp/Solution.lean`: the proofs of the headlines and kills.
+- `MyApp/Solution.lean`: the proofs of the headlines and kills. It has
+  `meta import SoftwareChallenge`, whose linter records which world claims each proof uses.
 
 Holes are defined in CoreCode or WorldCode. Once the statements exist, the code and the proofs
 can progress independently, headline by headline. A headline that is not proved yet stays out of
@@ -40,21 +44,27 @@ When `lake test` passes, or `grade` accepts a candidate:
 - Every headline is proved, and `lake comparator` replays each proof through the kernel.
 - The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, foreign code
   enters only through WorldSpec, CoreCode never calls it, and `main` reaches every hole.
-- Every headline rejects a wrong implementation: each kill is proved.
+- Every headline rejects a wrong implementation: each kill is proved. No two headlines state the
+  same, up to binder names.
 - Every headline assumes only the world claims it takes as hypotheses, and a `Check` tested each
   of them against the real foreign code.
 - The statement did not change: no owned file differs from `owned.lock`.
 
 No check decides whether a headline says what its name says, or whether a `Check` exercises its
-claim. You judge both.
+claim. You judge both. The report helps: `(one instance)` marks a headline that quantifies over
+no input, so it states one case; `unused by the proof` marks a world claim a headline assumes but
+its proof does not use, which only you can drop; `Independent` counts the headlines whose kill
+shows the others do not imply them.
 
 Every build prints the report:
 
 ```
 fold_preserves_meaning
 fold_idempotent  (not yet proved)
-output_correct  assumes AddAgrees (2 checks)
-Proved: 2 of 3 headlines
+fold_two_plus_three  (one instance)
+output_correct  assumes AddAgrees (2 checks, unused by the proof)
+Proved: 3 of 4 headlines
+Independent: 1 of 4 headlines
 Edit: ConstantFolding/CoreCode.lean ConstantFolding/WorldCode.lean ConstantFolding/Solution.lean
 Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean ...
 ```

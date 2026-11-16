@@ -20,6 +20,8 @@ theorem bounded (n : Nat) (h : n < 5) : n < 6 := by omega
 
 theorem identity_fixed (n : Nat) : identity n = n := by simp [identity, helper]
 
+theorem identity_fixed_again (m : Nat) : identity m = m := identity_fixed m
+
 theorem identity_fixed_rejects_successor : ¬ ∀ n : Nat, (fun n => n + 1) n = n := by
   intro h
   exact absurd (h 0) (by decide)
@@ -42,6 +44,14 @@ theorem identity_twice_rejects_successor :
     ¬ ∀ n : Nat, (fun n => n + 1) ((fun n => n + 1) n) = (fun n => n + 1) n := by
   intro h
   exact absurd (h 0) (by decide)
+
+theorem identity_fixed_rejects_independently :
+    (¬ ∀ n : Nat, (fun _ => 0) n = n) ∧ ∀ n : Nat, (fun _ => 0) ((fun _ => 0) n) = (fun _ => 0) n :=
+  ⟨fun h => absurd (h 1) (by decide), fun _ => rfl⟩
+
+theorem identity_fixed_rejects_independently_mixed :
+    (¬ ∀ n : Nat, (fun _ => 0) n = n) ∧ ∀ n : Nat, id (id n) = id n :=
+  ⟨fun h => absurd (h 1) (by decide), fun _ => rfl⟩
 
 theorem identity_twice_rejects_mixed : ¬ ∀ n : Nat, (fun n => n + 1) (id n) = id n := by
   intro h

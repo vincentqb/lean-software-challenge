@@ -1,6 +1,7 @@
 module
 
 public import ConstantFolding.WorldCode
+meta import SoftwareChallenge
 
 public section
 
