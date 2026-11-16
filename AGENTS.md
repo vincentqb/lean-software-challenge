@@ -1,8 +1,8 @@
 # Working on Lean Software Challenge
 
-The library is the audit, the commands (`WorldClaim`, `Check`, `@[kills]`, `@[terminates]`), the
-generated `comparator.json`, and `grade`. `README.md` states what an accepted solution guarantees;
-keep it true, and change it in the same commit as any behavior it describes.
+The library is the audit, the commands (`WorldClaim`, `Check`, `@[kills]`, `@[terminates]`,
+`@[witness]`), the generated `comparator.json`, and `grade`. `README.md` states what an accepted
+solution guarantees; keep it true, and change it in the same commit as any behavior it describes.
 
 In `Examples/ConstantFolding/`, the template, do not edit `Challenge.lean`, `owned.lock`,
 `ConstantFolding/CoreSpec.lean`, or `ConstantFolding/WorldSpec.lean`; propose changes instead.

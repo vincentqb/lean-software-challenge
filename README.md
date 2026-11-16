@@ -21,6 +21,12 @@ To show a headline independent of the others, state its kill as `¬ H ∧ H₂ �
 headline, then every other headline in file order, all with the same replacement. Its wrong
 implementation is then close to a correct one, and it is public.
 
+A headline's preconditions are its hypotheses that are not world claims. When one mentions a hole
+or a foreign function, no kill shows that some input meets it, so state a witness that one does:
+`∃` the inputs the preconditions use, in headline order, of the conjunction of the
+preconditions, with the holes kept, marked `@[witness headline]`. If the headline assumes world
+claims that mention no input, the witness assumes them first.
+
 The first build records a hash of each of these files in `owned.lock`. After that, a build fails
 if one of them changes. To record a new statement, delete `owned.lock` and build.
 
@@ -31,7 +37,7 @@ Agents write everything else:
 - `MyApp/CoreCode.lean`: pure code, and lemmas about it.
 - `MyApp/WorldCode.lean`: IO, calls to foreign functions, `main`, and at least one `Check` of
   each world claim a headline assumes.
-- `MyApp/Solution.lean`: the proofs of the headlines and kills. It has
+- `MyApp/Solution.lean`: the proofs of the headlines, kills, and witnesses. It has
   `meta import SoftwareChallenge`, whose linter records which world claims each proof uses.
 
 Holes are defined in CoreCode or WorldCode. Once the statements exist, the code and the proofs
@@ -46,6 +52,8 @@ When `lake test` passes, or `grade` accepts a candidate:
 - The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, foreign code
   enters only through WorldSpec, CoreCode never calls it, and `main` reaches every hole.
 - Every headline rejects a wrong implementation: each kill is proved.
+- Every headline can apply: some input meets its preconditions. Its kill shows this for
+  preconditions that mention no hole or foreign function, and its proved witness for the others.
 - No two headlines state the same, up to binder names.
 - Every headline assumes only the world claims it takes as hypotheses, and a `Check` tested each
   of them against the real foreign code.
@@ -68,6 +76,7 @@ Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean
 ```
 
 - `(not yet proved)`: the solution does not state the headline yet.
+- `(witness not yet proved)`: the solution does not state the headline's witness yet.
 - `(one instance)`: the headline quantifies over no input, so it states one case.
 - `unused by the proof`: the proof does not use this world claim, so the headline holds
   without it; only you can drop it.

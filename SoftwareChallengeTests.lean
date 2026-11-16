@@ -2,3 +2,4 @@ module
 
 import SoftwareChallengeTests.Commands
 import SoftwareChallengeTests.Audit
+import SoftwareChallengeTests.Policy

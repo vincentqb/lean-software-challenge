@@ -113,22 +113,36 @@ private def withEnvironment {α : Type} (modules : Array Name) (action : CoreM �
 
 def challengeModule : Name := `Challenge
 
+structure Preconditions where
+  headline : Name
+  expected : String
+  premises : List Shape
+  inputs : List (Universe × Shape)
+  preconditions : List Shape
+  mentions : Option Name
+
 structure Challenge where
   theorems : Array Name := #[]
   statements : Array (Name × Expr) := #[]
   holes : Array Name := #[]
   filled : Array Name := #[]
   kills : Array (Name × Name) := #[]
+  witnesses : Array (Name × Name) := #[]
+  preconditioned : Array Preconditions := #[]
+  misshapenWitnesses : Array (Name × Name) := #[]
   independent : Array Name := #[]
   terminating : Array (Name × Name) := #[]
   misshapen : Array (Name × Name) := #[]
   unmarked : Array (Name × Name) := #[]
 
 def Challenge.headlines (challenge : Challenge) : Array Name :=
-  challenge.theorems.filter fun name => !challenge.kills.any (·.1 == name)
+  challenge.theorems.filter fun name => !challenge.kills.any (·.1 == name) && !challenge.witnesses.any (·.1 == name)
 
 def Challenge.killsOf (challenge : Challenge) (headline : Name) : Array Name :=
   (challenge.kills.filter (·.2 == headline)).map (·.1)
+
+def Challenge.witnessesOf (challenge : Challenge) (headline : Name) : Array Name :=
+  (challenge.witnesses.filter (·.2 == headline)).map (·.1)
 
 def Challenge.statement? (challenge : Challenge) (name : Name) : Option Expr :=
   (challenge.statements.find? (·.1 == name)).map (·.2)
@@ -153,18 +167,33 @@ structure Assumption where
   checks : Nat
   unused : Bool := false
 
+structure Unmatched where
+  premise : String
+  module : Option Name
+  line : Nat
+
 structure Headline where
   name : Name
   assumptions : Array Assumption
   unnamed : Array String
+  unmatched : Array Unmatched := #[]
   /-- Whether the solution states the headline. The audit rejects `sorry` in every role, so a
   stated headline is proved; `lake comparator` replays the proof. -/
   proved : Bool := true
   oneInstance : Bool := false
   unlinted : Option Name := none
+  witnessProved : Bool := true
 
-def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := none) :
-    MetaM Headline := do
+def matchBudget : Nat := 200000
+
+def matchWithin (budget : Nat) (expected statement : Expr) : MetaM (Option Bool) :=
+  withoutModifyingState <| tryCatchRuntimeEx
+    (some <$> withCurrHeartbeats (withTheReader Core.Context ({ · with maxHeartbeats := budget * 1000 })
+      (Meta.isDefEq expected statement)))
+    fun _ => pure none
+
+def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := none)
+    (budget : Nat := matchBudget) : MetaM Headline := do
   let env ← getEnv
   let (type, proved) ← match env.find? name, stated with
     | some info, _ => pure (info.type, true)
@@ -176,6 +205,7 @@ def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := 
   Meta.forallTelescope type fun binders _ => do
     let mut assumptions : Array Assumption := #[]
     let mut unnamed := #[]
+    let mut unmatched := #[]
     let mut oneInstance := true
     for ((binder, pattern), index) in (binders.zip patterns).zipIdx do
       let statement ← Meta.inferType binder
@@ -183,16 +213,22 @@ def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := 
       unless ← Meta.isProp statement do oneInstance := false
       if isWorldClaim env claim then
         let expected ← Meta.inferType pattern
-        let checks ← (evidence.filter (·.claim == claim)).filterM fun found =>
-          withoutModifyingState (Meta.isDefEq expected found.statement)
         let shown := toString (← Meta.ppExpr statement)
+        let mut checks := 0
+        for found in evidence.filter (·.claim == claim) do
+          match ← matchWithin budget expected found.statement with
+          | some true => checks := checks + 1
+          | some false => pure ()
+          | none =>
+            let module := (env.getModuleIdxFor? found.source).map (env.header.modules[·.toNat]!.module)
+            unmatched := unmatched.push { premise := shown, module, line := found.line }
         let unused := record.any (·.contains (index, false))
         match assumptions.findIdx? (·.statement == shown) with
         | some known => assumptions := assumptions.modify known fun a => { a with unused := a.unused && unused }
-        | none => assumptions := assumptions.push { claim, statement := shown, checks := checks.size, unused }
+        | none => assumptions := assumptions.push { claim, statement := shown, checks, unused }
       else if !statement.hasFVar && (← Meta.isProp statement) then
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
-    return { name, assumptions, unnamed, proved, oneInstance
+    return { name, assumptions, unnamed, unmatched, proved, oneInstance
              unlinted := if record.isNone then prover else none }
 
 def toUniverse : Level → Universe
@@ -225,6 +261,46 @@ def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : B
   | some headlineInfo, some (.app (.const ``Not _) rejected) =>
     ((toShape headlineInfo.type).witnesses? replaceable.contains rejected).isSome
   | _, _ => false
+
+private def normalized (expr : Expr) : Expr := expr.replaceLevel (some ·.normalize)
+
+def preconditionsOf (replaceable : NameSet) (headline : Name) (type : Expr) : MetaM (Option Preconditions) :=
+  Meta.forallTelescope type fun binders _ => do
+    let env ← getEnv
+    let mut inputs := #[]
+    let mut premises := #[]
+    let mut preconditions := #[]
+    for binder in binders do
+      let statement ← Meta.inferType binder
+      if !(← Meta.isProp statement) then inputs := inputs.push binder
+      else if isWorldClaim env statement.getAppFn.constName then
+        unless statement.hasFVar do premises := premises.push statement
+      else preconditions := preconditions.push statement
+    if preconditions.isEmpty then return none
+    let mut used := #[]
+    for input in inputs.reverse do
+      let mentioned := fun (expr : Expr) => expr.containsFVar input.fvarId!
+      if preconditions.any mentioned || (← used.anyM fun later => return mentioned (← Meta.inferType later)) then
+        used := used.push input
+    used := used.reverse
+    let mut expected := mkAndN preconditions.toList
+    let mut quantified := #[]
+    for (input, index) in used.zipIdx.reverse do
+      let type ← Meta.inferType input
+      let level := (← Meta.getLevel type).normalize
+      expected := mkApp2 (.const ``Exists [level]) type (← Meta.mkLambdaFVars #[input] expected)
+      quantified := quantified.push (toUniverse level, toShape (normalized (type.abstract (used.extract 0 index))))
+    expected := premises.foldr (fun premise body => .forallE `_ premise body .default) expected
+    return some {
+      headline
+      expected := toString (← Meta.ppExpr expected)
+      premises := (premises.map (toShape ∘ normalized)).toList
+      inputs := quantified.reverse.toList
+      preconditions := (preconditions.map fun statement => toShape (normalized (statement.abstract used))).toList
+      mentions := preconditions.findSome? fun statement => statement.getUsedConstants.find? replaceable.contains }
+
+def Preconditions.witnessedBy (preconditions : Preconditions) (witness : Expr) : Bool :=
+  Shape.applies preconditions.premises preconditions.inputs preconditions.preconditions (toShape (normalized witness))
 
 def independent (env : Environment) (replaceable : NameSet) (headlines : Array Name) (headline kill : Name) :
     Bool :=
@@ -259,11 +335,22 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
       statements := (declared.filter (·.isTheorem)).map fun info => (info.name, info.type)
       filled := (declared.filter fun info => !info.isTheorem && !usesSorry info).map (·.name)
       kills := PersistentEnvExtension.getModuleEntries killsExt env index
+      witnesses := PersistentEnvExtension.getModuleEntries witnessExt env index
       terminating := (PersistentEnvExtension.getModuleEntries terminatesExt env index).map
         fun (headline, hole) => (hole, headline) }
     let replaceable := NameSet.ofList (holes ++ foreign).toList
     let headlines := found.headlines
+    let preconditioned ← Meta.MetaM.run' <| headlines.filterMapM fun headline =>
+      match env.find? headline with
+      | some info => preconditionsOf replaceable headline info.type
+      | none => pure none
+    let witnessed := fun (witness headline : Name) =>
+      match preconditioned.find? (·.headline == headline), env.find? witness with
+      | some preconditions, some info => preconditions.witnessedBy info.type
+      | _, _ => false
     return { found with
+      preconditioned
+      misshapenWitnesses := found.witnesses.filter fun (witness, headline) => !witnessed witness headline
       misshapen := found.kills.filter fun (kill, headline) => !headlines.contains headline ||
         !(kills env replaceable headline kill || independent env replaceable headlines headline kill)
       independent := headlines.filter fun headline => found.kills.any fun (kill, target) =>
@@ -409,6 +496,21 @@ def meaningful (facts : Facts) : Array String :=
       restate it as one of these, or name the headline it rejects"
     else s!"{kill}: marked `@[kills {headline}]`, but {headline} is not a headline of Challenge.lean; \
       name the headline it rejects") ++
+  (challenge.preconditioned.filterMap fun preconditions => preconditions.mentions.bind fun constant =>
+    if !(challenge.witnessesOf preconditions.headline).isEmpty then none
+    else some s!"{preconditions.headline}: a precondition mentions {constant}, so no kill shows that some input \
+      meets it; in Challenge.lean, state `{preconditions.expected}` and mark it \
+      `@[witness {preconditions.headline}]`") ++
+  (challenge.misshapenWitnesses.map fun (witness, headline) =>
+    let marked := s!"{witness}: marked `@[witness {headline}]`, but"
+    match challenge.preconditioned.find? (·.headline == headline) with
+    | some preconditions => s!"{marked} it is not `{preconditions.expected}`: the world claims of {headline} \
+        that mention no input, then `∃` the inputs its preconditions use, in order, of their conjunction, \
+        with holes kept; in Challenge.lean, restate it as that"
+    | none => if challenge.headlines.contains headline then s!"{marked} {headline} has no precondition to \
+        meet; drop the witness from Challenge.lean"
+      else s!"{marked} {headline} is not a headline of Challenge.lean; name the headline whose \
+        preconditions it meets") ++
   (facts.holes.filter (!facts.mentioned.contains ·.1)).map fun (hole, _) =>
     s!"{hole}: no headline mentions this hole; state one in Challenge.lean, or drop the hole"
 
@@ -445,6 +547,11 @@ def evidenced (facts : Facts) : Array String :=
   facts.headlines.flatMap fun line => (line.unlinted.map fun module =>
     s!"{line.name}: the unused-premise linter did not run on {module}, which proves it; \
       add `meta import SoftwareChallenge` to {module}").toArray ++
+    line.unmatched.map (fun unmatched =>
+      s!"{line.name}: cannot match {unmatched.premise} against the Check at \
+        {(unmatched.module.map toString).getD "an unknown module"}, line {unmatched.line}: unifying them does not \
+        finish within the audit's budget of {matchBudget} heartbeats; state that Check with the arguments \
+        of the premise") ++
     line.assumptions.filterMap fun assumption =>
       if assumption.checks > 0 then none
       else some s!"{line.name}: world claim {assumption.statement} has no Check; \
@@ -494,7 +601,9 @@ def describe (short : Name → String) (line : Headline) : String :=
   let stated := if assumed.isEmpty then short line.name
     else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
   let stated := if line.oneInstance then s!"{stated}  (one instance)" else stated
-  if line.proved then stated else s!"{stated}  (not yet proved)"
+  if !line.proved then s!"{stated}  (not yet proved)"
+  else if !line.witnessProved then s!"{stated}  (witness not yet proved)"
+  else stated
 
 private def gather (project : Project) (catalog : Array Name) (challengeFile : String)
     (challengeOLean : System.FilePath) : IO Facts := do
@@ -508,7 +617,8 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
     let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any catalog.contains
     return {
       inventory, challenge
-      headlines := ← challenge.headlines.mapM fun name => headline evidence name (challenge.statement? name)
+      headlines := ← challenge.headlines.mapM fun name => return { ← headline evidence name (challenge.statement? name)
+        with witnessProved := (challenge.witnessesOf name).all env.contains }
       mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
         (((env.find? name).map (·.type) <|> challenge.statement? name).map (·.getUsedConstants)).getD #[]).toList
       holes := challenge.holes.map fun hole => (hole, moduleOf hole)

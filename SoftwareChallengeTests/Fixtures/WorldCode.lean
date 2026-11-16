@@ -47,4 +47,8 @@ Check WrongSuccAgrees : wrongSucc 1 = 1 + 1
 
 Check WrongSuccAgrees := throw (IO.userError "ran during the build")
 
+theorem succ_at_leaves (h : SuccAt (leafSum 30 1)) : nativeSucc (leafSum 30 1) = leafSum 30 1 + 1 := h
+
+Check SuccAt 0 : nativeSucc 0 = 0 + 1
+
 end SoftwareChallengeTests.Fixtures

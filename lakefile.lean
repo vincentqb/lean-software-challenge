@@ -46,12 +46,12 @@ script test_challenge do
     [s!"run_cmd SoftwareChallenge.runChecks #[{", ".intercalate (modules.map (s!"`{·}")).toList}]", ""]
   let code ← run #["lean", runner.toString]
   unless code == 0 do return code
-  -- The comparator needs every headline proved; name the ones that are not instead of letting it
-  -- fail on a constant the solution does not declare.
+  -- The comparator needs every headline and witness proved; name the ones that are not instead of
+  -- letting it fail on a constant the solution does not declare.
   let report ← IO.FS.readFile (pkg.buildDir / "softwareChallenge.txt")
-  let unproved := (report.splitOn "\n").filter (·.endsWith "(not yet proved)")
+  let unproved := (report.splitOn "\n").filter (·.endsWith "not yet proved)")
   unless unproved.isEmpty do
-    IO.eprintln s!"{unproved.length} headlines are not yet proved, so the solution is not accepted:"
+    IO.eprintln s!"{unproved.length} headlines or their witnesses are not yet proved, so the solution is not accepted:"
     for line in unproved do IO.eprintln s!"  {line}"
     return 1
   run #["comparator"]

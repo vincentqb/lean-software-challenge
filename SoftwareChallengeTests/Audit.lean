@@ -8,6 +8,7 @@ import all SoftwareChallengeTests.Fixtures.Sibling
 import all SoftwareChallengeTests.Fixtures.Rejected
 import all SoftwareChallengeTests.Fixtures.Fixpoint
 import SoftwareChallengeTests.Fixtures.Challenge
+import SoftwareChallengeTests.Fixtures.WitnessChallenge
 meta import SoftwareChallenge.Audit
 meta import SoftwareChallenge
 
@@ -363,6 +364,47 @@ run_cmd Elab.Command.liftTermElabM do
       throwError "A Solution error was unclear: {error}"
   let generated := Audit.comparatorConfig `A.Solution marked
   unless generated == expectedConfig do throwError "Generated comparator.json:\n{generated}"
+
+run_cmd Elab.Command.liftTermElabM do
+  let member := fun (name : Name) => fixture (`WitnessChallenge ++ name)
+  let read ← Audit.readChallenge project (fixture `WitnessChallenge) (← findOLean (fixture `WitnessChallenge))
+  unless read.headlines == #[member `double_halves, member `double_positive, member `double_between,
+      member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero] do
+    throwError "A witness was read as a headline: {read.headlines}"
+  unless read.misshapenWitnesses.map (·.1) == #[member `double_positive_applies_unused,
+      member `double_positive_applies_replaced, member `double_zero_applies, member `double_applies] do
+    throwError "A witness was misjudged: {read.misshapenWitnesses}"
+  let errors := Audit.meaningful { challenge := read }
+  expect errors "double_halves: a precondition mentions SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
+    "state `∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4` and mark it \
+      `@[witness SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves]`"
+  for witness in ["double_positive_applies_unused", "double_positive_applies_replaced"] do
+    expect errors witness "but it is not `∃ n, 0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double n`"
+  expect errors "double_zero_applies" "has no precondition to meet"
+  expect errors "double_applies" "is not a headline of Challenge.lean"
+  if errors.any fun error => ["double_small:", "double_positive:", "double_between:", "double_lengths:",
+      "succ_hits_one:"].any fun headline => contains error headline && contains error "precondition" then
+    throwError "A headline with a witness, or with preconditions the solution cannot change, was rejected: {errors}"
+  unless contains (Audit.comparatorConfig `A.Solution read) (toString (member `double_positive_applies)) do
+    throwError "A witness is missing from comparator.json"
+  let pick := fixture `pick
+  let some vacuous ← Audit.preconditionsOf (NameSet.empty.insert pick) (fixture `pick_one_zero)
+      (← getConstInfo (fixture `pick_one_zero)).type
+    | throwError "The precondition of a vacuous headline was not read"
+  let refuted := Audit.toShape (← getConstInfo (fixture `pick_one_zero_has_no_witness)).type
+  unless vacuous.mentions == some pick &&
+      refuted == (Shape.applicability vacuous.premises vacuous.inputs vacuous.preconditions).negation do
+    throwError "The witness a vacuous headline needs is not the one its solution refutes"
+  expect (Audit.meaningful { challenge := { theorems := #[fixture `pick_one_zero], preconditioned := #[vacuous] } })
+    "pick_one_zero: a precondition mentions SoftwareChallengeTests.Fixtures.pick" "mark it `@[witness"
+  let pending : Audit.Headline := { name := `h, assumptions := #[], unnamed := #[], witnessProved := false }
+  unless (Audit.describe toString pending).endsWith "  (witness not yet proved)" &&
+      (Audit.describe toString { pending with proved := false }).endsWith "  (not yet proved)" do
+    throwError "The report misstated an unproved witness: {Audit.describe toString pending}"
+  let heavy ← Audit.headline (allEvidence (← getEnv)) (fixture `succ_at_leaves)
+  unless heavy.assumptions.map (·.checks) == #[0] do throwError "A Check that cannot be matched counted"
+  expect (Audit.evidenced { headlines := #[heavy] }) "succ_at_leaves: cannot match Fixtures.SuccAt \
+    (Fixtures.leafSum 30 1) against the Check at SoftwareChallengeTests.Fixtures.WorldCode, line 52" "budget"
 
 end
 

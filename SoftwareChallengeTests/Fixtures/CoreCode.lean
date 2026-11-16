@@ -71,6 +71,12 @@ theorem identity_succ_rejects_successor :
 
 theorem uses_unnamed (h : 1 = 2) : 1 = 2 := h
 
+def pick (_ : Nat) : Nat := 0
+
+theorem pick_one_zero (n : Nat) (h : pick n = 1) : n = 0 := by simp [pick] at h
+
+theorem pick_one_zero_has_no_witness : ¬ ∃ n, pick n = 1 := by simp [pick]
+
 /-- A claim outside a WorldSpec module. Declaring it here falsifies the audit. -/
 WorldClaim CoreClaim := 1 = 1
 
