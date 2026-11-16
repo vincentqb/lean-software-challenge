@@ -60,10 +60,65 @@ script test_challenge do
   let lake := (← getLake).toString
   let root := (← getRootPackage).dir
   for (args, cwd) in [(#["build"], root), (#["lint"], root), (#["build", "SoftwareChallengeTests"], root),
-      (#["test"], root / "Examples" / "ConstantFolding")] do
+      (#["test"], root / "Examples" / "ConstantFolding"), (#["script", "run", "test_grade"], root)] do
     let code ← (← IO.Process.spawn { cmd := lake, args, cwd }).wait
     unless code == 0 do return code
   return 0
+
+def gradeCandidates : List (String × System.FilePath × String × UInt32) := [
+  ("edits-challenge", "Challenge.lean", "theorem graded : True := trivial\n", 1),
+  ("adds-core-spec", "ConstantFolding" / "CoreSpec" / "Extra.lean",
+    "module\n\npublic section\n\ntheorem ConstantFolding.extra : True := trivial\n", 1),
+  ("honest", "ConstantFolding" / "CoreCode.lean",
+    "\ntheorem ConstantFolding.fold_fold (e : ConstantFolding.Expr) :\n    \
+      ConstantFolding.fold (ConstantFolding.fold e) = ConstantFolding.fold e :=\n  \
+      ConstantFolding.fold_eq_self_of_normal _ (ConstantFolding.normal_fold e)\n", 0)]
+
+script test_grade do
+  let lake := (← getLake).toString
+  let lsc ← IO.FS.realPath (← getRootPackage).dir
+  let template := lsc / "Examples" / "ConstantFolding"
+  let scratch ← IO.FS.createTempDir
+  let challenge := scratch / "constant_folding"
+  let run (cmd : String) (args : Array String) : IO IO.Process.Output := IO.Process.output
+    { cmd, args, cwd := challenge, env := #[("GIT_DIR", none), ("GIT_WORK_TREE", none), ("GIT_INDEX_FILE", none)] }
+  let succeed (cmd : String) (args : Array String) : IO Unit := do
+    let out ← run cmd args
+    unless out.exitCode == 0 do throw <| IO.userError s!"{cmd} {" ".intercalate args.toList} failed:\n{out.stdout}{out.stderr}"
+  let git (args : Array String) :=
+    succeed "git" (#["-c", "user.name=grade", "-c", "user.email=grade@localhost", "-c", "commit.gpgsign=false"] ++ args)
+  try
+    for source in ← template.walkDir do
+      let file := System.FilePath.mk (source.toString.drop (template.toString.length + 1)).toString
+      if (← source.isDir) || file.components.head? == some ".lake" || file.toString == "comparator.json" then continue
+      IO.FS.createDirAll (challenge / file).parent.get!
+      IO.FS.writeBinFile (challenge / file) (← IO.FS.readBinFile source)
+    for file in ["lakefile.lean", "lake-manifest.json"] do
+      IO.FS.writeFile (challenge / file) ((← IO.FS.readFile (challenge / file)).replace "\"../..\"" s!"\"{lsc}\"")
+    IO.FS.removeFile (challenge / "owned.lock")
+    succeed lake #["build"]
+    git #["init", "-q"]
+    git #["add", "-A"]
+    git #["commit", "-q", "-m", "base"]
+    git #["branch", "-M", "base"]
+    for (candidate, file, addition, _) in gradeCandidates do
+      git #["checkout", "-q", "-b", candidate, "base"]
+      IO.FS.createDirAll (challenge / file).parent.get!
+      let h ← IO.FS.Handle.mk (challenge / file) .append
+      h.putStr addition
+      h.flush
+      git #["add", "-A"]
+      git #["commit", "-q", "-m", candidate]
+    git #["checkout", "-q", "base"]
+    let mut failed := false
+    for (candidate, expected) in ("absent", 3) :: gradeCandidates.map fun (c, _, _, e) => (c, e) do
+      let out ← run lake #["script", "run", "software_challenge/grade", candidate]
+      unless out.exitCode == expected do
+        IO.eprintln s!"grade {candidate} exited {out.exitCode}, expected {expected}:\n{out.stdout}{out.stderr}"
+        failed := true
+    return if failed then 1 else 0
+  finally
+    IO.FS.removeDirAll scratch
 
 script grade (args) do
   let [candidate] := args
