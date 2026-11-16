@@ -20,6 +20,19 @@ theorem fold_normalizes (e : Expr) : normal (fold e) = true :=
 theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=
   fold_eq_self_of_normal (fold e) (normal_fold e)
 
+theorem fold_keeps_literal (n m : Nat) (h : fold (.lit n) = .lit m) : m = n := by
+  rw [fold_eq_self_of_normal (Expr.lit n) rfl] at h
+  injection h with h
+  exact h.symm
+
+theorem fold_keeps_literal_rejects_zero :
+    ¬ ∀ (n m : Nat), (fun (_ : Expr) => Expr.lit 0) (.lit n) = .lit m → m = n := by
+  intro h
+  exact absurd (h 1 0 rfl) (by decide)
+
+theorem fold_keeps_literal_applies : ∃ (n m : Nat), fold (.lit n) = .lit m :=
+  ⟨0, 0, fold_eq_self_of_normal _ rfl⟩
+
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
     output e = toString (eval (fun _ => 0) e) := by
   simp only [output, evalNative_eq agrees, fold_preserves_meaning]

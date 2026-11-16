@@ -10,7 +10,8 @@ public section
 # Constant folding
 
 Folding preserves meaning, leaves no constant subexpression, removes every constant
-subexpression of a closed expression, and is idempotent, and the output is the true value.
+subexpression of a closed expression, keeps every literal, and is idempotent, and the output is
+the true value.
 Not claimed: anything about the native adder beyond `AddAgrees nativeAdd`.
 -/
 
@@ -33,6 +34,9 @@ theorem fold_normalizes (e : Expr) : normal (fold e) = true := by
 theorem fold_idempotent (e : Expr) : fold (fold e) = fold e := by
   sorry
 
+theorem fold_keeps_literal (n m : Nat) (h : fold (.lit n) = .lit m) : m = n := by
+  sorry
+
 theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
     output e = toString (eval (fun _ => 0) e) := by
   sorry
@@ -51,6 +55,14 @@ theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
 @[kills fold_idempotent] theorem fold_idempotent_rejects_increment :
     ¬ ∀ e : Expr, (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =
       (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e := by
+  sorry
+
+@[kills fold_keeps_literal] theorem fold_keeps_literal_rejects_zero :
+    ¬ ∀ (n m : Nat), (fun (_ : Expr) => Expr.lit 0) (.lit n) = .lit m → m = n := by
+  sorry
+
+@[witness fold_keeps_literal] theorem fold_keeps_literal_applies :
+    ∃ (n m : Nat), fold (.lit n) = .lit m := by
   sorry
 
 @[kills output_correct] theorem output_correct_rejects_suffix :
