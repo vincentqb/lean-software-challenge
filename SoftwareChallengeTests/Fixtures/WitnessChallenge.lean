@@ -40,6 +40,16 @@ theorem double_zero : double 0 = 0 := sorry
 
 @[witness double_zero] theorem double_zero_applies : True := sorry
 
+theorem double_negative_vanishes : NegativeVanishes double := sorry
+
+theorem double_nonnegative_vanishes : NonnegativeVanishes double := sorry
+
+@[witness double_nonnegative_vanishes] theorem double_nonnegative_vanishes_applies : ∃ n, 0 ≤ double n := sorry
+
+theorem double_vanishes_only_at_zero : VanishesOnlyAtZero double := sorry
+
+theorem succ_law : SuccLaw := sorry
+
 @[witness double] theorem double_applies : ∃ n : Nat, 0 < n := sorry
 
 end SoftwareChallengeTests.Fixtures.WitnessChallenge

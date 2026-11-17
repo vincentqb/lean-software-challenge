@@ -124,7 +124,7 @@ run_cmd Elab.Command.liftTermElabM do
       (``Shape.witnesses?_complete, ``witnesses?_complete_witness),
       (``Shape.independent_sound, ``independent_sound_witness),
       (``Shape.applies_sound, ``applies_sound_witness)] do
-    let some preconditions ← Audit.preconditionsOf {} statement (← getConstInfo statement).type
+    let some preconditions ← Audit.preconditionsOf { modules := #[] } {} statement (← getConstInfo statement).type
       | throwError "{statement} has no precondition"
     unless preconditions.witnessedBy (← getConstInfo witness).type do
       throwError "{witness} is not `{preconditions.expected}`"

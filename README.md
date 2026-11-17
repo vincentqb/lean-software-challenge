@@ -25,7 +25,9 @@ A headline's preconditions are its hypotheses that are not world claims. When on
 or a foreign function, no kill shows that some input meets it, so state a witness that one does:
 `∃` the inputs the preconditions use, in headline order, of the conjunction of the
 preconditions, with the holes kept, marked `@[witness headline]`. If the headline assumes world
-claims that mention no input, the witness assumes them first.
+claims that mention no input, the witness assumes them first. The audit reads a headline with the
+`Prop`-valued definitions of CoreSpec and WorldSpec unfolded, except world claims, so the
+hypotheses and inputs of such a definition are the headline's.
 
 The first build records a hash of each of these files in `owned.lock`. After that, a build fails
 if one of them changes. To record a new statement, delete `owned.lock` and build.

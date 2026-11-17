@@ -29,4 +29,9 @@ WorldClaim SuccAt (n : Nat) := nativeSucc n = n + 1
 /-- The function returns its argument. Any other result falsifies it. -/
 WorldClaim Identity (f : Nat → Nat) := ∀ n, f n = n
 
+/-- The function vanishes only at zero. A nonzero n with f n = 0 falsifies it. -/
+WorldClaim VanishesOnlyAtZero (f : Nat → Nat) := ∀ n, f n = 0 → n = 0
+
+def SuccLaw : Prop := SuccAgrees nativeSucc → ∀ n, nativeSucc n = n + 1
+
 end SoftwareChallengeTests.Fixtures

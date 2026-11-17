@@ -16,6 +16,10 @@ public section
 
 namespace SoftwareChallengeTests.Audit
 
+private theorem double_negative_vanishes_has_no_witness :
+    ¬ ∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 0 :=
+  fun ⟨_, below⟩ => Nat.not_lt_zero _ below
+
 meta section
 
 open Lean SoftwareChallenge
@@ -201,37 +205,37 @@ run_cmd Elab.Command.liftCoreM do
 
 run_cmd Elab.Command.liftTermElabM do
   let evidence := allEvidence (← getEnv)
-  let world ← Audit.headline evidence (fixture `successor_grows)
-  let precondition ← Audit.headline evidence (fixture `bounded)
+  let world ← Audit.headline project evidence (fixture `successor_grows)
+  let precondition ← Audit.headline project evidence (fixture `bounded)
   unless world.assumptions.map (·.claim) == #[fixture `SuccAgrees] do throwError "A world claim was misread"
   unless (evidence.filter (·.claim == fixture `SuccAgrees)).size == 3 && world.assumptions.map (·.checks) == #[2] do
     throwError "A Check of another instance of a claim counted"
   unless precondition.assumptions.isEmpty && precondition.unnamed.isEmpty do
     throwError "A precondition was read as an assumption"
-  let missing ← try discard <| Audit.headline evidence `SoftwareChallengeTests.Missing; pure false
+  let missing ← try discard <| Audit.headline project evidence `SoftwareChallengeTests.Missing; pure false
     catch _ => pure true
   unless missing do throwError "A missing headline passed"
   let stated := (← getConstInfo (fixture `successor_grows)).type
-  let unproved ← Audit.headline evidence `SoftwareChallengeTests.Missing (some stated)
+  let unproved ← Audit.headline project evidence `SoftwareChallengeTests.Missing (some stated)
   unless !unproved.proved && unproved.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
     throwError "A headline the solution does not state was not read from its Challenge statement"
   unless world.proved do throwError "A headline the solution states was reported unproved"
-  let single ← Audit.headline evidence (fixture `identity_three)
-  let unnamed ← Audit.headline evidence (fixture `uses_unnamed)
+  let single ← Audit.headline project evidence (fixture `identity_three)
+  let unnamed ← Audit.headline project evidence (fixture `uses_unnamed)
   unless single.oneInstance && unnamed.oneInstance && !world.oneInstance && !precondition.oneInstance do
     throwError "A headline was misread as quantifying over inputs, or as not"
   unless (Audit.describe toString single).endsWith "  (one instance)" &&
       !contains (Audit.describe toString world) "one instance" do
     throwError "The report misstated one instance: {Audit.describe toString single}"
-  let ignored ← Audit.headline evidence (fixture `successor_positive)
-  let correct ← Audit.headline evidence (fixture `successor_correct)
+  let ignored ← Audit.headline project evidence (fixture `successor_positive)
+  let correct ← Audit.headline project evidence (fixture `successor_correct)
   unless ignored.assumptions.map (·.unused) == #[true] && correct.assumptions.map (·.unused) == #[false] &&
       world.assumptions.map (·.unused) == #[false] do
     throwError "The premise linter misread which proofs use their world claim"
   unless contains (Audit.describe toString ignored) "assumes SoftwareChallengeTests.Fixtures.SuccAgrees \
       (2 checks, unused by the proof)" && !contains (Audit.describe toString correct) "unused" do
     throwError "The report misstated an unused premise: {Audit.describe toString ignored}"
-  let unlinted ← Audit.headline evidence countdownTerminates
+  let unlinted ← Audit.headline project evidence countdownTerminates
   unless unlinted.unlinted == some (fixture `Fixpoint) && world.unlinted.isNone do
     throwError "A headline proved without the premise linter was not found: {unlinted.unlinted}"
   expect (Audit.evidenced { headlines := #[unlinted, world] }) "countdown_terminates"
@@ -239,7 +243,7 @@ run_cmd Elab.Command.liftTermElabM do
   if (Audit.evidenced { headlines := #[world] }).any (contains · "linter") then
     throwError "A headline proved with the premise linter was rejected"
   let headlines ← #[fixture `uses_unchecked, fixture `uses_live, fixture `uses_unnamed].mapM
-    fun name => Audit.headline evidence name
+    fun name => Audit.headline project evidence name
   let facts : Audit.Facts := {
     headlines := headlines.push world
     holes := #[(fixture `SuccAgrees, some (fixture `WorldSpec))] }
@@ -369,7 +373,9 @@ run_cmd Elab.Command.liftTermElabM do
   let member := fun (name : Name) => fixture (`WitnessChallenge ++ name)
   let read ← Audit.readChallenge project (fixture `WitnessChallenge) (← findOLean (fixture `WitnessChallenge))
   unless read.headlines == #[member `double_halves, member `double_positive, member `double_between,
-      member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero] do
+      member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero,
+      member `double_negative_vanishes, member `double_nonnegative_vanishes, member `double_vanishes_only_at_zero,
+      member `succ_law] do
     throwError "A witness was read as a headline: {read.headlines}"
   unless read.misshapenWitnesses.map (·.1) == #[member `double_positive_applies_unused,
       member `double_positive_applies_replaced, member `double_zero_applies, member `double_applies] do
@@ -382,13 +388,15 @@ run_cmd Elab.Command.liftTermElabM do
     expect errors witness "but it is not `∃ n, 0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double n`"
   expect errors "double_zero_applies" "has no precondition to meet"
   expect errors "double_applies" "is not a headline of Challenge.lean"
+  expect errors "double_negative_vanishes: a precondition mentions SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
+    "state `∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 0` and mark it"
   if errors.any fun error => ["double_small:", "double_positive:", "double_between:", "double_lengths:",
-      "succ_hits_one:"].any fun headline => contains error headline && contains error "precondition" then
+      "succ_hits_one:", "double_nonnegative_vanishes:", "double_vanishes_only_at_zero:", "succ_law:"].any fun headline => contains error headline && contains error "precondition" then
     throwError "A headline with a witness, or with preconditions the solution cannot change, was rejected: {errors}"
   unless contains (Audit.comparatorConfig `A.Solution read) (toString (member `double_positive_applies)) do
     throwError "A witness is missing from comparator.json"
   let pick := fixture `pick
-  let some vacuous ← Audit.preconditionsOf (NameSet.empty.insert pick) (fixture `pick_one_zero)
+  let some vacuous ← Audit.preconditionsOf project (NameSet.empty.insert pick) (fixture `pick_one_zero)
       (← getConstInfo (fixture `pick_one_zero)).type
     | throwError "The precondition of a vacuous headline was not read"
   let refuted := Audit.toShape (← getConstInfo (fixture `pick_one_zero_has_no_witness)).type
@@ -397,11 +405,25 @@ run_cmd Elab.Command.liftTermElabM do
     throwError "The witness a vacuous headline needs is not the one its solution refutes"
   expect (Audit.meaningful { challenge := { theorems := #[fixture `pick_one_zero], preconditioned := #[vacuous] } })
     "pick_one_zero: a precondition mentions SoftwareChallengeTests.Fixtures.pick" "mark it `@[witness"
+  let some negative := read.preconditioned.find? (·.headline == member `double_negative_vanishes)
+    | throwError "The precondition a specification definition hides was not read"
+  unless Audit.toShape (← getConstInfo ``double_negative_vanishes_has_no_witness).type ==
+      (Shape.applicability negative.premises negative.inputs negative.preconditions).negation do
+    throwError "The witness a hidden vacuous precondition needs is not the one its refutation rules out"
+  if read.preconditioned.any (·.headline == member `double_vanishes_only_at_zero) then
+    throwError "A world claim a headline concludes was unfolded into preconditions"
+  let law ← Audit.headline project (allEvidence (← getEnv)) (member `double_negative_vanishes)
+  let succLaw ← Audit.headline project (allEvidence (← getEnv)) (member `succ_law)
+  let claimed ← Audit.headline project (allEvidence (← getEnv)) (member `double_vanishes_only_at_zero)
+  unless !law.oneInstance && !succLaw.oneInstance && claimed.oneInstance do
+    throwError "A headline stated as a specification definition was misread as one instance, or as not"
+  unless succLaw.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
+    throwError "A world claim a specification definition assumes was not read: {succLaw.assumptions.map (·.claim)}"
   let pending : Audit.Headline := { name := `h, assumptions := #[], unnamed := #[], witnessProved := false }
   unless (Audit.describe toString pending).endsWith "  (witness not yet proved)" &&
       (Audit.describe toString { pending with proved := false }).endsWith "  (not yet proved)" do
     throwError "The report misstated an unproved witness: {Audit.describe toString pending}"
-  let heavy ← Audit.headline (allEvidence (← getEnv)) (fixture `succ_at_leaves)
+  let heavy ← Audit.headline project (allEvidence (← getEnv)) (fixture `succ_at_leaves)
   unless heavy.assumptions.map (·.checks) == #[0] do throwError "A Check that cannot be matched counted"
   expect (Audit.evidenced { headlines := #[heavy] }) "succ_at_leaves: cannot match Fixtures.SuccAt \
     (Fixtures.leafSum 30 1) against the Check at SoftwareChallengeTests.Fixtures.WorldCode, line 52" "budget"

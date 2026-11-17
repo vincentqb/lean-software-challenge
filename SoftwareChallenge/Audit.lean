@@ -192,13 +192,30 @@ def matchWithin (budget : Nat) (expected statement : Expr) : MetaM (Option Bool)
       (Meta.isDefEq expected statement)))
     fun _ => pure none
 
-def headline (evidence : Array Evidence) (name : Name) (stated : Option Expr := none)
+def abbreviates (project : Project) (name : Name) : MetaM Bool := do
+  let env ← getEnv
+  let some (.defnInfo info) := env.find? name | return false
+  let module := (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
+  unless !isWorldClaim env name && (module.bind project.role?) matches some .coreSpec | some .worldSpec do
+    return false
+  Meta.forallTelescopeReducing info.type fun _ result => return (← Meta.whnf result).isProp
+
+partial def unfolded (project : Project) (type : Expr) : MetaM Expr :=
+  Meta.forallTelescope type fun binders body => do
+    let body := body.consumeMData
+    let .const name _ := body.getAppFn | return type
+    unless ← abbreviates project name do return type
+    let some expanded ← Meta.delta? body (· == name) | return type
+    Meta.mkForallFVars binders (← unfolded project expanded)
+
+def headline (project : Project) (evidence : Array Evidence) (name : Name) (stated : Option Expr := none)
     (budget : Nat := matchBudget) : MetaM Headline := do
   let env ← getEnv
-  let (type, proved) ← match env.find? name, stated with
+  let (written, proved) ← match env.find? name, stated with
     | some info, _ => pure (info.type, true)
     | none, some type => pure (type, false)
     | none, none => throwError "Headline {name} is not compiled"
+  let type ← unfolded project written
   let prover := if proved then (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module) else none
   let record := prover.bind (premiseRecord? env · name)
   let (patterns, _, _) ← Meta.forallMetaTelescope type
@@ -264,8 +281,9 @@ def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : B
 
 private def normalized (expr : Expr) : Expr := expr.replaceLevel (some ·.normalize)
 
-def preconditionsOf (replaceable : NameSet) (headline : Name) (type : Expr) : MetaM (Option Preconditions) :=
-  Meta.forallTelescope type fun binders _ => do
+def preconditionsOf (project : Project) (replaceable : NameSet) (headline : Name) (type : Expr) :
+    MetaM (Option Preconditions) := do
+  Meta.forallTelescope (← unfolded project type) fun binders _ => do
     let env ← getEnv
     let mut inputs := #[]
     let mut premises := #[]
@@ -342,7 +360,7 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
     let headlines := found.headlines
     let preconditioned ← Meta.MetaM.run' <| headlines.filterMapM fun headline =>
       match env.find? headline with
-      | some info => preconditionsOf replaceable headline info.type
+      | some info => preconditionsOf project replaceable headline info.type
       | none => pure none
     let witnessed := fun (witness headline : Name) =>
       match preconditioned.find? (·.headline == headline), env.find? witness with
@@ -617,7 +635,7 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
     let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any catalog.contains
     return {
       inventory, challenge
-      headlines := ← challenge.headlines.mapM fun name => return { ← headline evidence name (challenge.statement? name)
+      headlines := ← challenge.headlines.mapM fun name => return { ← headline project evidence name (challenge.statement? name)
         with witnessProved := (challenge.witnessesOf name).all env.contains }
       mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
         (((env.find? name).map (·.type) <|> challenge.statement? name).map (·.getUsedConstants)).getD #[]).toList
