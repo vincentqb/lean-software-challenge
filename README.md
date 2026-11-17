@@ -156,3 +156,24 @@ export, not only the kernel's replay.
 
 `lake exe grade` refuses a candidate that changes or adds an owned file, then runs `lake test` in a
 fresh worktree of it. It exits 0 to accept, 1 to refuse, and 3 when it cannot judge.
+
+## Cite
+
+```bibtex
+@software{lean_software_challenge,
+  author = {Quenneville-B{\'e}lair, Vincent},
+  title  = {Lean Software Challenge},
+  note   = {A judge for agent-written Lean software},
+  year   = {2026},
+  url    = {https://github.com/vincentqb/lean-software-challenge},
+}
+```
+
+## Related work
+
+- Dean Foster, [lean-manifests](https://github.com/deanpfoster/lean-manifests)
+- Lean FRO, [Comparator](https://github.com/leanprover/comparator)
+- [Palomar](https://palomar-registry.org)
+- Lim et al., [Pre-QED: Environment Specifications for Agentic Verification](https://arxiv.org/abs/2611.15207)
+- Anthropic, [LLMs are making formal software verification feasible at a much larger scale](https://www.anthropic.com/research/formal-verification)
+- Theorem, [OSS Verify](https://github.com/theorem-labs/oss-verify-proofs)

@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
+title: Lean Software Challenge
+abstract: A judge for agent-written Lean software.
+authors:
+  - family-names: Quenneville-Bélair
+    given-names: Vincent
+repository-code: https://github.com/vincentqb/lean-software-challenge
+preferred-citation:
+  type: software
+  title: Lean Software Challenge
+  authors:
+    - family-names: Quenneville-Bélair
+      given-names: Vincent
+  notes: A judge for agent-written Lean software
+  year: 2026
+  url: https://github.com/vincentqb/lean-software-challenge
