@@ -77,6 +77,16 @@ theorem pick_one_zero (n : Nat) (h : pick n = 1) : n = 0 := by simp [pick] at h
 
 theorem pick_one_zero_has_no_witness : ¬ ∃ n, pick n = 1 := by simp [pick]
 
+theorem bundled_three : 1 = 1 ∧ (2 = 2 ∧ 3 = 3) := ⟨rfl, rfl, rfl⟩
+
+theorem bundled_iff : 1 = 1 ↔ 2 = 2 := ⟨fun _ => rfl, fun _ => rfl⟩
+
+theorem bundled_structure : TwoLaws := ⟨rfl, rfl⟩
+
+theorem bundled_hidden : BothHold := ⟨rfl, rfl⟩
+
+theorem not_bundled_exists : ∃ n : Nat, n = 1 := ⟨1, rfl⟩
+
 /-- A claim outside a WorldSpec module. Declaring it here falsifies the audit. -/
 WorldClaim CoreClaim := 1 = 1
 

@@ -227,6 +227,14 @@ run_cmd Elab.Command.liftTermElabM do
   unless (Audit.describe toString single).endsWith "  (one instance)" &&
       !contains (Audit.describe toString world) "one instance" do
     throwError "The report misstated one instance: {Audit.describe toString single}"
+  let bundles ← [(`bundled_three, 3), (`bundled_iff, 2), (`bundled_structure, 2), (`bundled_hidden, 2),
+      (`not_bundled_exists, 1), (`identity_fixed, 1)].mapM fun (name, expected) => do
+    return (name, expected, (← Audit.headline project evidence (fixture name)).laws)
+  for (name, expected, found) in bundles do
+    unless found == expected do throwError "{name} bundles {found} laws, expected {expected}"
+  unless (Audit.describe toString (← Audit.headline project evidence (fixture `bundled_three))).endsWith
+      "  (bundles 3 laws)" && !contains (Audit.describe toString world) "bundles" do
+    throwError "The report misstated bundled laws"
   let ignored ← Audit.headline project evidence (fixture `successor_positive)
   let correct ← Audit.headline project evidence (fixture `successor_correct)
   unless ignored.assumptions.map (·.unused) == #[true] && correct.assumptions.map (·.unused) == #[false] &&

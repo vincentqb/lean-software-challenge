@@ -82,6 +82,8 @@ Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean
 - `(not yet proved)`: the solution does not state the headline yet.
 - `(witness not yet proved)`: the solution does not state the headline's witness yet.
 - `(one instance)`: the headline quantifies over no input, so it states one case.
+- `(bundles k laws)`: the headline is a conjunction, an `↔`, or a `Prop` structure of `k` laws;
+  stating each as its own headline gives each its own kill and witness.
 - `unused by the proof`: the proof does not use this world claim, so the headline holds
   without it; only you can drop it.
 - `Independent`: how many headlines have a kill showing that the others do not imply them.

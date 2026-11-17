@@ -179,6 +179,7 @@ structure Headline where
   unmatched : Array Unmatched := #[]
   proved : Bool := true
   oneInstance : Bool := false
+  laws : Nat := 1
   unlinted : Option Name := none
   witnessProved : Bool := true
 
@@ -205,6 +206,26 @@ partial def unfolded (project : Project) (type : Expr) : MetaM Expr :=
     unless ← abbreviates project name do return type
     let some expanded ← Meta.delta? body (· == name) | return type
     Meta.mkForallFVars binders (← unfolded project expanded)
+
+partial def lawCount (project : Project) (type : Expr) : MetaM Nat := do
+  let type ← unfolded project type
+  Meta.forallTelescope type fun _ body => do
+    let body := body.consumeMData
+    let .const name levels := body.getAppFn | return 1
+    let some (.inductInfo ind) := (← getEnv).find? name | return 1
+    let [constructor] := ind.ctors | return 1
+    unless ind.numIndices == 0 && (← Meta.isProp body) do return 1
+    let some (.ctorInfo info) := (← getEnv).find? constructor | return 1
+    let fieldsType ← Meta.instantiateForall (info.type.instantiateLevelParams info.levelParams levels)
+      (body.getAppArgs.extract 0 ind.numParams)
+    Meta.forallTelescope fieldsType fun fields _ => do
+      if fields.size < 2 then return 1
+      let mut count := 0
+      for field in fields do
+        let fieldType ← Meta.inferType field
+        unless ← Meta.isProp fieldType do return 1
+        count := count + (← lawCount project fieldType)
+      return count
 
 def headline (project : Project) (evidence : Array Evidence) (name : Name) (stated : Option Expr := none)
     (budget : Nat := matchBudget) : MetaM Headline := do
@@ -243,7 +264,7 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (stat
         | none => assumptions := assumptions.push { claim, statement := shown, checks, unused }
       else if !statement.hasFVar && (← Meta.isProp statement) then
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
-    return { name, assumptions, unnamed, unmatched, proved, oneInstance
+    return { name, assumptions, unnamed, unmatched, proved, oneInstance, laws := ← lawCount project type
              unlinted := if record.isNone then prover else none }
 
 def toUniverse : Level → Universe
@@ -410,7 +431,7 @@ def unclaimed (project : Project) (moduleOf : Name → Option Name) (running : N
     (entry : Name := `main) : MetaM (Option (Nat × Array Name)) := do
   let env ← getEnv
   unless project.executable && env.contains entry do return none
-  let claimed := holes.foldl (fun seen hole => (reachedFrom env running hole).foldl NameSet.insert seen) {}
+  let claimed := closure (fun name => (compiledCallees env name).filter running) holes
   let written ← (reachedFrom env running entry).toArray.filterM fun name => do
     let some info := env.find? name | return false
     unless (moduleOf name).bind project.role? matches some .coreCode | some .worldCode do return false
@@ -630,6 +651,7 @@ def describe (short : Name → String) (line : Headline) : String :=
   let stated := if assumed.isEmpty then short line.name
     else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
   let stated := if line.oneInstance then s!"{stated}  (one instance)" else stated
+  let stated := if line.laws > 1 then s!"{stated}  (bundles {line.laws} laws)" else stated
   if !line.proved then s!"{stated}  (not yet proved)"
   else if !line.witnessProved then s!"{stated}  (witness not yet proved)"
   else stated
