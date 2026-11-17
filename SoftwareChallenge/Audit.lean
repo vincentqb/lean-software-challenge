@@ -177,8 +177,6 @@ structure Headline where
   assumptions : Array Assumption
   unnamed : Array String
   unmatched : Array Unmatched := #[]
-  /-- Whether the solution states the headline. The audit rejects `sorry` in every role, so a
-  stated headline is proved; `lake comparator` replays the proof. -/
   proved : Bool := true
   oneInstance : Bool := false
   unlinted : Option Name := none

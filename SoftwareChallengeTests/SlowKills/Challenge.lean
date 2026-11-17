@@ -5,12 +5,6 @@ meta import SoftwareChallenge
 
 public section
 
-/-!
-# Two kills whose proofs the kernel takes seconds to check
-
-`lake test` replays them in about the time of the slower one.
--/
-
 namespace SlowKills
 
 def double : Nat → Nat := sorry

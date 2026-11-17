@@ -25,7 +25,3 @@ lean_exe «constant_folding» where
 
 lean_lib «Challenge» where
   leanOptions := #[⟨`warn.sorry, false⟩]
-
-@[default_target]
-target audit pkg : Unit := do
-  return (← pkg.fetchFacetJob `softwareChallenge).map (fun _ => ())

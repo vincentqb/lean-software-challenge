@@ -29,8 +29,8 @@ claims that mention no input, the witness assumes them first. The audit reads a 
 `Prop`-valued definitions of CoreSpec and WorldSpec unfolded, except world claims, so the
 hypotheses and inputs of such a definition are the headline's.
 
-The first build records a hash of each of these files in `owned.lock`. After that, a build fails
-if one of them changes. To record a new statement, delete `owned.lock` and build.
+The first `lake test` records a hash of each of these files in `owned.lock`. After that, `lake test`
+fails if one of them changes. To record a new statement, delete `owned.lock` and run `lake test`.
 
 ## What agents write
 
@@ -48,7 +48,7 @@ can progress independently, headline by headline. A headline that is not proved 
 
 ## What you get
 
-When `lake test` passes, or `grade` accepts a candidate:
+When `lake test` passes, or `lake exe grade` accepts a candidate:
 
 - Every headline is proved, and `lake comparator` replays each proof through the kernel.
 - The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, foreign code
@@ -64,7 +64,7 @@ When `lake test` passes, or `grade` accepts a candidate:
 No check decides whether a headline says what its name says, whether it is as general as it
 could be, or whether a `Check` exercises its claim. You judge those; the report helps.
 
-Every build prints the report:
+`lake test` prints the report:
 
 ```
 fold_preserves_meaning
@@ -114,18 +114,16 @@ lean_lib «MyApp» where
 
 lean_lib «Challenge» where
   leanOptions := #[⟨`warn.sorry, false⟩]
-
-@[default_target]
-target audit pkg : Unit := do
-  return (← pkg.fetchFacetJob `softwareChallenge).map (fun _ => ())
 ```
 
 A program adds a `lean_exe` whose root is a WorldCode module. `Challenge` stays out of the
 default targets because its holes share names with the solution's definitions. `lake test` runs
 Lean's linters, and these options turn all of them on except `missingDocs`, which asks for doc
 comments, and `coreInternal`, which is meant for Lean's own repository. Commit
-`lean-toolchain` and `lake-manifest.json`, and add `/comparator.json` to `.gitignore`: the build
-writes it from `Challenge.lean`.
+`lean-toolchain` and `lake-manifest.json`, and add `/comparator.json` to `.gitignore`: `lake test`
+writes it from `Challenge.lean`. Require `software_challenge` by git, or from a directory outside
+`/home`, `/root`, `/run`, `/tmp` and `/var`: the comparator's sandbox hides those, and `lake test`
+refuses a dependency it cannot see.
 
 A module's role is the first component of its name that is `CoreSpec`, `WorldSpec`, `CoreCode`,
 or `WorldCode`; any other module is tooling. Modules outside the package are trusted, and every
@@ -144,9 +142,8 @@ needs a headline marked `@[terminates hole]` that states on which inputs it retu
 ## Run
 
 ```sh
-lake build        # audit, report, and comparator.json
-lake test         # build, lint, every Check, and lake comparator on each theorem
-lake script run software_challenge/grade <commit>   # judge a candidate from this checkout
+lake test                  # agents and owner: audit, report, lint, every Check, and lake comparator
+lake exe grade <commit>    # owner: judge a candidate from this checkout
 ```
 
 `lake test` runs `lake comparator` once for each theorem, several at a time, and writes the time
@@ -155,5 +152,5 @@ it reaches a time limit. `SOFTWARE_CHALLENGE_JOBS` sets how many run at a time (
 hardware threads, at most 16). A run's time includes the comparator's checks of the build and its
 export, not only the kernel's replay.
 
-`grade` refuses a candidate that changes or adds an owned file, then runs `lake test` in a fresh
-worktree of it. It exits 0 to accept, 1 to refuse, and 3 when it cannot judge.
+`lake exe grade` refuses a candidate that changes or adds an owned file, then runs `lake test` in a
+fresh worktree of it. It exits 0 to accept, 1 to refuse, and 3 when it cannot judge.
