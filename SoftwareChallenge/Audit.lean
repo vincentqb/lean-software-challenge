@@ -402,7 +402,8 @@ def entryOf (project : Project) (env : Environment) (moduleOf : Name → Option 
     (running : Name → Bool) (holes : Array Name) : Option (Option Name × Array Name) :=
   if !project.executable then none
   else if env.contains `main then
-    some (moduleOf `main, holes.filter (!(reachedFrom env running `main).contains ·))
+    let reached := reachedFrom env running `main
+    some (moduleOf `main, holes.filter (!reached.contains ·))
   else some (none, #[])
 
 def unclaimed (project : Project) (moduleOf : Name → Option Name) (running : Name → Bool) (holes : Array Name)
@@ -641,8 +642,9 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
     let moduleOf := fun (name : Name) =>
       (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
     let inventory ← collect catalog (NameSet.ofList (challenge.terminating.map (·.1)).toList)
-    let running := fun name => (moduleOf name).any catalog.contains
-    let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any catalog.contains
+    let packaged := NameSet.ofList catalog.toList
+    let running := fun name => (moduleOf name).any packaged.contains
+    let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any packaged.contains
     return {
       inventory, challenge
       headlines := ← challenge.headlines.mapM fun name => return { ← headline project evidence name (challenge.statement? name)
