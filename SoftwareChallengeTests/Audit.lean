@@ -428,6 +428,19 @@ run_cmd Elab.Command.liftTermElabM do
   expect (Audit.evidenced { headlines := #[heavy] }) "succ_at_leaves: cannot match Fixtures.SuccAt \
     (Fixtures.leafSum 30 1) against the Check at SoftwareChallengeTests.Fixtures.WorldCode, line 52" "budget"
 
+run_cmd Elab.Command.liftTermElabM do
+  let env ← getEnv
+  let moduleOf := fun (name : Name) => (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
+  let running := fun name => (moduleOf name).any valid.contains
+  let program := { project with executable := true }
+  let entry := fixture `loopIdentity
+  let glue ← Audit.unclaimed program moduleOf running #[fixture `identity] entry
+  unless glue == some (3, #[entry]) do throwError "Glue main runs was miscounted: {glue}"
+  let covered ← Audit.unclaimed program moduleOf running #[entry] entry
+  unless covered == some (3, #[]) do throwError "Code reached from a hole was counted unclaimed: {covered}"
+  if (← Audit.unclaimed project moduleOf running #[] entry).isSome then
+    throwError "A library without a lean_exe was reported unclaimed code"
+
 end
 
 end SoftwareChallengeTests.Audit

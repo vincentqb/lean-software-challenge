@@ -73,6 +73,8 @@ fold_two_plus_three  (one instance)
 output_correct  assumes AddAgrees (2 checks, unused by the proof)
 Proved: 3 of 4 headlines
 Independent: 1 of 4 headlines
+Unclaimed: 2 of 6 definitions main runs
+  main run
 Edit: ConstantFolding/CoreCode.lean ConstantFolding/WorldCode.lean ConstantFolding/Solution.lean
 Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean ...
 ```
@@ -83,6 +85,8 @@ Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean
 - `unused by the proof`: the proof does not use this world claim, so the headline holds
   without it; only you can drop it.
 - `Independent`: how many headlines have a kill showing that the others do not imply them.
+- `Unclaimed`: how many of the CoreCode and WorldCode definitions `main` runs no hole reaches, so
+  no headline speaks about them; the next line names them. A library has no `main` and no line.
 
 The [template](Examples/ConstantFolding) is a complete challenge.
 

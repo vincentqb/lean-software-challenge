@@ -407,6 +407,17 @@ def entryOf (project : Project) (env : Environment) (moduleOf : Name → Option 
     some (moduleOf `main, holes.filter (!(reachedFrom env running `main).contains ·))
   else some (none, #[])
 
+def unclaimed (project : Project) (moduleOf : Name → Option Name) (running : Name → Bool) (holes : Array Name)
+    (entry : Name := `main) : MetaM (Option (Nat × Array Name)) := do
+  let env ← getEnv
+  unless project.executable && env.contains entry do return none
+  let claimed := holes.foldl (fun seen hole => (reachedFrom env running hole).foldl NameSet.insert seen) {}
+  let written ← (reachedFrom env running entry).toArray.filterM fun name => do
+    let some info := env.find? name | return false
+    unless (moduleOf name).bind project.role? matches some .coreCode | some .worldCode do return false
+    return (← findDeclarationRangesCore? name).isSome && (← computational info)
+  return some (written.size, written.filter (!claimed.contains ·) |>.map privateToUserName)
+
 structure Facts where
   inventory : Inventory := ⟨#[], #[]⟩
   challenge : Challenge := {}
@@ -415,6 +426,7 @@ structure Facts where
   holes : Array (Name × Option Name) := #[]
   registrations : Array (Name × Option Role × Bool) := #[]
   entry : Option (Option Name × Array Name) := none
+  unclaimed : Option (Nat × Array Name) := none
   challengeImports : Array Name := #[]
   terminations : Array Termination := #[]
 
@@ -644,7 +656,8 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
           fun claim => (claim, project.role? module, moduleOf claim == some module)
       terminations := terminations env challenge.terminating challenge.statement?
-      entry := entryOf project env moduleOf running challenge.holes : Facts }
+      entry := entryOf project env moduleOf running challenge.holes
+      unclaimed := ← unclaimed project moduleOf running challenge.holes : Facts }
   return { facts with challengeImports := ← challengeImports challengeFile }
 
 private def audit (executable : Bool) (challengeFile challengeOLean : String) (modules : List String) :
@@ -680,6 +693,9 @@ private def audit (executable : Bool) (challengeFile challengeOLean : String) (m
   IO.println s!"Proved: {proved} of {facts.headlines.size} headlines"
   let independent := facts.challenge.independent.size
   if independent > 0 then IO.println s!"Independent: {independent} of {facts.headlines.size} headlines"
+  if let some (runs, unreached) := facts.unclaimed then
+    IO.println s!"Unclaimed: {unreached.size} of {runs} definitions main runs"
+    unless unreached.isEmpty do IO.println s!"  {" ".intercalate ((unreached.map short).qsort (· < ·)).toList}"
   for t in facts.terminations do IO.println s!"{short t.definition} terminates via {short t.headline}"
   IO.println files
   return 0
