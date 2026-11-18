@@ -38,9 +38,11 @@ open Lean SoftwareChallenge
 private def contains (text fragment : String) : Bool := (text.splitOn fragment).length > 1
 
 run_cmd Elab.Command.liftCoreM do
-  let failures ← checkFailures #[`SoftwareChallengeTests.Fixtures.WorldCode, `SoftwareChallengeTests.Fixtures.Sibling]
+  let failures ← checkFailures #[(`SoftwareChallengeTests.Fixtures.WorldCode, "SoftwareChallengeTests/Fixtures/WorldCode.lean"),
+    (`SoftwareChallengeTests.Fixtures.Sibling, "SoftwareChallengeTests/Fixtures/Sibling.lean")]
   unless failures.size == 3 && failures.all (contains · "of SoftwareChallengeTests.Fixtures.WrongSuccAgrees failed") &&
-      failures.any (contains · "Fixtures.Sibling, line 14") && failures.any (contains · "ran during the build") do
+      failures.any (contains · "SoftwareChallengeTests/Fixtures/Sibling.lean:14:") &&
+      failures.any (contains · "ran during the build") && failures.all (contains · "Then run `lake test`.") do
     throwError "The check runner misreported the fixture checks: {failures}"
   unless (← checkFailures #[]).isEmpty do throwError "The check runner ran checks of an unlisted module"
 

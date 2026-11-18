@@ -96,11 +96,13 @@ private def checked (cmd : Syntax) : CommandElabM Unit := do
   let before := errors (← get).messages
   withScope (fun scope => { scope with opts := Elab.async.set scope.opts false }) do
     elabCommand cmd
-  if errors (← get).messages > before then throwError "declaration failed to elaborate"
+  if errors (← get).messages > before then
+    throwError "declaration failed to elaborate, as the errors above say. Fix them, then run `lake build`."
 
 elab doc?:(docComment)? "WorldClaim " n:ident bs:(ppSpace bracketedBinder)* " := " t:term : command => do
   unless doc?.isSome do
-    throwError "WorldClaim {n} needs a doc comment naming the observation that would falsify it"
+    throwError "WorldClaim {n} has no doc comment, but a reviewer judges a world claim by the observation that \
+      would falsify it. Add `/-- <that observation> -/` above `WorldClaim {n}`, then run `lake build`."
   checked (← `($[$doc?]? @[expose, reducible] public def $n $bs* : Prop := $t))
   let name ← resolveGlobalConstNoOverload n
   modifyEnv (claimsExt.addEntry · name)
@@ -110,8 +112,12 @@ private def claimOf (claim : Term) : CommandElabM (Name × Expr) := liftTermElab
   Term.synthesizeSyntheticMVarsNoPostponing
   let statement ← instantiateMVars statement
   let head := statement.getAppFn.constName
-  unless isWorldClaim (← getEnv) head do throwError "{claim} is not a WorldClaim"
-  if statement.hasMVar then throwError "{claim}: give every argument of the claim"
+  unless isWorldClaim (← getEnv) head do
+    throwError "{claim} is not a WorldClaim, so this Check would test nothing a headline assumes. Name a claim \
+      declared with `WorldClaim` in a WorldSpec module, then run `lake build`."
+  if statement.hasMVar then
+    throwError "{claim} leaves an argument unstated, so the Check would not test one definite statement: give \
+      every argument of the claim, replacing each `_` with a term, then run `lake build`."
   return (head, statement)
 
 private def register (claim : Name × Expr) (action : Term) : CommandElabM Unit := do
@@ -131,27 +137,30 @@ elab "Check " claim:term " : " inst:term : command => do
   try checked (← `(example : $claim → $inst := fun h => by first | exact h | apply h))
   catch _ =>
     modify ({ · with messages })
-    throwError "{inst} is not an instance of {claim}"
+    throwError "{inst} is not an instance of {claim}, so the Check would test something the claim does not \
+      imply. State a proposition that {claim} implies, such as {claim} at concrete values, then run `lake build`."
   let falsified := Syntax.mkStrLit s!"{← liftCoreM (PrettyPrinter.ppTerm inst)} is false"
   register found (← `(unless decide ($inst) do throw (IO.userError $falsified)))
 
 elab "Check " claim:term " := " action:term : command => do
   register (← claimOf claim) action
 
-def checkFailures (modules : Array Name) : CoreM (Array String) := do
+def checkFailures (modules : Array (Name × String)) : CoreM (Array String) := do
   let env ← getEnv
   let mut failures := #[]
   for evidence in allEvidence env do
     let some index := env.getModuleIdxFor? evidence.source | continue
     let module := env.header.modules[index.toNat]!.module
-    unless modules.contains module do continue
+    let some (_, file) := modules.find? (·.1 == module) | continue
     let action ← unsafe evalConst (IO Unit) evidence.source
     if let .error error ← action.toBaseIO then
-      failures := failures.push s!"{module}, line {evidence.line}: the Check of {evidence.claim} failed: \
-        {error}; fix the check, or tell the owner that {evidence.claim} is false"
+      failures := failures.push s!"{file}:{evidence.line}: the Check of {evidence.claim} failed: {error}. A Check \
+        tests a world claim against the real foreign code, so either the Check is wrong or {evidence.claim} is \
+        false. Fix the Check; if {evidence.claim} is false, remove it from Challenge.lean and its WorldSpec \
+        module. Then run `lake test`."
   return failures
 
-def runChecks (modules : Array Name) : CommandElabM Unit := do
+def runChecks (modules : Array (Name × String)) : CommandElabM Unit := do
   let failures ← liftCoreM (checkFailures modules)
   unless failures.isEmpty do throwError ("\n".intercalate failures.toList)
 

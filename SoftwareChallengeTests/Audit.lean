@@ -7,7 +7,9 @@ import all SoftwareChallengeTests.Fixtures.WorldCode
 import all SoftwareChallengeTests.Fixtures.Sibling
 import all SoftwareChallengeTests.Fixtures.Rejected
 import all SoftwareChallengeTests.Fixtures.Fixpoint
+import all SoftwareChallengeTests.Fixtures.Statements
 import SoftwareChallengeTests.Fixtures.Challenge
+import SoftwareChallengeTests.Fixtures.AuxiliaryChallenge
 import SoftwareChallengeTests.Fixtures.WitnessChallenge
 meta import SoftwareChallenge.Audit
 meta import SoftwareChallenge
@@ -99,22 +101,22 @@ run_cmd Elab.Command.liftCoreM do
     for (name, reason) in #[("hiddenUnsafe", "unsafe"), ("diverging", "partial"),
         ("hiddenEffect", "IO"), ("packagedEffect", "IO"), ("startup", "initializer"),
         ("bound", "@[extern]"), ("Rejected.foreign", "@[extern]"), ("Rejected.replaced", "@[implemented_by]"),
-        ("traced", "dbg builtin"), ("traceValue", "dbg builtin"), ("Rejected.raw", "uses axiom"),
-        ("chained", "Rejected.raw"), ("Rejected.hole", "sorryAx"),
-        ("Fixtures.Rejected", "may not import SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec)")] do
+        ("traced", "dbg builtin"), ("traceValue", "dbg builtin"), ("Rejected.raw", "asserts"),
+        ("chained", "depends on axiom SoftwareChallengeTests.Fixtures.Rejected.raw"), ("Rejected.hole", "uses `sorry`"),
+        ("Fixtures.Rejected", "imports SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec), but")] do
       expect (violations layout rejected) name reason
     if (violations layout rejected).any (contains · "_unsafe_rec") then
       throwError "A partial definition was reported by its compiler name"
   for (module, role, facts, name, reason) in #[
-      (fixture `CoreSpec, Role.coreCode, accepted, "Fixtures.WorldSpec", "may not import"),
-      (fixture `WorldCode, .worldSpec, accepted, "Fixtures.WorldCode", "may not import"),
+      (fixture `CoreSpec, Role.coreCode, accepted, "Fixtures.WorldSpec", "may import only"),
+      (fixture `WorldCode, .worldSpec, accepted, "Fixtures.WorldCode", "may import only"),
       (fixture `WorldCode, .worldSpec, accepted, "drain", "partial"),
-      (fixture `CoreCode, .tooling, accepted, "Fixtures.WorldCode", "may not import"),
+      (fixture `CoreCode, .tooling, accepted, "Fixtures.WorldCode", "may import only"),
       (fixture `Rejected, .worldCode, rejected, "hiddenUnsafe", "unsafe"),
       (fixture `Rejected, .worldCode, rejected, "bound", "@[extern]"),
       (fixture `Rejected, .worldCode, rejected, "Rejected.foreign", "@[extern]"),
       (fixture `Rejected, .worldCode, rejected, "Rejected.replaced", "@[implemented_by]"),
-      (fixture `Rejected, .tooling, rejected, "Rejected.raw", "uses axiom"),
+      (fixture `Rejected, .tooling, rejected, "Rejected.raw", "asserts"),
       (fixture `Rejected, .worldSpec, rejected, "bound", "@[extern] with a body the kernel unfolds"),
       (fixture `Rejected, .worldSpec, rejected, "hiddenEffect", "IO")] do
     expect (violations (reassign module role) facts) name reason
@@ -134,19 +136,19 @@ run_cmd Elab.Command.liftCoreM do
   let legacy := { accepted with
     modules := accepted.modules.map ({ · with usesModuleSystem := false }) }
   if project.check legacy then throwError "A file without `module` passed"
-  expect (violations project legacy) "Fixtures.CoreCode" "start the file with `module`"
+  expect (violations project legacy) "Fixtures.CoreCode" "does not start with `module`"
   let outside : Project := { modules := project.modules.filter (·.1 != fixture `WorldCode) }
   if outside.check accepted then throwError "A module outside the package was audited as one of it"
-  expect (violations outside accepted) "Fixtures.WorldCode" "not a module of the challenge package"
+  expect (violations outside accepted) "Fixtures.WorldCode" "no lean_lib of the package builds"
   let challenge := Audit.owned project {
     challengeImports := ← Audit.challengeImports "SoftwareChallengeTests/Fixtures/Challenge.lean" }
   expect challenge "Fixtures.CoreCode" "may import only CoreSpec and WorldSpec"
-  if challenge.any (contains · "imports SoftwareChallenge;") then
+  if challenge.any (contains · "imports SoftwareChallenge,") then
     throwError "A challenge import from outside the package was rejected: {challenge}"
   let locked := #[("Challenge.lean", (1 : UInt64)), ("CoreSpec.lean", 2), ("Gone.lean", 3)]
   let drifted := Audit.lockErrors locked #[("Challenge.lean", 1), ("CoreSpec.lean", 5), ("New.lean", 4)]
     #["CoreCode.lean"]
-  expect drifted "CoreSpec.lean changed" "edit CoreCode.lean instead"
+  expect drifted "CoreSpec.lean differs from owned.lock" "edit CoreCode.lean instead"
   expect drifted "New.lean" "does not record it"
   expect drifted "Gone.lean" "missing"
   if drifted.any (contains · "Challenge.lean") then throwError "An unchanged owned file was reported"
@@ -157,21 +159,23 @@ run_cmd Elab.Command.liftCoreM do
       !(reached (fixture `identity)).contains (fixture `successor) &&
       (reached (fixture `loopIdentity)).contains (fixture `identity) do
     throwError "Runtime reachability misread a call"
-  expect (Audit.sound project { entry := some (some (fixture `WorldCode), #[`h]) }) "h" "main never reaches"
+  expect (Audit.pending { entry := some (some (fixture `WorldCode), #[`h]) }) "hole h" "is never called from main"
+  if !(Audit.sound project { entry := some (some (fixture `WorldCode), #[`h]) }).isEmpty then
+    throwError "An unreached hole was reported as an error, not as pending"
   expect (Audit.sound project { entry := some (some (fixture `CoreCode), #[]) }) "main" "WorldCode module"
   let moduleOf := fun (_ : Name) => some (fixture `WorldCode)
   let missing := Audit.entryOf { project with executable := true } env moduleOf (fun _ => true) #[`h]
   unless missing matches some (none, #[]) do throwError "A missing main passed"
-  expect (Audit.sound project { entry := missing }) "main" "declares a lean_exe"
+  expect (Audit.pending { entry := missing }) "main is not written yet" "declares a lean_exe"
   if (Audit.entryOf project env moduleOf (fun _ => true) #[`h]).isSome then
     throwError "A library without a lean_exe was required to have a main"
   let registrations := (valid.push (fixture `Rejected)).flatMap fun module =>
     (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
-      fun claim => (claim, project.role? module, (env.getModuleIdxFor? claim).any
+      fun claim => (claim, module, project.role? module, (env.getModuleIdxFor? claim).any
         (env.header.modules[·.toNat]!.module == module))
-  let registered := Audit.owned project { registrations }
-  expect registered "CoreClaim" "declare WorldClaims in a WorldSpec module"
-  expect registered "Identity" "registered outside the module that declares it"
+  let registered := Audit.registered project { registrations }
+  expect registered "CoreClaim" "only a WorldSpec module states"
+  expect registered "Identity" "as a WorldClaim without declaring it"
   if registered.any (contains · "SuccAgrees") then
     throwError "A claim declared in a WorldSpec module was rejected: {registered}"
 
@@ -203,25 +207,28 @@ run_cmd Elab.Command.liftCoreM do
     searchPathRef.set saved
     IO.FS.removeDirAll dependency
 
+private def moduleOf (env : Environment) (name : Name) : Option Name :=
+  (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
+
+private def analysed (evidence : Array Evidence) (name : Name) : MetaM Audit.Headline := do
+  Audit.headline project evidence name (← getConstInfo name).type (moduleOf (← getEnv) name)
+
 run_cmd Elab.Command.liftTermElabM do
   let evidence := allEvidence (← getEnv)
-  let world ← Audit.headline project evidence (fixture `successor_grows)
-  let precondition ← Audit.headline project evidence (fixture `bounded)
+  let world ← analysed evidence (fixture `successor_grows)
+  let precondition ← analysed evidence (fixture `bounded)
   unless world.assumptions.map (·.claim) == #[fixture `SuccAgrees] do throwError "A world claim was misread"
   unless (evidence.filter (·.claim == fixture `SuccAgrees)).size == 3 && world.assumptions.map (·.checks) == #[2] do
     throwError "A Check of another instance of a claim counted"
   unless precondition.assumptions.isEmpty && precondition.unnamed.isEmpty do
     throwError "A precondition was read as an assumption"
-  let missing ← try discard <| Audit.headline project evidence `SoftwareChallengeTests.Missing; pure false
-    catch _ => pure true
-  unless missing do throwError "A missing headline passed"
   let stated := (← getConstInfo (fixture `successor_grows)).type
-  let unproved ← Audit.headline project evidence `SoftwareChallengeTests.Missing (some stated)
+  let unproved ← Audit.headline project evidence `SoftwareChallengeTests.Missing stated
   unless !unproved.proved && unproved.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
-    throwError "A headline the solution does not state was not read from its Challenge statement"
-  unless world.proved do throwError "A headline the solution states was reported unproved"
-  let single ← Audit.headline project evidence (fixture `identity_three)
-  let unnamed ← Audit.headline project evidence (fixture `uses_unnamed)
+    throwError "A headline the solution does not prove was not read from its Challenge statement"
+  unless world.proved do throwError "A headline the solution proves was reported unproved"
+  let single ← analysed evidence (fixture `identity_three)
+  let unnamed ← analysed evidence (fixture `uses_unnamed)
   unless single.oneInstance && unnamed.oneInstance && !world.oneInstance && !precondition.oneInstance do
     throwError "A headline was misread as quantifying over inputs, or as not"
   unless (Audit.describe toString single).endsWith "  (one instance)" &&
@@ -229,38 +236,38 @@ run_cmd Elab.Command.liftTermElabM do
     throwError "The report misstated one instance: {Audit.describe toString single}"
   let bundles ← [(`bundled_three, 3), (`bundled_iff, 2), (`bundled_structure, 2), (`bundled_hidden, 2),
       (`not_bundled_exists, 1), (`identity_fixed, 1)].mapM fun (name, expected) => do
-    return (name, expected, (← Audit.headline project evidence (fixture name)).laws)
+    return (name, expected, (← analysed evidence (fixture name)).laws)
   for (name, expected, found) in bundles do
     unless found == expected do throwError "{name} bundles {found} laws, expected {expected}"
-  unless (Audit.describe toString (← Audit.headline project evidence (fixture `bundled_three))).endsWith
+  unless (Audit.describe toString (← analysed evidence (fixture `bundled_three))).endsWith
       "  (bundles 3 laws)" && !contains (Audit.describe toString world) "bundles" do
     throwError "The report misstated bundled laws"
-  let ignored ← Audit.headline project evidence (fixture `successor_positive)
-  let correct ← Audit.headline project evidence (fixture `successor_correct)
+  let ignored ← analysed evidence (fixture `successor_positive)
+  let correct ← analysed evidence (fixture `successor_correct)
   unless ignored.assumptions.map (·.unused) == #[true] && correct.assumptions.map (·.unused) == #[false] &&
       world.assumptions.map (·.unused) == #[false] do
     throwError "The premise linter misread which proofs use their world claim"
   unless contains (Audit.describe toString ignored) "assumes SoftwareChallengeTests.Fixtures.SuccAgrees \
       (2 checks, unused by the proof)" && !contains (Audit.describe toString correct) "unused" do
     throwError "The report misstated an unused premise: {Audit.describe toString ignored}"
-  let unlinted ← Audit.headline project evidence countdownTerminates
+  let unlinted ← analysed evidence countdownTerminates
   unless unlinted.unlinted == some (fixture `Fixpoint) && world.unlinted.isNone do
     throwError "A headline proved without the premise linter was not found: {unlinted.unlinted}"
   expect (Audit.evidenced { headlines := #[unlinted, world] }) "countdown_terminates"
-    "add `meta import SoftwareChallenge` to SoftwareChallengeTests.Fixtures.Fixpoint"
+    "Add `meta import SoftwareChallenge` to SoftwareChallengeTests.Fixtures.Fixpoint"
   if (Audit.evidenced { headlines := #[world] }).any (contains · "linter") then
     throwError "A headline proved with the premise linter was rejected"
-  let headlines ← #[fixture `uses_unchecked, fixture `uses_live, fixture `uses_unnamed].mapM
-    fun name => Audit.headline project evidence name
+  let headlines ← #[fixture `uses_unchecked, fixture `uses_live, fixture `uses_unnamed].mapM fun name => analysed evidence name
   let facts : Audit.Facts := {
     headlines := headlines.push world
-    holes := #[(fixture `SuccAgrees, some (fixture `WorldSpec))] }
-  let errors := Audit.sound project facts ++ Audit.evidenced facts
-  expect errors "Unchecked" "has no Check"
-  expect errors "SuccAgrees" "defined in SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec)"
-  expect errors "uses_unnamed" "not a WorldClaim"
-  if errors.any (fun e => contains e "ClockAdvances" || contains e "SuccAgrees has no Check") then
-    throwError "Checks did not count: {errors}"
+    holes := #[(fixture `SuccAgrees, some (fixture `WorldSpec))]
+    challenge := { hypotheses := #[(fixture `uses_unnamed, unnamed.unnamed)] } }
+  let pending := Audit.pending facts
+  expect pending "Unchecked" "which no Check tests"
+  expect (Audit.sound project facts) "SuccAgrees" "defined in SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec)"
+  expect (Audit.stated facts) "uses_unnamed" "which is not a WorldClaim"
+  if pending.any (fun e => contains e "ClockAdvances" || contains e "SuccAgrees" && contains e "no Check") then
+    throwError "Checks did not count: {pending}"
   let env ← getEnv
   let replaceable := NameSet.empty.insert (fixture `identity)
   unless Audit.kills env replaceable (fixture `identity_fixed) (fixture `identity_fixed_rejects_successor) do
@@ -290,8 +297,8 @@ run_cmd Elab.Command.liftTermElabM do
     theorems := #[fixture `identity_fixed, fixture `identity_fixed_again, fixture `identity_three]
     statements := ← statements #[fixture `identity_fixed, fixture `identity_fixed_again, fixture `identity_three] }
   let repeated := Audit.meaningful { challenge := restated }
-  expect repeated "identity_fixed_again states the same as SoftwareChallengeTests.Fixtures.identity_fixed;"
-    "ask the owner to drop one from Challenge.lean"
+  expect repeated "identity_fixed_again states the same as SoftwareChallengeTests.Fixtures.identity_fixed"
+    "Remove SoftwareChallengeTests.Fixtures.identity_fixed_again and its kills and witnesses from Challenge.lean"
   if repeated.any (contains · "identity_three states") then
     throwError "A headline with a different statement was reported as a duplicate: {repeated}"
   let order := #[fixture `identity_fixed, fixture `identity_twice]
@@ -312,30 +319,35 @@ run_cmd Elab.Command.liftTermElabM do
     kills := #[(fixture `identity_fixed_rejects_successor, fixture `identity_fixed)] }
   unless killed.headlines == #[fixture `identity_fixed, fixture `bounded] do
     throwError "A kill was reported as a headline: {killed.headlines}"
-  expect (Audit.meaningful { challenge := killed }) "bounded" "no kill"
-  expect (Audit.meaningful { holes := #[(`h, none)] }) "h" "no headline mentions this hole"
+  expect (Audit.meaningful { challenge := killed }) "bounded" "has no kill"
+  expect (Audit.meaningful { challenge := { holes := #[`h] } }) "no headline mentions hole h" "or remove the hole"
   if (Audit.meaningful { challenge := killed }).any (contains · "identity_fixed") then
     throwError "A killed headline was reported unkilled"
   let stuck := fixture `Fixpoint.countdown_terminates_rejects_stuck
-  let termination := fun (definition headline : Name) => Audit.sound project {
+  let typeOf := fun (name : Name) => (env.find? name).map (·.type)
+  let termination := fun (definition headline : Name) => Audit.stated {
     challenge := { theorems := #[countdownTerminates, stuck, fixture `bounded]
-                   kills := #[(stuck, countdownTerminates)] }
-    holes := #[(countdown, some (fixture `Fixpoint)), (fixture `identity, some (fixture `CoreCode))]
-    terminations := Audit.terminations env #[(definition, headline)] }
-  let terminatesType := (← getConstInfo countdownTerminates).type
-  let fromStatement := Audit.terminations env #[(countdown, `SoftwareChallengeTests.Missing)]
-    fun _ => some terminatesType
+                   kills := #[(stuck, countdownTerminates)], holes := #[countdown, fixture `identity] }
+    terminations := Audit.terminations (Audit.fixpoint env) #[(definition, headline)] typeOf }
+  let fromStatement := Audit.terminations (Audit.fixpoint env) #[(countdown, `SoftwareChallengeTests.Missing)]
+    fun _ => typeOf countdownTerminates
   unless fromStatement.all (·.mentioned) do
     throwError "A termination headline the solution does not state was not read from its statement"
   unless (termination countdown countdownTerminates).isEmpty do
     throwError "A listed termination headline was rejected: {termination countdown countdownTerminates}"
-  expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "not a definition hole"
-  expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "does not mention it"
-  expect (termination (fixture `identity) (fixture `identity_fixed)) "identity" "not a partial_fixpoint definition"
+  expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "which is not a hole of"
+  expect (termination (fixture `Fixpoint.spin) countdownTerminates) "spin" "does not mention"
+  let implemented := fun (hole headline module : Name) => Audit.sound project {
+    holes := #[(hole, some module)]
+    terminations := Audit.terminations (Audit.fixpoint env) #[(hole, headline)] typeOf }
+  expect (implemented (fixture `identity) (fixture `identity_fixed) (fixture `CoreCode)) "identity"
+    "is not defined with `partial_fixpoint`"
+  unless (implemented countdown countdownTerminates (fixture `Fixpoint)).isEmpty do
+    throwError "A partial_fixpoint hole named by @[terminates] was rejected"
   expect (termination countdown (fixture `Fixpoint.countdown_terminates_rejects_stuck)) "countdown"
-    "not a headline with a kill"
-  expect (termination countdown (fixture `bounded)) "countdown" "not a headline with a kill"
-  expect (termination countdown (fixture `bounded)) "bounded" "does not mention it"
+    "is not a headline with a kill"
+  expect (termination countdown (fixture `bounded)) "countdown" "is not a headline with a kill"
+  expect (termination countdown (fixture `bounded)) "bounded" "does not mention"
   let marked ← Audit.readChallenge project (fixture `Challenge) (← findOLean (fixture `Challenge))
   let member := fun (name : Name) => fixture (`Challenge ++ name)
   unless marked.theorems == #[member `double_even, member `double_even_rejects_identity,
@@ -348,32 +360,33 @@ run_cmd Elab.Command.liftTermElabM do
   let markedFacts : Audit.Facts := {
     challenge := marked
     holes := marked.holes.map (·, some (fixture `CoreCode))
-    terminations := Audit.terminations env marked.terminating }
+    terminations := Audit.terminations (Audit.fixpoint env) marked.terminating marked.statement? }
   let misread := Audit.meaningful markedFacts
-  expect misread "double_zero" "no kill"
-  expect misread "double_one:" "mark SoftwareChallengeTests.Fixtures.Challenge.double_one_rejects_one `@[kills"
-  if misread.any (contains · "double_one_rejects_one: no kill") then
+  expect misread "double_zero" "has no kill"
+  expect misread "double_one has no kill"
+    "Mark SoftwareChallengeTests.Fixtures.Challenge.double_one_rejects_one `@[kills"
+  if misread.any (contains · "double_one_rejects_one has no kill") then
     throwError "An unmarked kill was reported as a headline without a kill: {misread}"
-  expect misread "double_even_rejects_nothing" "but it is not `¬` SoftwareChallengeTests.Fixtures.Challenge.double_even"
+  expect misread "double_even_rejects_nothing" "but it is neither `¬` SoftwareChallengeTests.Fixtures.Challenge.double_even"
   expect misread "triple_rejects_nothing" "is not a headline of Challenge.lean"
   for kill in ["double_even_partly_independent", "double_even_independent_mixed"] do
     expect misread kill "nor that negation `∧` every other headline"
-  if misread.any (contains · "double_even_independent:") then
+  if misread.any (contains · "double_even_independent is marked") then
     throwError "An independence kill was rejected: {misread}"
   unless marked.independent == #[member `double_even] do
     throwError "Independence was misread: {marked.independent}"
-  if misread.any fun error => contains error "double_even:" || contains error "rejects_identity" then
+  if misread.any fun error => contains error "double_even has no kill" ||
+      contains error "double_even_rejects_identity is marked" then
     throwError "A marked kill was rejected: {misread}"
-  expect (Audit.sound project markedFacts) "triple" "but it is not a definition hole"
-  expect (Audit.owned project markedFacts) "implements SoftwareChallengeTests.Fixtures.Challenge.triple"
-    "implement it in a CoreCode or WorldCode module"
+  expect (Audit.stated markedFacts) "triple" "which is not a hole of"
+  expect (Audit.owned project markedFacts) "defines SoftwareChallengeTests.Fixtures.Challenge.triple with a body"
+    "Make SoftwareChallengeTests.Fixtures.Challenge.triple a hole with `:= sorry`"
   unless (Audit.solutionOf #[`A.CoreCode, `A.Solution]).toOption == some `A.Solution do
     throwError "The Solution module was not found"
-  for catalog in #[#[`A.CoreCode], #[`A.Solution, `B.Solution]] do
+  for (catalog, reason) in #[(#[`A.CoreCode], "builds no module named Solution"),
+      (#[`A.Solution, `B.Solution], "Rename all but the module that proves")] do
     let .error error := Audit.solutionOf catalog | throwError "{catalog} named one Solution module"
-    unless contains error "name only the module that proves the headlines and kills Solution" ||
-        contains error "name the module that proves the headlines and kills Solution" do
-      throwError "A Solution error was unclear: {error}"
+    unless contains error reason do throwError "A Solution error was unclear: {error}"
   let generated := Audit.comparatorConfig `A.Solution marked
   unless generated == expectedConfig do throwError "Generated comparator.json:\n{generated}"
 
@@ -389,17 +402,20 @@ run_cmd Elab.Command.liftTermElabM do
       member `double_positive_applies_replaced, member `double_zero_applies, member `double_applies] do
     throwError "A witness was misjudged: {read.misshapenWitnesses}"
   let errors := Audit.meaningful { challenge := read }
-  expect errors "double_halves: a precondition mentions SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
-    "state `∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4` and mark it \
-      `@[witness SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves]`"
+  expect errors "a precondition of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves mentions \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
+    "Add `@[witness SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves] theorem double_halves_applies : \
+      ∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4 := by sorry`"
   for witness in ["double_positive_applies_unused", "double_positive_applies_replaced"] do
     expect errors witness "but it is not `∃ n, 0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double n`"
   expect errors "double_zero_applies" "has no precondition to meet"
   expect errors "double_applies" "is not a headline of Challenge.lean"
-  expect errors "double_negative_vanishes: a precondition mentions SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
-    "state `∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 0` and mark it"
-  if errors.any fun error => ["double_small:", "double_positive:", "double_between:", "double_lengths:",
-      "succ_hits_one:", "double_nonnegative_vanishes:", "double_vanishes_only_at_zero:", "succ_law:"].any fun headline => contains error headline && contains error "precondition" then
+  expect errors "a precondition of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_negative_vanishes \
+      mentions SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
+    "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 0 := by sorry`"
+  if errors.any fun error => ["double_small", "double_positive", "double_between", "double_lengths",
+      "succ_hits_one", "double_nonnegative_vanishes", "double_vanishes_only_at_zero", "succ_law"].any fun headline =>
+        contains error s!"a precondition of {member headline.toName} mentions" then
     throwError "A headline with a witness, or with preconditions the solution cannot change, was rejected: {errors}"
   unless contains (Audit.comparatorConfig `A.Solution read) (toString (member `double_positive_applies)) do
     throwError "A witness is missing from comparator.json"
@@ -412,7 +428,8 @@ run_cmd Elab.Command.liftTermElabM do
       refuted == (Shape.applicability vacuous.premises vacuous.inputs vacuous.preconditions).negation do
     throwError "The witness a vacuous headline needs is not the one its solution refutes"
   expect (Audit.meaningful { challenge := { theorems := #[fixture `pick_one_zero], preconditioned := #[vacuous] } })
-    "pick_one_zero: a precondition mentions SoftwareChallengeTests.Fixtures.pick" "mark it `@[witness"
+    "a precondition of SoftwareChallengeTests.Fixtures.pick_one_zero mentions SoftwareChallengeTests.Fixtures.pick"
+    "`@[witness SoftwareChallengeTests.Fixtures.pick_one_zero] theorem pick_one_zero_applies"
   let some negative := read.preconditioned.find? (·.headline == member `double_negative_vanishes)
     | throwError "The precondition a specification definition hides was not read"
   unless Audit.toShape (← getConstInfo ``double_negative_vanishes_has_no_witness).type ==
@@ -420,21 +437,26 @@ run_cmd Elab.Command.liftTermElabM do
     throwError "The witness a hidden vacuous precondition needs is not the one its refutation rules out"
   if read.preconditioned.any (·.headline == member `double_vanishes_only_at_zero) then
     throwError "A world claim a headline concludes was unfolded into preconditions"
-  let law ← Audit.headline project (allEvidence (← getEnv)) (member `double_negative_vanishes)
-  let succLaw ← Audit.headline project (allEvidence (← getEnv)) (member `succ_law)
-  let claimed ← Audit.headline project (allEvidence (← getEnv)) (member `double_vanishes_only_at_zero)
+  let evidence := allEvidence (← getEnv)
+  let law ← analysed evidence (member `double_negative_vanishes)
+  let succLaw ← analysed evidence (member `succ_law)
+  let claimed ← analysed evidence (member `double_vanishes_only_at_zero)
   unless !law.oneInstance && !succLaw.oneInstance && claimed.oneInstance do
     throwError "A headline stated as a specification definition was misread as one instance, or as not"
   unless succLaw.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
     throwError "A world claim a specification definition assumes was not read: {succLaw.assumptions.map (·.claim)}"
-  let pending : Audit.Headline := { name := `h, assumptions := #[], unnamed := #[], witnessProved := false }
-  unless (Audit.describe toString pending).endsWith "  (witness not yet proved)" &&
-      (Audit.describe toString { pending with proved := false }).endsWith "  (not yet proved)" do
-    throwError "The report misstated an unproved witness: {Audit.describe toString pending}"
-  let heavy ← Audit.headline project (allEvidence (← getEnv)) (fixture `succ_at_leaves)
+  let line : Audit.Headline := { name := `h, assumptions := #[], unnamed := #[] }
+  for (shown, ending) in [({ line with witnessProved := false }, "h  (witness not yet proved)"),
+      ({ line with killProved := false }, "h  (kill not yet proved)"),
+      ({ line with proved := false }, "h  (not yet proved)"),
+      ({ line with proved := false, marker := "stated differently", killProved := false },
+        "h  (stated differently)  (kill not yet proved)")] do
+    unless Audit.describe toString shown == ending do
+      throwError "The report misstated what is pending: {Audit.describe toString shown}, expected {ending}"
+  let heavy ← analysed evidence (fixture `succ_at_leaves)
   unless heavy.assumptions.map (·.checks) == #[0] do throwError "A Check that cannot be matched counted"
-  expect (Audit.evidenced { headlines := #[heavy] }) "succ_at_leaves: cannot match Fixtures.SuccAt \
-    (Fixtures.leafSum 30 1) against the Check at SoftwareChallengeTests.Fixtures.WorldCode, line 52" "budget"
+  expect (Audit.pending { headlines := #[heavy] }) "SoftwareChallengeTests.Fixtures.WorldCode:52: this Check cannot \
+    be matched against Fixtures.SuccAt (Fixtures.leafSum 30 1)" "budget"
 
 run_cmd Elab.Command.liftTermElabM do
   let env ← getEnv
@@ -448,6 +470,90 @@ run_cmd Elab.Command.liftTermElabM do
   unless covered == some (3, #[]) do throwError "Code reached from a hole was counted unclaimed: {covered}"
   if (← Audit.unclaimed project moduleOf running #[] entry).isSome then
     throwError "A library without a lean_exe was reported unclaimed code"
+
+private def renamed (info : ConstantInfo) (name : Name) : ConstantInfo :=
+  match info with
+  | .thmInfo value => .thmInfo { value with name }
+  | .defnInfo value => .defnInfo { value with name }
+  | .opaqueInfo value => .opaqueInfo { value with name }
+  | .axiomInfo value => .axiomInfo { value with name }
+  | other => other
+
+private def tag : Audit.Standing → String
+  | .holds _ => "holds"
+  | .absent => "absent"
+  | .outside _ => "outside"
+  | .kind _ _ => "kind"
+  | .universes _ _ => "universes"
+  | .differs _ _ _ => "differs"
+  | .auxiliary _ _ => "auxiliary"
+
+run_cmd Elab.Command.liftTermElabM do
+  let env ← getEnv
+  let statement := fun (name : Name) => fixture (`Statements ++ name)
+  let imports := NameSet.empty.insert (fixture `Statements)
+  let standingOf := fun (stated found : Name) (auxiliaries : Array ConstantInfo) (closure : NameSet) => do
+    Audit.standing env (moduleOf env) closure auxiliaries (renamed (← getConstInfo (statement stated)) (statement found))
+  for (stated, found, expected) in [(`zero_right, `zero_right_renamed, "holds"),
+      (`zero_right, `zero_right_implicit, "holds"), (`zero_right, `zero_right_strict, "holds"),
+      (`zero_right, `zero_right_marked, "holds"), (`hole, `hole_abbrev, "holds"), (`in_u, `in_u, "holds"),
+      (`zero_right, `zero_right_assuming, "differs"), (`zero_right, `zero_right_flipped, "differs"),
+      (`add_swap, `add_swap_reordered, "differs"), (`twice_eq, `twice_eq_unfolded, "differs"),
+      (`twice_twice, `twice_twice_composed, "differs"), (`hole, `hole_optional, "differs"),
+      (`in_u, `in_v, "universes"), (`in_uv, `in_vu, "universes"), (`in_u, `in_one, "universes"),
+      (`zero_right, `zero_right_def, "kind"), (`hole, `hole_opaque, "kind"), (`hole, `hole_partial, "kind"),
+      (`hole, `hole_unsafe, "kind")] do
+    let judged ← tag <$> standingOf stated found #[] imports
+    unless judged == expected do throwError "{found} restating {stated} was judged {judged}, expected {expected}"
+  let one ← getConstInfo (statement `aux_one)
+  unless tag (← standingOf `zero_right `zero_right_renamed #[one] imports) == "holds" &&
+      tag (← standingOf `zero_right `zero_right_renamed #[renamed (← getConstInfo (statement `aux_two)) one.name]
+        imports) == "auxiliary" &&
+      tag (← standingOf `zero_right `zero_right_renamed #[] {}) == "outside" &&
+      tag (← Audit.standing env (moduleOf env) imports #[] (renamed one `SoftwareChallengeTests.Missing)) == "absent" do
+    throwError "An auxiliary constant, the Solution's imports, or a missing constant was misjudged"
+  let challenge : Audit.Challenge := {
+    theorems := #[`T, `K], holes := #[`H], kills := #[(`K, `T)], lines := #[(`T, 3), (`K, 5), (`H, 1)]
+    signatures := #[(`T, "(n : Nat) : n + 0 = n"), (`K, ": ¬ ∀ n : Nat, n = n + 1"), (`H, ": Nat → Nat")]
+    rendered := #[(`T, ("∀ (n : Nat), n + 0 = n", "∀ (n : Nat), @Eq Nat (n + 0) n"))] }
+  let facts : Audit.Facts := {
+    challenge, solution := `A.Solution, files := #[(`A.Solution, "A/Solution.lean"), (`A.Proofs, "A/Proofs.lean")]
+    standings := #[(`T, .absent), (`H, .absent), (`K, .absent)] }
+  let pending := Audit.pending facts
+  expect pending "Challenge.lean:3: T is not proved yet"
+    "Add `theorem T (n : Nat) : n + 0 = n := …`, with a proof, to A/Solution.lean or a module it imports"
+  expect pending "Challenge.lean:1: hole H is not implemented yet" "Add `def H : Nat → Nat := …` to a CoreCode module"
+  expect pending "Challenge.lean:5: K is not proved yet" "so nothing shows that T rejects a wrong implementation"
+  let moved := Audit.pending { facts with standings := #[(`T, .outside `A.Proofs)] }
+  expect moved "A/Proofs.lean: T is in A.Proofs, which A.Solution does not import" "Import A.Proofs from A/Solution.lean"
+  let flipped := Audit.pending { facts with standings := #[(`T, .differs `A.Solution "∀ (n : Nat), n = n + 0" "")] }
+  expect flipped "T states `∀ (n : Nat), n = n + 0` in A.Solution, but `∀ (n : Nat), n + 0 = n` in Challenge.lean:3"
+    "Restate it as `theorem T (n : Nat) : n + 0 = n := …`"
+  let alike := Audit.pending { facts with
+    standings := #[(`T, .differs `A.Solution "∀ (n : Nat), n + 0 = n" "∀ (n : Nat), @Eq.{1} Nat (n + 0) n")] }
+  expect alike "states `∀ (n : Nat), @Eq.{1} Nat (n + 0) n`" "but `∀ (n : Nat), @Eq Nat (n + 0) n` in Challenge.lean:3"
+  let config := Audit.comparatorConfig `A.Solution challenge
+  unless (Audit.comparatorErrors config (some config) false).isEmpty do
+    throwError "A current comparator.json was rejected"
+  expect (Audit.comparatorErrors config none false) "lakefile.lean has no target that writes it"
+    Audit.statementTarget
+  expect (Audit.comparatorErrors config none true) "comparator.json is missing" "Run `lake build`"
+  let stale := Audit.comparatorConfig `B.Solution { challenge with theorems := #[`T, `Old] }
+  for reason in ["it lists Old, which Challenge.lean no longer declares", "it omits K, which Challenge.lean declares",
+      "it names the solution module \"B.Solution\", but the package's is \"A.Solution\""] do
+    expect (Audit.comparatorErrors config (some stale) true) "comparator.json does not match Challenge.lean" reason
+  let auxiliary ← Audit.readChallenge project (fixture `AuxiliaryChallenge) (← findOLean (fixture `AuxiliaryChallenge))
+  expect (Audit.stated { challenge := auxiliary }) "first_is_zero" "elaborates to the private constant"
+  let source := "theorem foo (n : Nat) :\n    n = n := by\n  sorry\ntheorem bar (x : Nat := 0) : x = x := rfl\n"
+  unless Audit.signatureAt source ⟨1, 11⟩ == some "(n : Nat) : n = n" &&
+      Audit.signatureAt source ⟨4, 11⟩ == some "(x : Nat := 0) : x = x" do
+    throwError "A signature was misread: {Audit.signatureAt source ⟨1, 11⟩} {Audit.signatureAt source ⟨4, 11⟩}"
+  let signed ← Audit.readChallenge project (fixture `Challenge) (← findOLean (fixture `Challenge))
+    (← IO.FS.readFile "SoftwareChallengeTests/Fixtures/Challenge.lean")
+  unless signed.signatureOf (fixture `Challenge.double_even) ==
+      "theorem SoftwareChallengeTests.Fixtures.Challenge.double_even (n : Nat) : double n % 2 = 0" &&
+      signed.signatureOf (fixture `Challenge.double) == "def SoftwareChallengeTests.Fixtures.Challenge.double : Nat → Nat" do
+    throwError "A Challenge signature was misread: {signed.signatureOf (fixture `Challenge.double_even)}"
 
 end
 

@@ -3,6 +3,7 @@ open Lean Lake DSL
 
 package «constant_folding» where
   builtinLint := true
+  lintDriver := "software_challenge/lint_challenge"
   testDriver := "software_challenge/test_challenge"
   leanOptions := #[
     ⟨`autoImplicit, false⟩,
@@ -25,3 +26,7 @@ lean_exe «constant_folding» where
 
 lean_lib «Challenge» where
   leanOptions := #[⟨`warn.sorry, false⟩]
+
+@[default_target]
+target statement pkg : Unit := do
+  return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())

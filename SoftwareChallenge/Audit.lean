@@ -23,7 +23,7 @@ private def closure (next : Name → Array Name) (roots : Array Name) : NameSet 
 private def terminates (env : Environment) (name : Name) : Bool :=
   (Elab.Structural.eqnInfoExt.find? env name).isSome || (Elab.WF.eqnInfoExt.find? env name).isSome
 
-private def fixpoint (env : Environment) (name : Name) : Bool :=
+def fixpoint (env : Environment) (name : Name) : Bool :=
   (Elab.PartialFixpoint.eqnInfoExt.find? env name).isSome
 
 private def computational (info : ConstantInfo) : MetaM Bool := do
@@ -121,6 +121,19 @@ structure Preconditions where
   preconditions : List Shape
   mentions : Option Name
 
+structure Termination where
+  definition : Name
+  headline : Name
+  fixpoint : Bool
+  mentioned : Bool
+
+def terminations (fixpoint : Name → Bool) (terminating : Array (Name × Name)) (stated : Name → Option Expr) :
+    Array Termination :=
+  terminating.map fun (definition, headline) => {
+    definition, headline
+    fixpoint := fixpoint definition
+    mentioned := ((stated headline).map (·.getUsedConstants.contains definition)).getD false }
+
 structure Challenge where
   theorems : Array Name := #[]
   statements : Array (Name × Expr) := #[]
@@ -134,6 +147,12 @@ structure Challenge where
   terminating : Array (Name × Name) := #[]
   misshapen : Array (Name × Name) := #[]
   unmarked : Array (Name × Name) := #[]
+  declared : Array ConstantInfo := #[]
+  lines : Array (Name × Nat) := #[]
+  signatures : Array (Name × String) := #[]
+  rendered : Array (Name × String × String) := #[]
+  auxiliaries : Array (Name × Array ConstantInfo) := #[]
+  hypotheses : Array (Name × Array String) := #[]
 
 def Challenge.headlines (challenge : Challenge) : Array Name :=
   challenge.theorems.filter fun name => !challenge.kills.any (·.1 == name) && !challenge.witnesses.any (·.1 == name)
@@ -147,20 +166,24 @@ def Challenge.witnessesOf (challenge : Challenge) (headline : Name) : Array Name
 def Challenge.statement? (challenge : Challenge) (name : Name) : Option Expr :=
   (challenge.statements.find? (·.1 == name)).map (·.2)
 
-structure Termination where
-  definition : Name
-  headline : Name
-  fixpoint : Bool
-  mentioned : Bool
+def Challenge.lineOf (challenge : Challenge) (name : Name) : Nat :=
+  ((challenge.lines.find? (·.1 == name)).map (·.2)).getD 0
 
-def terminations (env : Environment) (terminating : Array (Name × Name))
-    (stated : Name → Option Expr := fun _ => none) : Array Termination :=
-  terminating.map fun (definition, headline) => {
-    definition, headline
-    fixpoint := fixpoint env definition
-    mentioned := (((env.find? headline).map (·.type) <|> stated headline).map
-      (·.getUsedConstants.contains definition)).getD false }
+def Challenge.renderedOf (challenge : Challenge) (name : Name) : String × String :=
+  ((challenge.rendered.find? (·.1 == name)).map (·.2)).getD ("", "")
 
+def Challenge.signatureOf (challenge : Challenge) (name : Name) : String :=
+  let keyword := if challenge.holes.contains name then "def" else "theorem"
+  match challenge.signatures.find? (·.1 == name) with
+  | some (_, signature) => s!"{keyword} {name} {signature}"
+  | none => s!"{keyword} {name} : {(challenge.renderedOf name).1}"
+
+def Challenge.purpose (challenge : Challenge) (name : Name) : String :=
+  match challenge.kills.find? (·.1 == name), challenge.witnesses.find? (·.1 == name) with
+  | some (_, headline), _ => s!"so nothing shows that {headline} rejects a wrong implementation"
+  | _, some (_, headline) => s!"so nothing shows that some input meets the preconditions of {headline}"
+  | none, none => if challenge.holes.contains name then "so no headline about it can be proved"
+    else "so the solution does not claim it yet"
 structure Assumption where
   claim : Name
   statement : String
@@ -178,9 +201,11 @@ structure Headline where
   unnamed : Array String
   unmatched : Array Unmatched := #[]
   proved : Bool := true
+  marker : String := "not yet proved"
   oneInstance : Bool := false
   laws : Nat := 1
   unlinted : Option Name := none
+  killProved : Bool := true
   witnessProved : Bool := true
 
 def matchBudget : Nat := 200000
@@ -227,15 +252,11 @@ partial def lawCount (project : Project) (type : Expr) : MetaM Nat := do
         count := count + (← lawCount project fieldType)
       return count
 
-def headline (project : Project) (evidence : Array Evidence) (name : Name) (stated : Option Expr := none)
-    (budget : Nat := matchBudget) : MetaM Headline := do
+
+def headline (project : Project) (evidence : Array Evidence) (name : Name) (written : Expr)
+    (prover : Option Name := none) (budget : Nat := matchBudget) : MetaM Headline := do
   let env ← getEnv
-  let (written, proved) ← match env.find? name, stated with
-    | some info, _ => pure (info.type, true)
-    | none, some type => pure (type, false)
-    | none, none => throwError "Headline {name} is not compiled"
   let type ← unfolded project written
-  let prover := if proved then (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module) else none
   let record := prover.bind (premiseRecord? env · name)
   let (patterns, _, _) ← Meta.forallMetaTelescope type
   Meta.forallTelescope type fun binders _ => do
@@ -264,8 +285,8 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (stat
         | none => assumptions := assumptions.push { claim, statement := shown, checks, unused }
       else if !statement.hasFVar && (← Meta.isProp statement) then
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
-    return { name, assumptions, unnamed, unmatched, proved, oneInstance, laws := ← lawCount project type
-             unlinted := if record.isNone then prover else none }
+    return { name, assumptions, unnamed, unmatched, proved := prover.isSome, oneInstance,
+             laws := ← lawCount project type, unlinted := if record.isNone then prover else none }
 
 def toUniverse : Level → Universe
   | .zero => .zero
@@ -346,10 +367,45 @@ def independent (env : Environment) (replaceable : NameSet) (headlines : Array N
   | some stated, some rejected, some others => stated.independent replaceable.contains others.toList rejected
   | _, _, _ => false
 
-private def line (name : Name) : CoreM Nat :=
-  return ((← findDeclarationRangesCore? name).map (·.range.pos.line)).getD 0
 
-def readChallenge (project : Project) (challenge : Name) (olean : System.FilePath) : IO Challenge := do
+def oneLine (text : String) : String :=
+  " ".intercalate ((text.splitOn "\n").map (·.trimAscii.toString) |>.filter (!·.isEmpty))
+
+private def lastOf : Name → String
+  | .str _ last => last
+  | name => toString name
+
+private def signatureEnd : List Char → Nat → List Char → Option (List Char)
+  | ':' :: '=' :: _, 0, kept => some kept.reverse
+  | char :: rest, depth, kept =>
+    signatureEnd rest (if "([{⦃⟨".contains char then depth + 1 else if ")]}⦄⟩".contains char then depth - 1
+      else depth) (char :: kept)
+  | [], _, _ => none
+
+def signatureAt (source : String) (position : Position) : Option String := do
+  let lines := source.splitOn "\n"
+  let first ← lines[position.line - 1]?
+  let text := "\n".intercalate (String.ofList (first.toList.drop position.column) :: lines.drop position.line)
+  let signature := oneLine (String.ofList (← signatureEnd text.toList 0 []))
+  if signature.isEmpty then none else some signature
+
+def render (expr : Expr) : MetaM (String × String) := do
+  let shown := fun (explicit : Bool) => withOptions (fun options => ((options.setBool `pp.proofs true).setBool
+    `pp.explicit explicit).setBool `pp.universes explicit) do return oneLine (toString (← Meta.ppExpr expr))
+  return (← shown false, ← shown true)
+
+def auxiliariesOf (env : Environment) (inChallenge : Name → Bool) (targets : NameSet) (root : ConstantInfo) :
+    Array ConstantInfo :=
+  let auxiliary := fun (name : Name) => inChallenge name && !targets.contains name
+  let uses := fun (name : Name) => match env.find? name with
+    | some info => (info.type.getUsedConstants ++
+        ((info.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]).filter auxiliary
+    | none => #[]
+  ((closure uses (root.type.getUsedConstants.filter auxiliary)).toArray.filterMap env.find?).qsort
+    (toString ·.name < toString ·.name)
+
+def readChallenge (project : Project) (challenge : Name) (olean : System.FilePath) (source : String := "") :
+    IO Challenge := do
   let parts ← #[olean, olean.addExtension "server", olean.addExtension "private"].filterM (·.pathExists)
   let ir ← #[olean.withExtension "ir.sig", olean.withExtension "ir"].filterM (·.pathExists)
   let some (data, _) := (← readModuleDataParts parts).back?
@@ -358,8 +414,10 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
   withEnvironment (artifacts := artifacts) #[challenge] do
     let env ← getEnv
     let some index := env.getModuleIdx? challenge | throwError "{challenge} is not compiled"
-    let declared := (← (data.constants.filter (!·.name.isInternal)).mapM fun info =>
-      return (← line info.name, info)).qsort (·.1 < ·.1) |>.map (·.2)
+    let written ← (data.constants.filter (!·.name.isInternal)).filterMapM fun info => do
+      return (← findDeclarationRangesCore? info.name).map (·, info)
+    let written := written.qsort (·.1.range.pos.line < ·.1.range.pos.line)
+    let declared := written.map (·.2)
     let usesSorry := fun (info : ConstantInfo) =>
       (info.value?.map (·.getUsedConstants.contains ``sorryAx)).getD false
     let foreign := (env.header.modules.zip env.header.moduleData).flatMap fun (module, data) =>
@@ -367,6 +425,9 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
         (data.constants.filter (isExtern env ·.name)).map (·.name)
       else #[]
     let holes := (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name)
+    let targets := declared.filter fun info => info.isTheorem || holes.contains info.name
+    let targetNames := NameSet.ofList (targets.map (·.name)).toList
+    let inChallenge := fun (name : Name) => env.getModuleIdxFor? name == some index
     let found : Challenge := {
       theorems := (declared.filter (·.isTheorem)).map (·.name), holes
       statements := (declared.filter (·.isTheorem)).map fun info => (info.name, info.type)
@@ -374,19 +435,30 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
       kills := PersistentEnvExtension.getModuleEntries killsExt env index
       witnesses := PersistentEnvExtension.getModuleEntries witnessExt env index
       terminating := (PersistentEnvExtension.getModuleEntries terminatesExt env index).map
-        fun (headline, hole) => (hole, headline) }
+        fun (headline, hole) => (hole, headline)
+      declared := targets
+      lines := written.map fun (ranges, info) => (info.name, ranges.range.pos.line)
+      signatures := written.filterMap fun (ranges, info) =>
+        (signatureAt source ranges.selectionRange.endPos).map (info.name, ·)
+      auxiliaries := targets.map fun info => (info.name, auxiliariesOf env inChallenge targetNames info) }
     let replaceable := NameSet.ofList (holes ++ foreign).toList
     let headlines := found.headlines
-    let preconditioned ← Meta.MetaM.run' <| headlines.filterMapM fun headline =>
-      match env.find? headline with
-      | some info => preconditionsOf project replaceable headline info.type
-      | none => pure none
+    let (preconditioned, rendered, hypotheses) ← Meta.MetaM.run' do
+      let preconditioned ← headlines.filterMapM fun headline => match env.find? headline with
+        | some info => preconditionsOf project replaceable headline info.type
+        | none => pure none
+      let rendered ← targets.mapM fun info => return (info.name, ← render info.type)
+      let hypotheses ← headlines.filterMapM fun name => do
+        let some info := env.find? name | return none
+        let unnamed := (← headline project #[] name info.type).unnamed
+        return if unnamed.isEmpty then none else some (name, unnamed)
+      return (preconditioned, rendered, hypotheses)
     let witnessed := fun (witness headline : Name) =>
       match preconditioned.find? (·.headline == headline), env.find? witness with
       | some preconditions, some info => preconditions.witnessedBy info.type
       | _, _ => false
     return { found with
-      preconditioned
+      preconditioned, rendered, hypotheses
       misshapenWitnesses := found.witnesses.filter fun (witness, headline) => !witnessed witness headline
       misshapen := found.kills.filter fun (kill, headline) => !headlines.contains headline ||
         !(kills env replaceable headline kill || independent env replaceable headlines headline kill)
@@ -398,10 +470,12 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
 def solutionOf (catalog : Array Name) : Except String Name :=
   match catalog.filter (· matches .str _ "Solution") with
   | #[solution] => .ok solution
-  | #[] => .error "no module named Solution is built by a default target; name the module that proves \
-      the headlines and kills Solution, e.g. MyApp.Solution, and build it from a default lean_lib"
-  | several => .error s!"{", ".intercalate (several.map toString).toList} are all named Solution; \
-      name only the module that proves the headlines and kills Solution"
+  | #[] => .error s!"the package builds no module named Solution, so the comparator has no proofs to check. Add \
+      {((catalog[0]?.map (·.getRoot)).getD `MyApp) ++ `Solution}, proving the headlines, kills, and witnesses, to \
+      the roots of a default lean_lib in lakefile.lean, then run `lake build`."
+  | several => .error s!"{", ".intercalate (several.map toString).toList} are all named Solution, but the \
+      comparator checks one module. Rename all but the module that proves the headlines, kills, and witnesses, \
+      then run `lake build`."
 
 def comparatorConfig (solution : Name) (challenge : Challenge) : String :=
   let quoted := fun (name : Name) => (toJson name).compress
@@ -438,22 +512,109 @@ def unclaimed (project : Project) (moduleOf : Name → Option Name) (running : N
     return (← findDeclarationRangesCore? name).isSome && (← computational info)
   return some (written.size, written.filter (!claimed.contains ·) |>.map privateToUserName)
 
+def importClosure (env : Environment) (root : Name) : NameSet :=
+  closure (fun module => match env.getModuleIdx? module with
+    | some index => env.header.moduleData[index.toNat]!.imports.map (·.module)
+    | none => #[]) #[root]
+
+inductive Standing where
+  | holds (module : Name)
+  | absent
+  | outside (module : Name)
+  | kind (module : Name) (found : String)
+  | universes (module : Name) (found : List Name)
+  | differs (module : Name) (plain explicit : String)
+  | auxiliary (module : Name) (constant : Name)
+  deriving Inhabited
+
+def Standing.marker : Standing → String
+  | .absent => "not yet proved"
+  | .outside _ => "outside Solution's imports"
+  | _ => "stated differently"
+
+def kindOf : ConstantInfo → String
+  | .axiomInfo _ => "an axiom"
+  | .defnInfo info => match info.safety with
+    | .safe => "a def"
+    | .unsafe => "an unsafe def"
+    | .partial => "a partial def"
+  | .thmInfo _ => "a theorem"
+  | .opaqueInfo _ => "an opaque constant, as `partial def` and `opaque` declare"
+  | .quotInfo _ => "a quotient primitive"
+  | .inductInfo _ => "an inductive type"
+  | .ctorInfo _ => "a constructor"
+  | .recInfo _ => "a recursor"
+
+def kindMatches (stated found : ConstantInfo) : Bool :=
+  match stated, found with
+  | .thmInfo _, .thmInfo _ => true
+  | .defnInfo stated, .defnInfo found => stated.safety == found.safety
+  | _, _ => false
+
+def sameConstant (stated found : ConstantInfo) : Bool :=
+  let value := fun (info : ConstantInfo) => (info.value? (allowOpaque := true)).map toShape
+  stated.levelParams == found.levelParams && toShape stated.type == toShape found.type &&
+    value stated == value found && match stated, found with
+    | .defnInfo stated, .defnInfo found =>
+      stated.safety == found.safety && stated.hints == found.hints && stated.all == found.all
+    | .thmInfo stated, .thmInfo found => stated.all == found.all
+    | .opaqueInfo stated, .opaqueInfo found => stated.isUnsafe == found.isUnsafe && stated.all == found.all
+    | .axiomInfo stated, .axiomInfo found => stated.isUnsafe == found.isUnsafe
+    | .inductInfo _, .inductInfo _ | .ctorInfo _, .ctorInfo _ | .recInfo _, .recInfo _
+    | .quotInfo _, .quotInfo _ => true
+    | _, _ => false
+
+def standing (env : Environment) (moduleOf : Name → Option Name) (solutionImports : NameSet)
+    (auxiliaries : Array ConstantInfo) (stated : ConstantInfo) : MetaM Standing := do
+  let some found := env.find? stated.name | return .absent
+  let some module := moduleOf stated.name | return .absent
+  if !solutionImports.contains module then return .outside module
+  if !kindMatches stated found then return .kind module (kindOf found)
+  if stated.levelParams != found.levelParams then return .universes module found.levelParams
+  if toShape stated.type != toShape found.type then
+    let (plain, explicit) ← render found.type
+    return .differs module plain explicit
+  match auxiliaries.find? fun auxiliary => !((env.find? auxiliary.name).any (sameConstant auxiliary)) with
+  | some auxiliary => return .auxiliary module auxiliary.name
+  | none => return .holds module
+
 structure Facts where
   inventory : Inventory := ⟨#[], #[]⟩
   challenge : Challenge := {}
   headlines : Array Headline := #[]
-  mentioned : NameSet := {}
   holes : Array (Name × Option Name) := #[]
-  registrations : Array (Name × Option Role × Bool) := #[]
+  registrations : Array (Name × Name × Option Role × Bool) := #[]
   entry : Option (Option Name × Array Name) := none
   unclaimed : Option (Nat × Array Name) := none
   challengeImports : Array Name := #[]
   terminations : Array Termination := #[]
+  standings : Array (Name × Standing) := #[]
+  hidden : Array (String × String) := #[]
+  lints : Array (Name × Array Nat × Array Name) := #[]
+  solution : Name := .anonymous
+  files : Array (Name × String) := #[]
+  lines : Std.HashMap Name Nat := {}
+  imports : Array (Name × Array (Name × Nat)) := #[]
+  challengeFile : String := "Challenge.lean"
+
+def Facts.fileOf (facts : Facts) (module : Name) : String :=
+  if module == challengeModule then facts.challengeFile
+  else ((facts.files.find? (·.1 == module)).map (·.2)).getD (toString module)
+
+def Facts.place (facts : Facts) (module name : Name) : String :=
+  let line := if module == challengeModule then facts.challenge.lineOf name else facts.lines.getD name 0
+  if line == 0 then facts.fileOf module else s!"{facts.fileOf module}:{line}"
+
+def Facts.importLine (facts : Facts) (module dependency : Name) : Nat :=
+  (((facts.imports.find? (·.1 == module)).bind fun (_, lines) => lines.find? (·.1 == dependency)).map (·.2)).getD 1
+
+private def lintNext : String := "then run `lake lint`"
+
+private def buildNext : String := "then run `lake build`"
 
 private def roleRule : String :=
-  "a module's role is the first component of its name that is CoreSpec, WorldSpec, CoreCode, or \
-    WorldCode, and tooling otherwise, so rename a module to change its role, \
-    e.g. MyApp.Helpers to MyApp.CoreCode.Helpers"
+  "a module's role is the first component of its name that is CoreSpec, WorldSpec, CoreCode, or WorldCode, \
+    and tooling otherwise, as in MyApp.CoreCode.Helpers"
 
 private def allowedImports : Role → String
   | .coreSpec => "CoreSpec modules and modules outside the package"
@@ -462,12 +623,37 @@ private def allowedImports : Role → String
   | .worldCode => "any module but tooling"
   | .tooling => "any module"
 
-private def remedy : Role → String
-  | .coreSpec | .coreCode => "CoreSpec and CoreCode are pure: move effects and escape hatches to a WorldCode module"
-  | .worldSpec => "declare foreign code as `@[extern] opaque` and move effects to a WorldCode module"
-  | .worldCode => "WorldCode may do IO but not `unsafe`, `@[extern]`, or `@[implemented_by]`; \
-      ask the owner to declare foreign code as `@[extern] opaque` in a WorldSpec module"
-  | .tooling => "tooling may do anything but use axioms"
+private def importPurpose : Role → String
+  | .coreSpec => "the statements rest only on pure definitions"
+  | .worldSpec => "claims about the world rest only on the statements' definitions"
+  | .coreCode => "pure code never reaches foreign code or effects"
+  | .worldCode => "the program never runs tooling"
+  | .tooling => "nothing constrains it"
+
+private def purity : Role → String
+  | .coreSpec | .coreCode => "must be pure and total, so that the proofs are about the code that runs"
+  | .worldSpec => "may declare foreign code only as `@[extern] opaque`, so that the kernel never unfolds it"
+  | .worldCode => "may do IO but not use `unsafe`, `@[extern]`, or `@[implemented_by]`, so that the code that \
+      runs is the code proved"
+  | .tooling => "may do anything"
+
+private def offence : String → String
+  | "initializer" => "an initializer"
+  | "IO" => "IO"
+  | "dbg builtin" => "a dbg builtin"
+  | reason => s!"`{reason}`"
+
+private def cure (name : Name) : String → String
+  | "unsafe" => s!"remove `unsafe` from {name}"
+  | "partial" => s!"remove `partial` from {name} and recurse structurally or with `termination_by`"
+  | "@[extern]" => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, as \
+      `@[extern] opaque`"
+  | "@[implemented_by]" => s!"remove `@[implemented_by]` from {name}"
+  | "initializer" => s!"move the `initialize` declaration {name} to a WorldCode module"
+  | "IO" => s!"move {name} to a WorldCode module"
+  | "dbg builtin" => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
+  | "@[extern] with a body the kernel unfolds" => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
+  | reason => s!"remove {reason} from {name}"
 
 private def located (project : Project) (module : Name) : String :=
   match project.role? module with
@@ -477,135 +663,314 @@ private def located (project : Project) (module : Name) : String :=
 private def distinct (errors : Array String) : Array String :=
   errors.foldl (fun kept error => if kept.contains error then kept else kept.push error) #[]
 
+private def axiomError (place : String) (name : Name) (axioms : Array Name) : String :=
+  let listed := ", ".intercalate (axioms.map toString).toList
+  if axioms.contains ``sorryAx then
+    s!"{place}: {name} uses `sorry`, so it is not proved. Replace each `sorry` in {name} with a proof or a \
+      definition, or delete {name}, {lintNext}."
+  else if axioms.contains name then
+    s!"{place}: `axiom {name}` asserts {name} without proof, and the comparator permits only propext, \
+      Classical.choice, and Quot.sound. Delete it and prove what uses it, {lintNext}."
+  else
+    let compiled := if axioms.contains `Lean.ofReduceBool then
+      " (`native_decide` uses Lean.ofReduceBool, so prove it with `decide` instead)" else ""
+    s!"{place}: {name} depends on axiom {listed}, but the comparator permits only propext, Classical.choice, and \
+      Quot.sound, so its proof is not checked. Prove {name} without {listed}{compiled}, {lintNext}."
+
 def sound (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
   for fact in facts.inventory.modules do
+    let file := facts.fileOf fact.name
     let some role := project.role? fact.name
-      | errors := errors.push s!"{fact.name} is not a module of the challenge package; build it from a \
-          lean_lib of the package"
-    unless fact.usesModuleSystem do errors := errors.push s!"{fact.name}: start the file with `module`"
+      | errors := errors.push s!"{file}: no lean_lib of the package builds {fact.name}, so the audit gives it no \
+          role. Build it from a lean_lib in lakefile.lean, {lintNext}."
+    unless fact.usesModuleSystem do
+      errors := errors.push s!"{file}:1: {fact.name} does not start with `module`, so the audit cannot tell what \
+        it exposes. Add `module` as the first line of {file}, {lintNext}."
     for dependency in fact.imports do
       unless project.admits role dependency do
-        errors := errors.push s!"{fact.name} ({role}) may not import {located project dependency.name}; \
-          it may import {allowedImports role}; {roleRule}"
+        errors := errors.push s!"{file}:{facts.importLine fact.name dependency.name}: {fact.name} ({role}) imports \
+          {located project dependency.name}, but {role} may import only {allowedImports role}, so that \
+          {importPurpose role}. Remove `import {dependency.name}` from {file}, or rename {fact.name} to the role \
+          it needs ({roleRule}), {lintNext}."
   for fact in facts.inventory.declarations do
     if let some role := project.role? fact.moduleName then
       let name := (Compiler.isUnsafeRecName? fact.name).getD fact.name
-      unless fact.axioms.isEmpty do
-        errors := errors.push s!"{name} ({role}) uses axiom {", ".intercalate (fact.axioms.map toString).toList}; \
-          remove the axiom and prove the fact, or, if it is an assumption about the world, ask the owner to \
-          state it as a WorldClaim"
+      let shown := privateToUserName name
+      let place := facts.place fact.moduleName name
+      unless fact.axioms.isEmpty do errors := errors.push (axiomError place shown fact.axioms)
       let reasons := fact.reasons role
       unless reasons.isEmpty do
-        errors := errors.push s!"{name} ({role}): {", ".intercalate reasons}; {remedy role}"
+        errors := errors.push s!"{place}: {shown} uses {" and ".intercalate (reasons.map offence)} in \
+          {located project fact.moduleName}, but {role} code {purity role}. \
+          {(" and ".intercalate (reasons.map (cure shown))).capitalize}, {lintNext}."
   for (hole, module) in facts.holes do
-    unless (module.bind project.role?) matches some .coreCode | some .worldCode do
-      let place := (module.map fun module => s!"is defined in {located project module}").getD "is not defined"
-      errors := errors.push s!"{hole}: a definition hole must be defined in a CoreCode or WorldCode module, \
-        but it {place}; implement it in one; {roleRule}"
-  if let some (module, unreached) := facts.entry then
-    unless (module.bind project.role?) matches some .worldCode do
-      errors := errors.push s!"main: the package declares a lean_exe, so declare main in a WorldCode module"
-    for hole in unreached do errors := errors.push s!"{hole}: main never reaches this hole; call it from main"
+    if let some module := module then
+      unless (project.role? module) matches some .coreCode | some .worldCode do
+        errors := errors.push s!"{facts.place module hole}: hole {hole} is defined in {located project module}, \
+          but a hole is code, which lives in CoreCode or WorldCode, where the audit checks what it may do. Move \
+          `def {hole}` from {facts.fileOf module} to a CoreCode module, or to a WorldCode module if it does IO, \
+          {lintNext}."
+  if let some (some module, _) := facts.entry then
+    unless (project.role? module) matches some .worldCode do
+      errors := errors.push s!"{facts.place module `main}: main is defined in {located project module}, but main \
+        runs the program, which does IO, and only WorldCode may. Move `def main` to the WorldCode module that is \
+        the root of the lean_exe, {lintNext}."
   for t in facts.terminations do
-    let marked := s!"@[terminates {t.definition}] on {t.headline} in Challenge.lean"
-    unless t.fixpoint do
-      errors := errors.push s!"{t.definition}: {marked} names it, but it is not a partial_fixpoint definition; \
-        define it with partial_fixpoint, or ask the owner to drop the @[terminates]"
-    unless facts.holes.any (·.1 == t.definition) do
-      errors := errors.push s!"{t.definition}: {marked} names it, but it is not a definition hole; \
-        ask the owner to name a hole declared with `sorry` in Challenge.lean"
-    unless facts.challenge.headlines.contains t.headline && !(facts.challenge.killsOf t.headline).isEmpty do
-      errors := errors.push s!"{t.definition}: {marked}, but {t.headline} is not a headline with a kill; \
-        ask the owner to move the @[terminates] to a headline with a kill"
-    unless t.mentioned do
-      errors := errors.push s!"{t.definition}: {marked}, but {t.headline} does not mention it; \
-        ask the owner to move the @[terminates] to a headline that states it returns"
-  for line in facts.headlines do
-    for hypothesis in line.unnamed do
-      errors := errors.push s!"{line.name}: hypothesis {hypothesis} is not a WorldClaim; \
-        ask the owner to declare it as one in a WorldSpec module, or to drop it"
+    if let some (_, some module) := facts.holes.find? (·.1 == t.definition) then
+      unless t.fixpoint do
+        errors := errors.push s!"{facts.place module t.definition}: hole {t.definition} is not defined with \
+          `partial_fixpoint`, but `@[terminates {t.definition}]` on {t.headline} \
+          ({facts.place challengeModule t.headline}) admits it only as a partial_fixpoint definition, whose \
+          termination {t.headline} states. Define {t.definition} with `partial_fixpoint` after its body in \
+          {facts.fileOf module}, {lintNext}."
   return distinct errors
+
+def registered (project : Project) (facts : Facts) : Array String := Id.run do
+  let mut errors := #[]
+  for (claim, module, role, declaredThere) in facts.registrations do
+    if role != some .worldSpec then
+      errors := errors.push s!"{facts.place module claim}: WorldClaim {claim} is declared in \
+        {located project module}, but a world claim is an assumption about the world, which only a WorldSpec \
+        module states. Remove `WorldClaim {claim}` from {facts.fileOf module}, and state a claim the headlines \
+        assume in a WorldSpec module, {lintNext}."
+    unless declaredThere do
+      errors := errors.push s!"{facts.fileOf module}: {module} registers {claim} as a WorldClaim without declaring \
+        it, but a claim is registered only by the `WorldClaim` command that declares it. Remove that registration \
+        from {facts.fileOf module}, {lintNext}."
+  return errors
+
+def evidenced (facts : Facts) : Array String :=
+  facts.headlines.filterMap fun line => line.unlinted.map fun module =>
+    s!"{facts.place module line.name}: {line.name} is proved in {module}, which does not run the premise linter, \
+      so the report cannot tell which world claims the proof uses. Add `meta import SoftwareChallenge` to \
+      {facts.fileOf module}, {lintNext}."
+
+def warned (facts : Facts) : Array String :=
+  facts.lints.map fun (module, lines, linters) =>
+    let positions := if lines.isEmpty then "" else s!" at line {", ".intercalate (lines.map toString).toList}"
+    s!"{facts.fileOf module}: Lean's linters ({", ".intercalate (linters.map toString).toList}) warn{positions}, as \
+      `lake lint` printed above, so {module} does not pass Lean's linters. Fix each warning as it says, \
+      {lintNext}."
 
 def meaningful (facts : Facts) : Array String :=
   let challenge := facts.challenge
+  let file := facts.challengeFile
+  let here := fun (name : Name) => facts.place challengeModule name
   let stated := challenge.headlines.filterMap fun name => (challenge.statement? name).map (name, toShape ·)
+  let mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
+    ((challenge.statement? name).map (·.getUsedConstants)).getD #[]).toList
   (stated.mapIdx fun index (later, shape) => ((stated.extract 0 index).find? (·.2 == shape)).map fun (earlier, _) =>
-    s!"{later} states the same as {earlier}; ask the owner to drop one from Challenge.lean").filterMap id ++
+    s!"{here later}: {later} states the same as {earlier} ({here earlier}), up to binder names, so it claims \
+      nothing new. Remove {later} and its kills and witnesses from {file}, {buildNext}.").filterMap id ++
   (challenge.headlines.filterMap fun headline =>
     if !(challenge.killsOf headline).isEmpty || challenge.unmarked.any (·.1 == headline) then none
     else match challenge.unmarked.find? (·.2 == headline) with
-      | some (kill, _) => some s!"{headline}: no kill shows it rejects a wrong implementation; \
-          in Challenge.lean, mark {kill} `@[kills {headline}]`"
-      | none => some s!"{headline}: no kill shows it rejects a wrong implementation; in Challenge.lean, \
-          state `¬` {headline} with its holes replaced by wrong ones and mark it `@[kills {headline}]`") ++
+      | some (kill, _) => some s!"{here headline}: {headline} has no kill, so nothing shows it rejects a wrong \
+          implementation, but {kill} ({here kill}) states one. Mark {kill} `@[kills {headline}]` in {file}, \
+          {buildNext}."
+      | none => some s!"{here headline}: {headline} has no kill, so nothing shows it rejects a wrong \
+          implementation. Add `@[kills {headline}] theorem {lastOf headline}_rejects : \
+          ¬ {(challenge.renderedOf headline).1} := by sorry` to {file}, with each hole replaced by a wrong \
+          implementation, {buildNext}.") ++
   (challenge.misshapen.map fun (kill, headline) =>
-    if challenge.headlines.contains headline then s!"{kill}: marked `@[kills {headline}]`, but it is not \
-      `¬` {headline} with holes and WorldSpec foreign constants replaced by wrong ones, nor that negation `∧` \
-      every other headline in Challenge.lean order under the same replacement; in Challenge.lean, \
-      restate it as one of these, or name the headline it rejects"
-    else s!"{kill}: marked `@[kills {headline}]`, but {headline} is not a headline of Challenge.lean; \
-      name the headline it rejects") ++
+    if challenge.headlines.contains headline then s!"{here kill}: {kill} is marked `@[kills {headline}]`, but it \
+      is neither `¬` {headline} with its holes and WorldSpec foreign functions replaced by wrong implementations, \
+      nor that negation `∧` every other headline in {file} order under the same replacement, so it does not show \
+      that {headline} rejects anything. Restate {kill} as `¬ {(challenge.renderedOf headline).1}` with the holes \
+      replaced, or name in `@[kills …]` the headline it rejects, {buildNext}."
+    else s!"{here kill}: {kill} is marked `@[kills {headline}]`, but {headline} is not a headline of {file}, so \
+      the kill rejects nothing claimed. Name a headline in `@[kills …]`, {buildNext}.") ++
   (challenge.preconditioned.filterMap fun preconditions => preconditions.mentions.bind fun constant =>
     if !(challenge.witnessesOf preconditions.headline).isEmpty then none
-    else some s!"{preconditions.headline}: a precondition mentions {constant}, so no kill shows that some input \
-      meets it; in Challenge.lean, state `{preconditions.expected}` and mark it \
-      `@[witness {preconditions.headline}]`") ++
+    else some s!"{here preconditions.headline}: a precondition of {preconditions.headline} mentions {constant}, \
+      so no kill shows that some input meets it, and {preconditions.headline} could hold vacuously. Add \
+      `@[witness {preconditions.headline}] theorem {lastOf preconditions.headline}_applies : \
+      {preconditions.expected} := by sorry` to {file}, {buildNext}.") ++
   (challenge.misshapenWitnesses.map fun (witness, headline) =>
-    let marked := s!"{witness}: marked `@[witness {headline}]`, but"
+    let marked := s!"{here witness}: {witness} is marked `@[witness {headline}]`, but"
     match challenge.preconditioned.find? (·.headline == headline) with
-    | some preconditions => s!"{marked} it is not `{preconditions.expected}`: the world claims of {headline} \
-        that mention no input, then `∃` the inputs its preconditions use, in order, of their conjunction, \
-        with holes kept; in Challenge.lean, restate it as that"
-    | none => if challenge.headlines.contains headline then s!"{marked} {headline} has no precondition to \
-        meet; drop the witness from Challenge.lean"
-      else s!"{marked} {headline} is not a headline of Challenge.lean; name the headline whose \
-        preconditions it meets") ++
-  (facts.holes.filter (!facts.mentioned.contains ·.1)).map fun (hole, _) =>
-    s!"{hole}: no headline mentions this hole; state one in Challenge.lean, or drop the hole"
+    | some preconditions => s!"{marked} it is not `{preconditions.expected}`: the world claims of {headline} that \
+        mention no input, then `∃` the inputs its preconditions use, in order, of their conjunction, with holes \
+        kept, so it does not show that some input meets them. Restate {witness} as `{preconditions.expected}`, \
+        {buildNext}."
+    | none => if challenge.headlines.contains headline then s!"{marked} {headline} has no precondition to meet, \
+        so the witness shows nothing. Remove {witness} from {file}, {buildNext}."
+      else s!"{marked} {headline} is not a headline of {file}, so the witness meets no claimed precondition. \
+        Name in `@[witness …]` the headline whose preconditions it meets, {buildNext}.") ++
+  (challenge.holes.filter (!mentioned.contains ·)).map fun hole =>
+    s!"{here hole}: no headline mentions hole {hole}, so nothing is claimed about it. State a headline about \
+      {hole} in {file}, or remove the hole, {buildNext}."
 
 def owned (project : Project) (facts : Facts) : Array String := Id.run do
+  let file := facts.challengeFile
   let mut errors := #[]
-  for (claim, role, declaredThere) in facts.registrations do
-    if role != some .worldSpec then
-      errors := errors.push s!"{claim}: declare WorldClaims in a WorldSpec module"
-    unless declaredThere do
-      errors := errors.push s!"{claim}: registered outside the module that declares it; \
-        register it with WorldClaim in the module that declares it"
   for dependency in facts.challengeImports do
     unless project.admits .worldSpec { name := dependency, comptime := false } do
-      errors := errors.push s!"{challengeModule} imports {dependency}; \
-        a challenge may import only CoreSpec and WorldSpec modules and modules outside the package"
+      errors := errors.push s!"{file}:{facts.importLine challengeModule dependency}: {challengeModule} imports \
+        {located project dependency}, but a challenge may import only CoreSpec and WorldSpec modules and modules \
+        outside the package, so that the statement rests only on what its owner wrote. Remove \
+        `import {dependency}` from {file} and import the CoreSpec or WorldSpec modules it needs, {buildNext}."
   for name in facts.challenge.filled do
-    errors := errors.push s!"{challengeModule} implements {name}; it only declares holes, so keep \
-      `sorry` there and implement it in a CoreCode or WorldCode module"
+    errors := errors.push s!"{facts.place challengeModule name}: {challengeModule} defines {name} with a body, but \
+      a challenge declares only theorems and holes, which the solution implements. Make {name} a hole with \
+      `:= sorry`, or move it to a CoreSpec module, {buildNext}."
   return errors
 
-def lockErrors (locked current : Array (String × UInt64)) (edit : Array String) : Array String :=
-  let restore := s!"restore it and edit {", ".intercalate edit.toList} instead; \
-    the owner deletes owned.lock to record a new statement"
-  (current.filterMap fun (file, digest) => match locked.find? (·.1 == file) with
-    | none => some s!"{file} is owned but owned.lock does not record it; a module is owned when a component \
-        of its name is CoreSpec or WorldSpec, so remove or rename it, or ask the owner to delete owned.lock \
-        to record it"
-    | some (_, recorded) => if recorded == digest then none
-      else some s!"{file} changed since owned.lock; it decides what is claimed, so {restore}") ++
-  (locked.filter fun (file, _) => !current.any (·.1 == file)).map fun (file, _) =>
-    s!"{file} is recorded in owned.lock but missing; it decides what is claimed, so {restore}"
+def stated (facts : Facts) : Array String := Id.run do
+  let challenge := facts.challenge
+  let file := facts.challengeFile
+  let here := fun (name : Name) => facts.place challengeModule name
+  let mut errors := #[]
+  for t in facts.terminations do
+    let marked := s!"{here t.headline}: `@[terminates {t.definition}]` on {t.headline}"
+    unless challenge.holes.contains t.definition do
+      errors := errors.push s!"{marked} names {t.definition}, which is not a hole of {file}, so no headline \
+        speaks about its termination. Name a hole declared with `:= sorry` in {file}, or remove the attribute, \
+        {buildNext}."
+    unless challenge.headlines.contains t.headline && !(challenge.killsOf t.headline).isEmpty do
+      errors := errors.push s!"{marked}: {t.headline} is not a headline with a kill, so nothing shows that it \
+        rejects a diverging implementation. Move the attribute to a headline with a kill, {buildNext}."
+    unless t.mentioned do
+      errors := errors.push s!"{marked}: {t.headline} does not mention {t.definition}, so it cannot state on \
+        which inputs {t.definition} returns. Move the attribute to a headline that does, {buildNext}."
+  for (name, hypotheses) in challenge.hypotheses do
+    for hypothesis in hypotheses do
+      errors := errors.push s!"{here name}: {name} assumes `{hypothesis}`, which is not a WorldClaim, so no Check \
+        tests it, and a false assumption would make {name} vacuous. Declare it in a WorldSpec module as \
+        `WorldClaim Name := {hypothesis}`, with a doc comment, and assume that, or remove the hypothesis, \
+        {buildNext}."
+  for (name, auxiliaries) in challenge.auxiliaries do
+    for auxiliary in auxiliaries.filter (isPrivateName ·.name) do
+      errors := errors.push s!"{here name}: the statement of {name} elaborates to the private constant \
+        {privateToUserName auxiliary.name}, which no solution can reproduce, so {name} can never be proved. \
+        Write that part of the statement as a term, without tactics or `decide`, {buildNext}."
+  return errors
 
-def evidenced (facts : Facts) : Array String :=
-  facts.headlines.flatMap fun line => (line.unlinted.map fun module =>
-    s!"{line.name}: the unused-premise linter did not run on {module}, which proves it; \
-      add `meta import SoftwareChallenge` to {module}").toArray ++
-    line.unmatched.map (fun unmatched =>
-      s!"{line.name}: cannot match {unmatched.premise} against the Check at \
-        {(unmatched.module.map toString).getD "an unknown module"}, line {unmatched.line}: unifying them does not \
-        finish within the audit's budget of {matchBudget} heartbeats; state that Check with the arguments \
-        of the premise") ++
-    line.assumptions.filterMap fun assumption =>
-      if assumption.checks > 0 then none
-      else some s!"{line.name}: world claim {assumption.statement} has no Check; \
-        add `Check {assumption.statement} ...` to a WorldCode module"
+def lockErrors (locked current : Array (String × UInt64)) (edit : Array String) (next : String := "lake lint") :
+    Array String :=
+  let editable := if edit.isEmpty then "the CoreCode and WorldCode modules" else ", ".intercalate edit.toList
+  (current.filterMap fun (file, digest) => match locked.find? (·.1 == file) with
+    | none => some s!"{file} is owned, because a component of its module name is CoreSpec or WorldSpec, but \
+        owned.lock does not record it, so it would change the statement unreviewed. Remove or rename {file}; to \
+        add it to the statement, delete owned.lock and run `lake build` to record it. Then run `{next}`."
+    | some (_, recorded) => if recorded == digest then none
+      else some s!"{file} differs from owned.lock, but it states the challenge, which a solution must not \
+        change. Restore it with `git checkout -- {file}` and edit {editable} instead; to change the statement, \
+        delete owned.lock and run `lake build` to record it. Then run `{next}`.") ++
+  (locked.filter fun (file, _) => !current.any (·.1 == file)).map fun (file, _) =>
+    s!"{file} is recorded in owned.lock but missing, and it states the challenge, which a solution must not \
+      change. Restore it with `git checkout -- {file}`; to drop it from the statement, delete owned.lock and run \
+      `lake build` to record it. Then run `{next}`."
+
+def statementTarget : String :=
+  "@[default_target]\ntarget statement pkg : Unit := do\n  \
+    return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())"
+
+private def difference (expected found : String) : String :=
+  let field := fun (text key : String) => (Json.parse text).toOption.bind fun json => (json.getObjVal? key).toOption
+  let names := fun (text : String) => ["theorem_names", "definition_names"].toArray.flatMap fun key =>
+    ((field text key).bind fun json => (fromJson? json : Except String (Array String)).toOption).getD #[]
+  let declared := names expected
+  let listed := names found
+  let gone := listed.filter (!declared.contains ·)
+  let added := declared.filter (!listed.contains ·)
+  let module := fun (text : String) => (field text "solution_module").map (·.compress)
+  let parts := (if gone.isEmpty then [] else
+      [s!"it lists {", ".intercalate gone.toList}, which Challenge.lean no longer declares"]) ++
+    (if added.isEmpty then [] else [s!"it omits {", ".intercalate added.toList}, which Challenge.lean declares"]) ++
+    if module expected == module found then [] else
+      [s!"it names the solution module {(module found).getD "null"}, but the package's is {(module expected).getD "null"}"]
+  if parts.isEmpty then "its contents differ from what `lake build` writes" else "; ".intercalate parts
+
+def comparatorErrors (expected : String) (existing : Option String) (target : Bool) : Array String :=
+  match existing with
+  | none => if target then
+      #[s!"comparator.json is missing: `lake build` writes it from Challenge.lean, and has not written it here \
+        yet. Run `lake build`, {lintNext}."]
+    else #[s!"comparator.json is missing: lakefile.lean has no target that writes it. Add these lines to \
+      lakefile.lean, then run `lake build`:\n\n{statementTarget}\n"]
+  | some text => if text == expected then #[] else
+      #[s!"comparator.json does not match Challenge.lean: {difference expected text}. Run `lake build` to \
+        regenerate it."]
+
+def pending (facts : Facts) : Array String := Id.run do
+  let challenge := facts.challenge
+  let here := fun (name : Name) => facts.place challengeModule name
+  let solution := facts.solution
+  let solutionFile := facts.fileOf solution
+  let mut items := #[]
+  for (name, standing) in facts.standings do
+    let hole := challenge.holes.contains name
+    let what := if hole then s!"hole {name}" else toString name
+    let signature := challenge.signatureOf name
+    match standing with
+    | .holds _ => pure ()
+    | .absent =>
+      items := items.push <| if hole then
+        s!"{here name}: hole {name} is not implemented yet, {challenge.purpose name}. Add `{signature} := …` to a \
+          CoreCode module, or to a WorldCode module if it does IO, {lintNext}."
+      else s!"{here name}: {name} is not proved yet, {challenge.purpose name}. Add `{signature} := …`, with a \
+          proof, to {solutionFile} or a module it imports, {lintNext}."
+    | .outside module =>
+      items := items.push s!"{facts.place module name}: {what} is in {module}, which {solution} does not import, \
+        so the comparator, which reads only {solution} and its imports, cannot see it. Import {module} from \
+        {solutionFile}, or move {name} into {solutionFile}, {lintNext}."
+    | .kind module found =>
+      items := items.push <| if hole then
+        s!"{facts.place module name}: hole {name} is {found} in {module}, but {here name} declares a `def`, so the \
+          comparator rejects it. Define it with `def`, without `partial`, `unsafe`, or `opaque`, in \
+          {facts.fileOf module}, {lintNext}."
+      else s!"{facts.place module name}: {name} is {found} in {module}, but {here name} states it as a theorem, so \
+          the comparator rejects it. Declare it with `theorem` in {facts.fileOf module}, {lintNext}."
+    | .universes module found =>
+      let shown := fun (levels : List Name) => if levels.isEmpty then "none" else ", ".intercalate (levels.map toString)
+      let expected := ((challenge.declared.find? (·.name == name)).map (·.levelParams)).getD []
+      items := items.push s!"{facts.place module name}: {what} has universe parameters {shown found} in {module}, but \
+        {shown expected} in {here name}, so the comparator rejects it. Declare it with the universe parameters \
+        of {here name}, in that order, {lintNext}."
+    | .differs module plain explicit =>
+      let (statedPlain, statedExplicit) := challenge.renderedOf name
+      let (found, expected) := if plain == statedPlain then (explicit, statedExplicit) else (plain, statedPlain)
+      items := items.push s!"{facts.place module name}: {what} {if hole then "has type" else "states"} `{found}` in \
+        {module}, but `{expected}` in {here name}, so the comparator rejects it. Restate it as `{signature} := …`, \
+        {lintNext}."
+    | .auxiliary module constant =>
+      items := items.push s!"{facts.place module name}: {what} elaborates to {constant} in {module}, which differs \
+        from the {constant} that {here name} elaborates to, so the comparator rejects it. Copy the statement of \
+        {name} from {here name} verbatim, {lintNext}."
+  match facts.entry with
+  | some (none, _) => items := items.push s!"main is not written yet, but the package declares a lean_exe, and the \
+      audit checks that main reaches every hole. Add `def main : IO Unit` to the WorldCode module that is the root \
+      of the lean_exe, {lintNext}."
+  | some (some module, unreached) =>
+    for hole in unreached do
+      items := items.push s!"{here hole}: hole {hole} is never called from main, so the headlines about it say \
+        nothing about the program that runs. Call {hole} from main ({facts.place module `main}), or from code main \
+        runs, {lintNext}."
+  | none => pure ()
+  for line in facts.headlines do
+    for unmatched in line.unmatched do
+      let module := (unmatched.module.map facts.fileOf).getD "an unknown module"
+      items := items.push s!"{module}:{unmatched.line}: this Check cannot be matched against {unmatched.premise}, \
+        which {line.name} assumes, within the audit's budget of {matchBudget} heartbeats, so it does not count as \
+        a Check of it. Restate that Check with the arguments of the premise, as `Check {unmatched.premise} …`, \
+        {lintNext}."
+    for assumption in line.assumptions.filter (·.checks == 0) do
+      items := items.push s!"{here line.name}: {line.name} assumes the world claim {assumption.statement}, which no \
+        Check tests against the real foreign code. Add `Check {assumption.statement} := do …`, or \
+        `Check {assumption.statement} : <an instance it implies>`, to a WorldCode module, {lintNext}."
+  for (name, dir) in facts.hidden do
+    items := items.push s!"the comparator's sandbox hides package {name} at {dir}, because it mounts empty \
+      directories over /home, /root, /run, /tmp, and /var, so `lake comparator` cannot build the solution. In \
+      lakefile.lean, require {name} from git, so that it lives in .lake/packages, or from a directory outside \
+      those, {lintNext}."
+  return items
+
+def importLines (file : System.FilePath) : IO (Array (Name × Nat)) := do
+  return ((← IO.FS.readFile file).splitOn "\n").toArray.zipIdx.filterMap fun (line, index) =>
+    let words := (line.splitOn " ").filter (!·.isEmpty)
+    if words.contains "import" then words.getLast?.map fun module => (module.toName, index + 1) else none
 
 def challengeImports (file : System.FilePath) : IO (Array Name) := do
   return (← parseImports' (← IO.FS.readFile file) file.toString).imports.map (·.module)
@@ -652,13 +1017,37 @@ def describe (short : Name → String) (line : Headline) : String :=
     else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
   let stated := if line.oneInstance then s!"{stated}  (one instance)" else stated
   let stated := if line.laws > 1 then s!"{stated}  (bundles {line.laws} laws)" else stated
-  if !line.proved then s!"{stated}  (not yet proved)"
-  else if !line.witnessProved then s!"{stated}  (witness not yet proved)"
-  else stated
+  let marks := (if line.proved then [] else [line.marker]) ++ (if line.killProved then [] else ["kill not yet proved"]) ++
+    if line.witnessProved then [] else ["witness not yet proved"]
+  marks.foldl (fun shown mark => s!"{shown}  ({mark})") stated
 
-private def gather (project : Project) (catalog : Array Name) (challengeFile : String)
-    (challengeOLean : System.FilePath) : IO Facts := do
-  let challenge ← readChallenge project challengeModule challengeOLean
+structure Arguments where
+  executable : Bool := false
+  target : Bool := false
+  hidden : Array (String × String) := #[]
+  challengeFile : String := ""
+  challengeOLean : String := ""
+  sources : Array (Name × String) := #[]
+
+private def parse (args : List String) : Option Arguments := do
+  let flags := args.takeWhile (·.startsWith "--")
+  let challengeFile :: challengeOLean :: modules := args.dropWhile (·.startsWith "--") | none
+  return {
+    executable := flags.contains "--executable"
+    target := flags.contains "--target"
+    hidden := (flags.filterMap fun flag => match flag.splitOn "=" with
+      | ["--hidden", name, dir] => some (name, dir)
+      | _ => none).toArray
+    challengeFile, challengeOLean
+    sources := modules.toArray.map fun module => match module.splitOn "=" with
+      | [name, file] => (name.toName, file)
+      | _ => (module.toName, module) }
+
+private def gather (project : Project) (arguments : Arguments) (solution : Option Name) : IO Facts := do
+  let challenge ← readChallenge project challengeModule arguments.challengeOLean
+    (← IO.FS.readFile arguments.challengeFile)
+  let catalog := arguments.sources.map (·.1)
+  let imports ← arguments.sources.mapM fun (module, file) => return (module, ← importLines file)
   let facts ← withEnvironment catalog <| Meta.MetaM.run' do
     let env ← getEnv
     let moduleOf := fun (name : Name) =>
@@ -667,66 +1056,138 @@ private def gather (project : Project) (catalog : Array Name) (challengeFile : S
     let packaged := NameSet.ofList catalog.toList
     let running := fun name => (moduleOf name).any packaged.contains
     let evidence := (allEvidence env).filter fun found => (moduleOf found.source).any packaged.contains
+    let solutionImports := match solution with
+      | some solution => importClosure env solution
+      | none => NameSet.ofList env.header.moduleNames.toList
+    let standings ← challenge.declared.mapM fun stated => do
+      let auxiliaries := ((challenge.auxiliaries.find? (·.1 == stated.name)).map (·.2)).getD #[]
+      return (stated.name, ← standing env moduleOf solutionImports auxiliaries stated)
+    let holds := fun (name : Name) => standings.any fun (found, current) => found == name && current matches .holds _
+    let headlines ← challenge.headlines.mapM fun name => do
+      let current := ((standings.find? (·.1 == name)).map (·.2)).getD .absent
+      let prover := match current with
+        | .holds module => some module
+        | _ => none
+      let analysed ← try headline project evidence name ((challenge.statement? name).getD (.sort .zero)) prover
+        catch _ => pure { name, assumptions := #[], unnamed := #[] }
+      return { analysed with
+        proved := prover.isSome, marker := current.marker
+        killProved := (challenge.killsOf name).all holds, witnessProved := (challenge.witnessesOf name).all holds }
+    let mut lines : Std.HashMap Name Nat := {}
+    for module in catalog do
+      if let some index := env.getModuleIdx? module then
+        for info in env.header.moduleData[index.toNat]!.constants do
+          if let some ranges ← findDeclarationRangesCore? info.name then
+            lines := lines.insert info.name ranges.range.pos.line
+    let lints := (Linter.getAllLints env).filterMap fun (module, entries) =>
+      if packaged.contains module && !entries.isEmpty then
+        some (module, (entries.filterMap (·.position?.map (·.line))).qsort (· < ·),
+          entries.foldl (fun kept entry => if kept.contains entry.linter then kept else kept.push entry.linter) #[])
+      else none
     return {
-      inventory, challenge
-      headlines := ← challenge.headlines.mapM fun name => return { ← headline project evidence name (challenge.statement? name)
-        with witnessProved := (challenge.witnessesOf name).all env.contains }
-      mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
-        (((env.find? name).map (·.type) <|> challenge.statement? name).map (·.getUsedConstants)).getD #[]).toList
+      inventory, challenge, headlines, standings, lines, lints
       holes := challenge.holes.map fun hole => (hole, moduleOf hole)
       registrations := catalog.flatMap fun module =>
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
-          fun claim => (claim, project.role? module, moduleOf claim == some module)
-      terminations := terminations env challenge.terminating challenge.statement?
+          fun claim => (claim, module, project.role? module, moduleOf claim == some module)
+      terminations := terminations (fixpoint env) challenge.terminating challenge.statement?
       entry := entryOf project env moduleOf running challenge.holes
       unclaimed := ← unclaimed project moduleOf running challenge.holes : Facts }
-  return { facts with challengeImports := ← challengeImports challengeFile }
+  return { facts with
+    files := arguments.sources, imports, challengeFile := arguments.challengeFile
+    solution := solution.getD .anonymous, hidden := arguments.hidden }
 
-private def audit (executable : Bool) (challengeFile challengeOLean : String) (modules : List String) :
-    IO UInt32 := do
-  let sources := modules.toArray.map fun module => match module.splitOn "=" with
-    | [name, file] => (name.toName, file)
-    | _ => (module.toName, module)
-  let catalog := sources.map (·.1)
-  let project := Project.ofPackage catalog executable
-  let facts ← gather project catalog challengeFile challengeOLean
-  let edit := editableFiles project sources
-  let ownedNow ← ownedFiles project sources challengeFile
+private def listing (title : String) (items : Array String) : String :=
+  "\n".intercalate (s!"{title}: {items.size}" :: items.toList.map fun item => "  " ++ item.replace "\n" "\n    ")
+
+private def lockText (current : Array (String × UInt64)) : String :=
+  "\n".intercalate (current.map fun (file, digest) => s!"{digest} {file}").toList
+
+private def statementAudit (arguments : Arguments) : IO UInt32 := do
+  let catalog := arguments.sources.map (·.1)
+  let project := Project.ofPackage catalog arguments.executable
+  let challenge ← readChallenge project challengeModule arguments.challengeOLean
+    (← IO.FS.readFile arguments.challengeFile)
+  let solution := solutionOf catalog
+  let facts : Facts := {
+    challenge, files := arguments.sources, challengeFile := arguments.challengeFile
+    challengeImports := ← challengeImports arguments.challengeFile
+    imports := #[(challengeModule, ← importLines arguments.challengeFile)]
+    terminations := terminations (fun _ => false) challenge.terminating challenge.statement? }
+  let ownedNow ← ownedFiles project arguments.sources arguments.challengeFile
   let current ← digests ownedNow
   let locked ← readLock
-  let solution := solutionOf catalog
-  let failures := (sound project facts).map ("sound: " ++ ·) ++ (meaningful facts).map ("meaningful: " ++ ·) ++
-    ((match solution with | .ok _ => #[] | .error error => #[error]) ++ owned project facts ++ (locked.map (lockErrors · current edit)).getD #[]).map
-      ("owned: " ++ ·) ++
-    (evidenced facts).map ("evidence: " ++ ·)
-  let files := s!"Edit: {" ".intercalate edit.toList}\nOwned: {" ".intercalate ownedNow.toList}"
-  unless project.check facts.inventory && failures.isEmpty do
-    IO.println ("\n".intercalate failures.toList ++ "\n" ++ files)
+  let errors := meaningful facts ++ owned project facts ++ stated facts ++
+    (match solution with | .ok _ => #[] | .error error => #[error]) ++
+    ((locked.map (lockErrors · current (editableFiles project arguments.sources) "lake build")).getD #[])
+  unless errors.isEmpty do
+    IO.println (listing "Errors" errors)
     return 1
   if let .ok solution := solution then
-    let config := comparatorConfig solution facts.challenge
+    let config := comparatorConfig solution challenge
     unless (← try some <$> IO.FS.readFile "comparator.json" catch _ => pure none) == some config do
       IO.FS.writeFile "comparator.json" config
+      IO.println s!"Wrote comparator.json: {challenge.theorems.size} theorems and {challenge.holes.size} \
+        definitions for `lake comparator` to check against {solution}"
   if locked.isNone then
-    IO.FS.writeFile "owned.lock" ("\n".intercalate (current.map fun (file, digest) => s!"{digest} {file}").toList)
-  let short := shorten (sharedNamespace (facts.headlines.map (·.name)))
-  for line in facts.headlines do IO.println (describe short line)
-  let proved := (facts.headlines.filter (·.proved)).size
-  IO.println s!"Proved: {proved} of {facts.headlines.size} headlines"
-  let independent := facts.challenge.independent.size
-  if independent > 0 then IO.println s!"Independent: {independent} of {facts.headlines.size} headlines"
-  if let some (runs, unreached) := facts.unclaimed then
-    IO.println s!"Unclaimed: {unreached.size} of {runs} definitions main runs"
-    unless unreached.isEmpty do IO.println s!"  {" ".intercalate ((unreached.map short).qsort (· < ·)).toList}"
-  for t in facts.terminations do IO.println s!"{short t.definition} terminates via {short t.headline}"
-  IO.println files
+    IO.FS.writeFile "owned.lock" (lockText current)
+    IO.println s!"Recorded owned.lock: {" ".intercalate ownedNow.toList}"
   return 0
 
-def run : List String → IO UInt32
-  | "--executable" :: challengeFile :: challengeOLean :: modules => audit true challengeFile challengeOLean modules
-  | challengeFile :: challengeOLean :: modules => audit false challengeFile challengeOLean modules
+private def proved (facts : Facts) : String :=
+  let holds := fun (name : Name) => facts.standings.any fun (found, current) => found == name && current matches .holds _
+  let counted := fun (names : Array Name) (label : String) =>
+    if names.isEmpty && label != "headlines" then none
+    else some s!"{(names.filter holds).size} of {names.size} {label}"
+  "Proved: " ++ ", ".intercalate ([counted facts.challenge.headlines "headlines",
+    counted (facts.challenge.kills.map (·.1)) "kills",
+    counted (facts.challenge.witnesses.map (·.1)) "witnesses"].filterMap id)
+
+private def solutionAudit (arguments : Arguments) : IO UInt32 := do
+  let catalog := arguments.sources.map (·.1)
+  let project := Project.ofPackage catalog arguments.executable
+  let solution := solutionOf catalog
+  let facts ← gather project arguments solution.toOption
+  let edit := editableFiles project arguments.sources
+  let ownedNow ← ownedFiles project arguments.sources arguments.challengeFile
+  let current ← digests ownedNow
+  let existing ← try some <$> IO.FS.readFile "comparator.json" catch _ => pure none
+  let locked ← match ← readLock with
+    | some locked => pure (lockErrors locked current edit)
+    | none => pure #[s!"owned.lock is missing, so lint cannot check that the owned files are unchanged. Run \
+        `lake build` to record it, or restore it with `git checkout -- owned.lock`, {lintNext}."]
+  let errors := sound project facts ++ registered project facts ++ evidenced facts ++ warned facts ++ locked ++
+    match solution with
+    | .ok solution => comparatorErrors (comparatorConfig solution facts.challenge) existing arguments.target
+    | .error error => #[error]
+  let items := pending facts
+  let short := shorten (sharedNamespace (facts.headlines.map (·.name)))
+  let mut report := facts.headlines.map (describe short) |>.push (proved facts)
+  let independent := facts.challenge.independent.size
+  if independent > 0 then report := report.push s!"Independent: {independent} of {facts.headlines.size} headlines"
+  if let some (runs, unreached) := facts.unclaimed then
+    report := report.push s!"Unclaimed: {unreached.size} of {runs} definitions main runs"
+    unless unreached.isEmpty do
+      report := report.push s!"  {" ".intercalate ((unreached.map short).qsort (· < ·)).toList}"
+  for t in facts.terminations do report := report.push s!"{short t.definition} terminates via {short t.headline}"
+  unless errors.isEmpty do report := report.push (listing "Errors" errors)
+  unless items.isEmpty do report := report.push (listing "Pending" items)
+  report := report.push s!"Edit: {" ".intercalate edit.toList}" |>.push s!"Owned: {" ".intercalate ownedNow.toList}"
+  IO.println ("\n".intercalate report.toList)
+  return if !errors.isEmpty || !project.check facts.inventory then 1 else if items.isEmpty then 0 else 2
+
+def run (args : List String) : IO UInt32 := do
+  let usage := "usage: lean --run Audit.lean (statement | solution) [--executable] [--target] \
+    [--hidden=<package>=<dir>]... <challenge file> <challenge olean> <module>=<file>..."
+  match args with
+  | "statement" :: rest => if let some arguments := parse rest then statementAudit arguments else
+    IO.eprintln usage
+    return 1
+  | "solution" :: rest => if let some arguments := parse rest then solutionAudit arguments else
+    IO.eprintln usage
+    return 1
   | _ => do
-    IO.println "usage: lean --run Audit.lean [--executable] <challenge file> <challenge olean> <module>=<file>..."
-    return 2
+    IO.eprintln usage
+    return 1
 
 end SoftwareChallenge.Audit
