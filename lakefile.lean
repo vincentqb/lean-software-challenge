@@ -19,9 +19,20 @@ lean_lib «SoftwareChallengeTests» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
-def challengeMissing : String :=
-  "the package has no module Challenge, which states the challenge. Create Challenge.lean and add \
-    `lean_lib «Challenge» where leanOptions := #[⟨`warn.sorry, false⟩]` to lakefile.lean, then run `lake build`."
+def challengeUndeclared : String :=
+  "lakefile.lean declares no lean_lib «Challenge», so Challenge.lean, which states the challenge, is not part of the \
+    package. Add the line ``lean_lib «Challenge» where leanOptions := #[⟨`warn.sorry, false⟩]`` to lakefile.lean, \
+    create Challenge.lean if it is missing, delete owned.lock if there is one, then run `lake build`."
+
+def challengeAbsent : String :=
+  "lakefile.lean declares lean_lib «Challenge», but Challenge.lean does not exist, so nothing states the challenge. \
+    Create Challenge.lean with the headlines, their holes, and a kill for each, delete owned.lock if there is one, \
+    then run `lake build`."
+
+def challengeOf (pkg : Package) : IO (Except String Lake.Module) := do
+  let some challenge := pkg.findModule? `Challenge | return .error challengeUndeclared
+  unless ← challenge.leanFile.pathExists do return .error challengeAbsent
+  return .ok challenge
 
 def auditMissing : String :=
   "SoftwareChallenge.Audit is not in the workspace, so the audit cannot run. Add `require software_challenge from \
@@ -41,14 +52,39 @@ def sandboxCovers : Array System.FilePath := #["/home", "/root", "/run", "/tmp",
 def within (dir root : System.FilePath) : Bool :=
   root.components.isPrefixOf dir.components
 
-def hiddenFromSandbox (workspace : Workspace) (root : Package) : IO (Array (Name × System.FilePath)) := do
+def lexical (path : System.FilePath) : System.FilePath :=
+  System.mkFilePath <| path.components.foldl (init := []) fun parts part =>
+    if part == "." then parts else if part == ".." && parts.length > 1 then parts.dropLast else parts ++ [part]
+
+def hiddenFromSandbox (workspace : Workspace) (root : Package) :
+    IO (Array (Name × System.FilePath × System.FilePath)) := do
   let rootDir ← IO.FS.realPath root.dir
   let mut hidden := #[]
   for pkg in workspace.packages do
-    let dir ← IO.FS.realPath pkg.dir
-    unless within dir rootDir || !sandboxCovers.any (within dir ·) do
-      hidden := hidden.push (pkg.baseName, dir)
+    let real ← IO.FS.realPath pkg.dir
+    if within real rootDir then continue
+    let configured := lexical (rootDir / pkg.relDir)
+    if let some dir := [configured, real].find? fun dir => sandboxCovers.any (within dir ·) then
+      hidden := hidden.push (pkg.baseName, dir, real)
   return hidden
+
+def lineOf (file : System.FilePath) (holds : String → Bool) : IO (Option (Nat × String)) := do
+  unless ← file.pathExists do return none
+  return ((← IO.FS.readFile file).splitOn "\n").zipIdx.findSome? fun (line, index) =>
+    if holds line then some (index + 1, line.trimAscii.toString) else none
+
+def importsChallenge (catalog : Array Lake.Module) (challenge : Lake.Module) : FetchM (Option String) := do
+  for mod in catalog do
+    unless (← (← mod.imports.fetch).await).any (·.name == challenge.name) do continue
+    let (line, text) := (← lineOf mod.leanFile fun line =>
+      let words := (line.splitOn " ").filter (!·.isEmpty)
+      words.contains "import" && words.contains challenge.name.toString).getD (1, s!"import {challenge.name}")
+    let spec := (catalog.find? fun other => other.name.components.any (·.toString == "CoreSpec")).map (·.name)
+    return some s!"{mod.relLeanFile}:{line}: {mod.name} imports {challenge.name}, whose holes share names with the \
+      solution's definitions, so the solution cannot be checked against it. Replace `{text}` at \
+      {mod.relLeanFile}:{line} with imports of the CoreSpec and WorldSpec modules {mod.name} uses\
+      {(spec.map fun spec => s!", such as `public import {spec}`").getD ""}, then run `lake build`."
+  return none
 
 def auditOutput (pkg : Package) (mode : String) (flags : Array String) (challenge : Lake.Module)
     (olean : System.FilePath) (catalog : Array Lake.Module) : JobM IO.Process.Output := do
@@ -69,8 +105,9 @@ def addFileTraces (pkg : Package) (files : List String) : JobM Unit := do
 
 package_facet softwareChallengeStatement pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error auditMissing
-  let some challenge := pkg.findModule? `Challenge | error challengeMissing
+  let challenge ← match ← challengeOf pkg with | .ok challenge => pure challenge | .error message => error message
   let catalog ← packageModules pkg challenge
+  if let some message ← importsChallenge catalog challenge then error message
   let mut job := Job.nil.mix (← audit.leanArts.fetch)
   for mod in ← (← challenge.transImports.fetch).await do
     if mod.pkg.keyName == pkg.keyName then job := job.mix (← mod.leanArts.fetch)
@@ -86,7 +123,7 @@ package_facet softwareChallengeStatement pkg : Unit := do
     let current ← if ← (pkg.dir / "comparator.json").pathExists then
       some <$> IO.FS.readFile (pkg.dir / "comparator.json") else pure none
     let previous ← if ← written.pathExists then some <$> IO.FS.readFile written else pure none
-    unless current.isSome && current == previous do
+    unless current.isSome && current == previous && (← (pkg.dir / "owned.lock").pathExists) do
       if ← (report.addExtension "trace").pathExists then IO.FS.removeFile (report.addExtension "trace")
     buildUnlessUpToDate report (← getTrace) (report.addExtension "trace") do
       let olean := pkg.buildDir / "softwareChallenge" / "statement" / "Challenge.olean"
@@ -113,16 +150,12 @@ package_facet softwareChallengeStatement pkg : Unit := do
 
 package_facet softwareChallenge pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error auditMissing
-  let some challenge := pkg.findModule? `Challenge | error challengeMissing
+  let challenge ← match ← challengeOf pkg with | .ok challenge => pure challenge | .error message => error message
   let catalog ← packageModules pkg challenge
-  for mod in catalog do
-    if (← (← mod.imports.fetch).await).any (·.name == challenge.name) then
-      error s!"{mod.relLeanFile}: {mod.name} imports {challenge.name}, but the comparator checks the solution \
-        against {challenge.name}, whose holes the solution redefines. Replace `import {challenge.name}` in \
-        {mod.relLeanFile} with the CoreSpec and WorldSpec modules it needs, then run `lake lint`."
+  if let some message ← importsChallenge catalog challenge then error message
   let hidden ← hiddenFromSandbox (← getWorkspace) pkg
   let flags := (if pkg.defaultTargets.contains `statement then #["--target"] else #[]) ++
-    hidden.map fun (name, dir) => s!"--hidden={name}={dir}"
+    hidden.map fun (name, dir, _) => s!"--hidden={name}={dir}"
   let mut job := (Job.nil.mix (← audit.leanArts.fetch)).mix (← challenge.leanArts.fetch)
   for mod in catalog do
     job := job.mix (← mod.leanArts.fetch)
@@ -152,12 +185,13 @@ def auditSolution (pkg : Package) : ScriptM UInt32 := do
     return 1
   return if pendingCount (← IO.FS.readFile (pkg.buildDir / "softwareChallenge.txt")) == 0 then 0 else 2
 
-script lint_challenge do
-  let pkg ← getRootPackage
+def lintChallenge (pkg : Package) : ScriptM UInt32 := do
+  let linters ← (← IO.Process.spawn
+    { cmd := (← getLake).toString, args := #["lint", "--builtin-only"], cwd := pkg.dir }).wait
   let code ← auditSolution pkg
-  unless pkg.config.builtinLint? == some true do
-    IO.eprintln "lakefile.lean does not set `builtinLint := true`, so `lake lint` did not run Lean's linters. Add \
-      `builtinLint := true` to the `package` block of lakefile.lean, then run `lake lint`."
+  unless linters == 0 do
+    IO.eprintln "Lean's linters report the problems `lake lint --builtin-only` printed above, so the solution is not \
+      clean. Fix each at the file and line it names, then run `lake lint`."
     return 1
   if code == 2 then
     let count := pendingCount (← IO.FS.readFile (pkg.buildDir / "softwareChallenge.txt"))
@@ -165,8 +199,23 @@ script lint_challenge do
       as listed under Pending above, so the solution is not complete. Do each as it says, then run `lake lint`."
   return code
 
+def builtinLintLine (pkg : Package) : IO (Option Nat) := do
+  unless pkg.config.builtinLint? == some true do return none
+  return some (((← lineOf (pkg.dir / "lakefile.lean") (·.contains "builtinLint")).map (·.1)).getD 1)
+
+script lint_challenge do
+  let pkg ← getRootPackage
+  if let some line ← builtinLintLine pkg then
+    IO.eprintln s!"lakefile.lean:{line}: the package block sets `builtinLint := true`, but `lake lint` already runs \
+      Lean's linters through software_challenge/lint_challenge, so they would run twice. Remove that line, delete \
+      owned.lock and run `lake build` to re-record it, then run `lake lint`."
+    return 1
+  lintChallenge pkg
+
 def runChecks (lake : String) (pkg : Package) : ScriptM UInt32 := do
-  let some challenge := pkg.findModule? `Challenge | do IO.eprintln challengeMissing; return 1
+  let challenge ← match ← challengeOf pkg with
+    | .ok challenge => pure challenge
+    | .error message => do IO.eprintln message; return 1
   let modules ← runBuild do return Job.pure (← packageModules pkg challenge)
   let runner := pkg.buildDir / "softwareChallenge" / "Checks.lean"
   IO.FS.createDirAll (pkg.buildDir / "softwareChallenge")
@@ -179,15 +228,26 @@ def runChecks (lake : String) (pkg : Package) : ScriptM UInt32 := do
 script run_checks do
   runChecks (← getLake).toString (← getRootPackage)
 
+def scriptLine (pkg : Package) (name : String) : IO String := do
+  let line ← lineOf (pkg.dir / "lakefile.lean") fun line =>
+    ((line.dropPrefix? "script ").map fun rest => (rest.toString.splitOn " ").head? == some name).getD false
+  return s!"lakefile.lean:{(line.map (·.1)).getD 1}"
+
 def ownTests (pkg : Package) (names : List String) : ScriptM UInt32 := do
   let mut worst := 0
   for name in names do
     match pkg.scripts.find? name.toName with
-    | some found => worst := max worst (← found.run [])
+    | some found =>
+      let code ← found.run []
+      unless code == 0 do
+        IO.eprintln s!"{← scriptLine pkg name}: script {name}, which testDriverArgs names, exited {code}, so the \
+          package's own tests fail. Run `lake script run {name}` to see what it checks, fix it, then run `lake test`."
+      worst := max worst code
     | none =>
-      IO.eprintln s!"testDriverArgs in lakefile.lean names {name}, but lakefile.lean declares no script {name}, so \
-        it cannot run. Declare `script {name} do …` in lakefile.lean, or remove \"{name}\" from testDriverArgs, \
-        then run `lake test`."
+      let line ← lineOf (pkg.dir / "lakefile.lean") (·.contains "testDriverArgs")
+      IO.eprintln s!"lakefile.lean:{(line.map (·.1)).getD 1}: testDriverArgs names {name}, but lakefile.lean \
+        declares no script {name}, so it cannot run. Declare `script {name} do …` in lakefile.lean, or remove \
+        \"{name}\" from testDriverArgs, delete owned.lock, run `lake build`, then run `lake test`."
       worst := max worst 1
   return worst
 
@@ -198,9 +258,52 @@ script test_challenge (args) do
 
 def tenths (ms : Nat) : String := s!"{ms / 1000}.{ms % 1000 / 100} s"
 
+def comparatorRejections : Array (String × String × String) := #[
+  ("kernel rejected the solution", "Lean's kernel rejected its proof or a declaration it uses, though the build \
+    accepted it, as `debug.skipKernelTC` or `Lean.addDecl` allows", "Prove it without those"),
+  ("theorem statement do not match", "the solution states it otherwise than Challenge.lean",
+    "State it exactly as Challenge.lean does"),
+  ("constant kind don't match", "the solution declares it as another kind of constant than Challenge.lean",
+    "Declare it as Challenge.lean does"),
+  ("Const not found in solution", "the solution does not declare it",
+    "Prove it in Solution or a module Solution imports"),
+  ("Const does not match between challenge and target", "the solution defines it otherwise than Challenge.lean",
+    "Define it as Challenge.lean does"),
+  ("Solution constant is not a definition", "the solution declares it as something other than a definition",
+    "Declare it as a `def`"),
+  ("Solution constant is not a theorem", "the solution declares it as something other than a theorem",
+    "Declare it as a `theorem`"),
+  ("Illegal axiom detected", "its proof uses an axiom beyond propext, Classical.choice, and Quot.sound",
+    "Prove it without that axiom"),
+  ("is not permitted; it is used by", "its proof uses an axiom beyond propext, Classical.choice, and Quot.sound",
+    "Prove it without that axiom")]
+
+def rejectionOf (output : IO.Process.Output) : Option (String × String) :=
+  let text := output.stdout ++ output.stderr
+  let lines := text.splitOn "\n"
+  let signalled := lines.any fun line => match line.splitOn "exited with " with
+    | [_, code] => (code.trimAscii.toString.toNat?.map fun code => decide (code ≥ 128)).getD false
+    | _ => false
+  if output.exitCode != 1 || signalled || lines.any (·.startsWith "bwrap:") then none
+  else (comparatorRejections.find? fun (verdict, _) => text.contains verdict).map fun (_, why, fix) => (why, fix)
+
+def comparatorFailure (output : IO.Process.Output) : String :=
+  let lines := ((output.stdout ++ output.stderr).splitOn "\n").filter fun line =>
+    line.startsWith "error:" || line.startsWith "bwrap:" || line.startsWith "PANIC"
+  (lines.getLast?.map (·.trimAscii.toString)).getD s!"exit {output.exitCode}"
+
 def replayEach (lake : String) (dir buildDir : System.FilePath) : IO UInt32 := do
-  let config ← IO.ofExcept <| Json.parse (← IO.FS.readFile (dir / "comparator.json"))
-  let theorems ← IO.ofExcept <| config.getObjValAs? (Array String) "theorem_names"
+  let text ← IO.FS.readFile (dir / "comparator.json")
+  let parsed : Except String (Json × Array String) := do
+    let config ← Json.parse text
+    return (config, ← config.getObjValAs? (Array String) "theorem_names")
+  let (config, theorems) ← match parsed with
+    | .ok parsed => pure parsed
+    | .error problem => do
+      IO.eprintln s!"comparator.json cannot be read: {problem}. `lake build` writes it from Challenge.lean: delete \
+        comparator.json and run `lake build`, then run `lake script run software_challenge/replay`."
+      return 2
+  let challenge ← if ← (dir / "Challenge.lean").pathExists then IO.FS.readFile (dir / "Challenge.lean") else pure ""
   let configs := buildDir / "softwareChallenge" / "comparator"
   IO.FS.createDirAll configs
   let next ← IO.mkRef 0
@@ -229,19 +332,33 @@ def replayEach (lake : String) (dir buildDir : System.FilePath) : IO UInt32 := d
   for task in workers do IO.ofExcept task.get
   let total := (← IO.monoMsNow) - start
   let done := (← results.get).qsort fun a b => a.2.2 > b.2.2
+  let lineOfTheorem := fun (name : String) =>
+    let short := (name.splitOn ".").getLast?.getD name
+    ((challenge.splitOn "\n").zipIdx.findSome? fun (line, index) =>
+      if ((line.splitOn " ").filter (!·.isEmpty)).contains short && line.contains "theorem " then some (index + 1)
+      else none).map (s!"Challenge.lean:{·}")
+  let replayAgain := "then run `lake script run software_challenge/replay`"
   for (name, output, _) in done do
     unless output.exitCode == 0 do
-      IO.eprintln s!"`lake comparator` {if output.exitCode == 1 then "rejects" else "could not check"} {name}:\n\
-        {output.stdout}{output.stderr}\nFix what it reports, then run `lake script run software_challenge/replay`."
+      let place := ((lineOfTheorem name).map (s!" ({·})")).getD ""
+      match rejectionOf output with
+      | some (why, fix) =>
+        IO.eprintln s!"`lake comparator` rejects {name}{place}: {why}. {fix}, {replayAgain}.\n\
+          {output.stdout}{output.stderr}"
+      | none =>
+        IO.eprintln s!"`lake comparator` could not check {name}{place}: it exited {output.exitCode} without a \
+          verdict ({comparatorFailure output}). Fix that cause, such as a dependency under /home, /root, /run, /tmp, \
+          or /var, which its sandbox hides, {replayAgain}.\n{output.stdout}{output.stderr}"
   let lines := done.map fun (name, output, elapsed) =>
     if output.exitCode == 0 then s!"{name}  {tenths elapsed}"
-    else if output.exitCode == 1 then s!"{name}  {tenths elapsed}  (rejected)"
+    else if (rejectionOf output).isSome then s!"{name}  {tenths elapsed}  (rejected)"
     else s!"{name}  {tenths elapsed}  (could not run, exit {output.exitCode})"
   let accepted := (done.filter (·.2.1.exitCode == 0)).size
   let report := "\n".intercalate (lines.push s!"Replayed: {accepted} of {theorems.size} theorems in {tenths total}").toList
   IO.FS.writeFile (buildDir / "comparator.txt") (report ++ "\n")
+  (← IO.getStderr).flush
   IO.println report
-  if done.any (·.2.1.exitCode == 1) then return 1
+  if done.any fun (_, output, _) => (rejectionOf output).isSome then return 1
   if done.any (·.2.1.exitCode != 0) then return 2
   return 0
 
@@ -253,34 +370,54 @@ script replay do
     return 1
   replayEach (← getLake).toString pkg.dir pkg.buildDir
 
+script grade_packages do
+  let workspace ← getWorkspace
+  let entries ← (workspace.packages.filter (!·.isRoot)).mapM fun pkg => do
+    return Json.mkObj [("type", "path"), ("scope", toJson pkg.scope), ("name", toJson pkg.baseName),
+      ("manifestFile", toJson pkg.relManifestFile.toString), ("inherited", toJson false),
+      ("dir", toJson (← IO.FS.realPath pkg.dir).toString), ("copy", toJson false),
+      ("configFile", toJson pkg.relConfigFile.toString)]
+  IO.println (Json.mkObj [("version", "1.3.0"), ("packages", toJson entries)]).pretty
+  return 0
+
 script grade_candidate (args) do
   let lake := (← getLake).toString
   let pkg ← getRootPackage
   let commit := args.headD "the candidate"
   let again := s!"then run `lake exe grade {commit}` from the base checkout"
   let hidden ← hiddenFromSandbox (← getWorkspace) pkg
-  for (name, dir) in hidden do
+  for (name, dir, real) in hidden do
+    let move := if sandboxCovers.any (within real ·) then "" else s!", such as its real path {real}"
     IO.eprintln s!"cannot judge: the comparator's sandbox hides package {name} at {dir}, because it mounts empty \
       directories over /home, /root, /run, /tmp, and /var, so `lake comparator` cannot build {commit}. In \
-      lakefile.lean, require {name} from git, or from a directory outside those, commit it, {again}."
+      lakefile.lean, require {name} from git or from a directory outside those{move}, delete owned.lock, run \
+      `lake build`, and commit, {again}."
   unless hidden.isEmpty do return 3
+  if let some line ← builtinLintLine pkg then
+    IO.eprintln s!"cannot judge: lakefile.lean:{line} sets `builtinLint := true`, so `lake lint` fails on every \
+      candidate, since it runs Lean's linters itself. In the base, remove that line, delete owned.lock, run \
+      `lake build`, and commit; merge that commit into {commit}, {again}."
+    return 3
   let refuse (step : String) : ScriptM UInt32 := do
     IO.eprintln s!"refused: `{step}` fails on {commit}, as printed above. Fix what it reports in {commit}, {again}."
-    return 1
-  for (args, step) in [(#["build"], "lake build"), (#["lint", "--builtin-only"], "lake lint --builtin-only")] do
-    unless (← (← IO.Process.spawn { cmd := lake, args, cwd := pkg.dir }).wait) == 0 do return ← refuse step
-  match ← auditSolution pkg with
+    return 10
+  unless (← (← IO.Process.spawn { cmd := lake, args := #["build"], cwd := pkg.dir }).wait) == 0 do
+    return ← refuse "lake build"
+  match ← lintChallenge pkg with
   | 0 => pure ()
   | 2 =>
-    IO.eprintln s!"refused: {commit} is not complete: the audit lists pending items above. Finish them in \
+    IO.eprintln s!"refused: {commit} is not complete: `lake lint` lists pending items above. Finish them in \
       {commit}, {again}."
-    return 1
+    return 10
   | _ => return ← refuse "lake lint"
   unless (← runChecks lake pkg) == 0 do return ← refuse "lake script run software_challenge/run_checks"
   let own ← if pkg.testDriver == "software_challenge/test_challenge" then ownTests pkg pkg.testDriverArgs.toList
     else if pkg.testDriver.isEmpty then pure 0
     else (← IO.Process.spawn { cmd := lake, args := #["test"], cwd := pkg.dir }).wait
-  unless own == 0 do return ← refuse "lake test"
+  unless own == 0 do
+    IO.eprintln s!"refused: the package's own tests fail on {commit}, as printed above. Fix them in {commit}, \
+      {again}."
+    return 10
   return 0
 
 lean_exe «grade» where
@@ -321,6 +458,7 @@ structure Mutant where
   name : String
   owner : Edits := []
   agent : Edits := []
+  relocks : Bool := false
   exits : Exits := {}
 
 def replacing (old new : String) (text : String) : Option String :=
@@ -335,13 +473,28 @@ def coreCodeFile : System.FilePath := "ConstantFolding" / "CoreCode.lean"
 def worldCodeFile : System.FilePath := "ConstantFolding" / "WorldCode.lean"
 def solutionFile : System.FilePath := "ConstantFolding" / "Solution.lean"
 
+def weakened : Edits := [
+  (challengeFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :="
+    "theorem fold_idempotent (e : Expr) (_ : normal e = true) : fold (fold e) = fold e :="),
+  (challengeFile, replacing "    ¬ ∀ e : Expr, (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e"
+    "    ¬ ∀ e : Expr, normal e = true → (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e"),
+  (solutionFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :="
+    "theorem fold_idempotent (e : Expr) (_ : normal e = true) : fold (fold e) = fold e :="),
+  (solutionFile, replacing "    ¬ ∀ e : Expr, (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e"
+    "    ¬ ∀ e : Expr, normal e = true → (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e"),
+  (solutionFile, replacing "  have := h (.lit 0)\n" "  have := h (.lit 0) rfl\n")]
+
+def dropsKillProof : System.FilePath × (String → Option String) :=
+  (solutionFile, replacing "theorem fold_normalizes_rejects_identity : ¬ ∀ e, normal (id e) = true := by\n  \
+    intro h\n  exact absurd (h (.add (.lit 1) (.lit 2))) (by decide)\n\n" "")
+
 def restated : Edits := [
   (challengeFile, replacing "(h : fold (.lit n) = .lit m) : m = n := by" "(h : fold (.lit n) = .lit m) : n = m := by"),
   (challengeFile, replacing "= .lit m → m = n := by" "= .lit m → n = m := by")]
 
 def mutants : List Mutant := [
   { name := "owner-unchanged" },
-  { name := "owner-drops-kill", exits := { build := 1, lint := 1, grade := 3 }, owner := [
+  { name := "owner-drops-kill", exits := { build := 1, lint := 1, comparator := 1, grade := 3 }, owner := [
       (challengeFile, replacing "@[kills fold_normalizes] theorem fold_normalizes_rejects_identity : \
         ¬ ∀ e, normal (id e) = true := by\n  sorry\n\n" "")] },
   { name := "owner-restates-headline", exits := { lint := 2, comparator := 1, grade := 1 }, owner := restated },
@@ -377,7 +530,7 @@ def mutants : List Mutant := [
       (worldCodeFile, replacing "Check AddAgrees nativeAdd := do" "def probeAdd : IO Unit := do")] },
   { name := "agent-failing-check", exits := { test := 1, grade := 1 }, agent := [
       (worldCodeFile, replacing "unless nativeAdd a b - a == b do" "unless nativeAdd a b - a == b + 1 do")] },
-  { name := "agent-edits-challenge", exits := { build := 1, lint := 1, comparator := 1, grade := 1 }, agent := [
+  { name := "agent-edits-challenge", exits := { build := 1, lint := 1, grade := 1 }, agent := [
       (challengeFile, appending "\ntheorem graded : True := trivial\n")] },
   { name := "agent-adds-owned-file", exits := { build := 1, lint := 1, grade := 1 }, agent := [
       ("ConstantFolding" / "CoreSpec" / "Extra.lean",
@@ -385,38 +538,17 @@ def mutants : List Mutant := [
   { name := "agent-weakens-solution", exits := { lint := 2, comparator := 1, grade := 1 }, agent := [
       (solutionFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :="
         "theorem fold_idempotent (e : Expr) (_ : normal e = true) : fold (fold e) = fold e :=")] },
-  { name := "agent-drops-kill-proof", exits := { lint := 2, comparator := 1, grade := 1 }, agent := [
-      (solutionFile, replacing "theorem fold_normalizes_rejects_identity : ¬ ∀ e, normal (id e) = true := by\n  \
-        intro h\n  exact absurd (h (.add (.lit 1) (.lit 2))) (by decide)\n\n" "")] },
+  { name := "agent-drops-kill-proof", exits := { lint := 2, comparator := 1, grade := 1 }, agent := [dropsKillProof] },
+  { name := "agent-lint-warning-pending", exits := { lint := 1, comparator := 1, grade := 1 }, agent := [
+      (coreCodeFile, appending "\ntheorem ConstantFolding.self_eq (n : Nat) (h : n = n) : n = n := rfl\n"),
+      dropsKillProof] },
+  { name := "agent-relocks-weakened-statement", relocks := true, exits := { grade := 1 }, agent := weakened },
   { name := "agent-proves-outside-solution", exits := { lint := 2, comparator := 1, grade := 1 }, agent := [
       (solutionFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  \
         fold_eq_self_of_normal (fold e) (normal_fold e)\n\n" ""),
       ("ConstantFolding" / "Proofs.lean", appending "module\n\npublic import ConstantFolding.Solution\n\n\
         public section\n\nnamespace ConstantFolding\n\ntheorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  \
         fold_eq_self_of_normal (fold e) (normal_fold e)\n\nend ConstantFolding\n")] }]
-
-def declaredIn (challenge : String) : Array String × Array String := Id.run do
-  let mut scope : List String := []
-  let mut theorems := #[]
-  let mut holes := #[]
-  for line in challenge.splitOn "\n" do
-    let words := (line.splitOn " ").filter (!·.isEmpty)
-    let qualified := fun (name : String) => ".".intercalate (scope.reverse ++ [name])
-    match words with
-    | "namespace" :: name :: _ => scope := name :: scope
-    | "end" :: _ :: _ => scope := scope.drop 1
-    | "def" :: name :: _ => if line.endsWith ":= sorry" then holes := holes.push (qualified name)
-    | _ =>
-      match (words.dropWhile (· != "theorem")).drop 1 with
-      | name :: _ => theorems := theorems.push (qualified name)
-      | [] => pure ()
-  return (theorems, holes)
-
-def comparatorConfigOf (challenge : String) : String :=
-  let (theorems, holes) := declaredIn challenge
-  (Json.mkObj [("challenge_module", toJson "Challenge"), ("solution_module", toJson "ConstantFolding.Solution"),
-    ("theorem_names", toJson theorems), ("definition_names", toJson holes),
-    ("permitted_axioms", toJson #["propext", "Quot.sound", "Classical.choice"])]).pretty
 
 def scrubbedEnv : Array (String × Option String) :=
   #[("GIT_DIR", none), ("GIT_WORK_TREE", none), ("GIT_INDEX_FILE", none), ("SOFTWARE_CHALLENGE_JOBS", some "1")]
@@ -427,7 +559,9 @@ def runIn (dir : System.FilePath) (cmd : String) (args : Array String) : IO IO.P
 def succeedIn (dir : System.FilePath) (cmd : String) (args : Array String) : IO Unit := do
   let out ← runIn dir cmd args
   unless out.exitCode == 0 do
-    throw <| IO.userError s!"{cmd} {" ".intercalate args.toList} failed in {dir}:\n{out.stdout}{out.stderr}"
+    throw <| IO.userError s!"`{cmd} {" ".intercalate args.toList}` exited {out.exitCode} in {dir}, as printed below, \
+      so the matrix cannot set up its scratch copy. Fix what it reports in the template or the library, then run \
+      `lake test`.\n{out.stdout}{out.stderr}"
 
 def gitIn (dir : System.FilePath) (args : Array String) : IO Unit :=
   succeedIn dir "git" (#["-c", "user.name=matrix", "-c", "user.email=matrix@localhost",
@@ -441,27 +575,26 @@ def runRetrying (dir : System.FilePath) (cmd : String) (args : Array String) : I
     out ← runIn dir cmd args
   return out
 
-def comparatorVerdicts : Array String := #["kernel rejected the solution", "theorem statement do not match",
-  "constant kind don't match", "Const not found in solution", "Const does not match between challenge and target",
-  "Solution constant is not a definition", "Solution constant is not a theorem", "Illegal axiom detected",
-  "is not permitted; it is used by"]
-
 def stepLayers : List String := ["build", "lint", "test", "comparator"]
 
 def layerOutput (lake : String) (dir : System.FilePath) : String → IO IO.Process.Output
   | "comparator" => do
-    let config := dir / ".lake" / "matrix-comparator.json"
-    IO.FS.writeFile config (comparatorConfigOf (← IO.FS.readFile (dir / challengeFile)))
     let built ← runIn dir lake #["build", "Challenge"]
-    if built.exitCode == 0 then runRetrying dir lake #["comparator", "--config", config.toString] else pure built
+    if built.exitCode == 0 then runRetrying dir lake #["comparator"] else pure built
   | layer => runIn dir lake #[layer]
 
 def applyEdits (dir : System.FilePath) (m : Mutant) (edits : Edits) : IO Unit := do
   for (file, edit) in edits do
     IO.FS.createDirAll (dir / file).parent.get!
     let text ← if ← (dir / file).pathExists then IO.FS.readFile (dir / file) else pure ""
-    let some edited := edit text | throw <| IO.userError s!"{m.name}: an edit of {file} no longer applies"
+    let some edited := edit text | throw <| IO.userError s!"{m.name}: the text its edit of {file} replaces does not \
+      occur exactly once in that file, so the matrix cannot apply the mutant. Update that `replacing` text for \
+      {m.name} in lakefile.lean to match the file it edits, then run `lake test`."
     IO.FS.writeFile (dir / file) edited
+
+def relock (lake : String) (dir : System.FilePath) : IO IO.Process.Output := do
+  IO.FS.removeFile (dir / "owned.lock")
+  runIn dir lake #["build", ":softwareChallengeStatement"]
 
 def gradeOf (statement : UInt32) (changesOwned : Bool) (code : String → UInt32) (verdict : Bool) : UInt32 :=
   if statement != 0 then 3
@@ -479,62 +612,125 @@ def revert (lake : String) (copy : System.FilePath) (config : String) (m : Mutan
   let status ← runIn copy "git" #["status", "--porcelain"]
   unless rebuilt.exitCode == 0 && idle.exitCode == 0 && status.stdout.isEmpty &&
       (← IO.FS.readFile (copy / "comparator.json")) == config do
-    throw <| IO.userError s!"{m.name}: reverting it left {copy} unlike the base, so later mutants would see its \
-      state:\n{rebuilt.stdout}{rebuilt.stderr}{idle.stdout}{idle.stderr}{status.stdout}"
+    throw <| IO.userError s!"{m.name}: reverting it left {copy} unlike the base, as the build and status below show, \
+      so later mutants would see its state. Make revert in lakefile.lean undo what the mutant's edits or its build \
+      left behind, then run `lake test`.\n{rebuilt.stdout}{rebuilt.stderr}{idle.stdout}{idle.stderr}{status.stdout}"
 
 def runMutant (lake : String) (copy : System.FilePath) (owned : Array String) (config : String) (m : Mutant) :
     IO (Array (String × UInt32 × Nat) × String) := do
-  let mut log := ""
-  unless m.owner.isEmpty do
-    applyEdits copy m m.owner
-    IO.FS.removeFile (copy / "owned.lock")
-    unless m.agent.isEmpty do
-      let recorded ← runIn copy lake #["build"]
-      log := log ++ s!"--- {m.name} owner build exit {recorded.exitCode}\n{recorded.stdout}{recorded.stderr}"
-  applyEdits copy m m.agent
-  let mut cells := #[]
-  let mut verdict := false
-  for layer in stepLayers do
+  try
+    let mut log := ""
+    unless m.owner.isEmpty do
+      applyEdits copy m m.owner
+      IO.FS.removeFile (copy / "owned.lock")
+      unless m.agent.isEmpty do
+        let recorded ← runIn copy lake #["build"]
+        log := log ++ s!"--- {m.name} owner build exit {recorded.exitCode}\n{recorded.stdout}{recorded.stderr}"
+    applyEdits copy m m.agent
+    if m.relocks then
+      let relocked ← relock lake copy
+      log := log ++ s!"--- {m.name} relock build exit {relocked.exitCode}\n{relocked.stdout}{relocked.stderr}"
+    let mut cells := #[]
+    let mut verdict := false
+    for layer in stepLayers do
+      let start ← IO.monoMsNow
+      let out ← layerOutput lake copy layer
+      cells := cells.push (layer, out.exitCode, (← IO.monoMsNow) - start)
+      log := log ++ s!"--- {m.name} {layer} exit {out.exitCode}\n{out.stdout}{out.stderr}"
+      if layer == "comparator" then verdict := (rejectionOf out).isSome
     let start ← IO.monoMsNow
-    let out ← layerOutput lake copy layer
-    cells := cells.push (layer, out.exitCode, (← IO.monoMsNow) - start)
-    log := log ++ s!"--- {m.name} {layer} exit {out.exitCode}\n{out.stdout}{out.stderr}"
-    if layer == "comparator" then verdict := comparatorVerdicts.any ((out.stdout ++ out.stderr).contains ·)
-  let start ← IO.monoMsNow
-  let statement ← if m.owner.isEmpty then pure (0 : UInt32) else do
-    let checked ← runIn copy lake #["build", ":softwareChallengeStatement"]
-    log := log ++ s!"--- {m.name} statement check exit {checked.exitCode}\n{checked.stdout}{checked.stderr}"
-    pure checked.exitCode
-  let changesOwned := m.agent.any fun (file, _) => owned.contains file.toString
-  let code := fun (layer : String) => ((cells.find? (·.1 == layer)).map (·.2.1)).getD 0
-  cells := cells.push ("grade", gradeOf statement changesOwned code verdict, (← IO.monoMsNow) - start)
-  revert lake copy config m
-  return (cells, log)
+    let statement ← if m.owner.isEmpty then pure (0 : UInt32) else do
+      let checked ← runIn copy lake #["build", ":softwareChallengeStatement"]
+      log := log ++ s!"--- {m.name} statement check exit {checked.exitCode}\n{checked.stdout}{checked.stderr}"
+      pure checked.exitCode
+    let changesOwned := m.agent.any fun (file, _) => owned.contains file.toString
+    let code := fun (layer : String) => ((cells.find? (·.1 == layer)).map (·.2.1)).getD 0
+    cells := cells.push ("grade", gradeOf statement changesOwned code verdict, (← IO.monoMsNow) - start)
+    revert lake copy config m
+    return (cells, log)
+  catch failure =>
+    revert lake copy config m
+    return (#[], toString failure)
 
-def endToEnd : List (String × UInt32) := [("agent-honest", 0), ("agent-edits-challenge", 1)]
+def endToEnd : List (String × UInt32) := [("agent-honest", 0), ("agent-edits-challenge", 1),
+  ("agent-forges-proof", 1), ("agent-relocks-weakened-statement", 1)]
 
-def gradeEndToEnd (lake : String) (base : System.FilePath) : IO (Array (String × UInt32 × UInt32 × String)) := do
-  let mut results := #[]
-  for (name, expected) in endToEnd do
-    let some m := mutants.find? (·.name == name) | throw <| IO.userError s!"no mutant {name}"
+def failingLake : String :=
+  "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = software_challenge/grade_candidate ]; then\n    \
+    echo 'error: simulated failure before judging' >&2\n    exit 1\n  fi\ndone\nexec \"$REAL_LAKE\" \"$@\"\n"
+
+def gradeEndToEnd (lake : String) (lsc root base : System.FilePath) :
+    IO (Array (String × UInt32 × UInt32 × String)) := do
+  for (name, _) in endToEnd do
+    let some m := mutants.find? (·.name == name) | throw <| IO.userError s!"endToEnd in lakefile.lean names {name}, \
+      but `mutants` has no mutant of that name, so it cannot be graded. Rename it to a mutant in `mutants`, then run \
+      `lake test`."
     gitIn base #["checkout", "-q", "-b", name]
     applyEdits base m m.agent
+    if m.relocks then
+      let relocked ← relock lake base
+      unless relocked.exitCode == 0 do
+        throw <| IO.userError s!"{name}: `lake build` cannot record owned.lock after its edits, as printed below, so \
+          the matrix cannot commit it. Make the edits of {name} in lakefile.lean build, then run `lake test`.\n\
+          {relocked.stdout}{relocked.stderr}"
     gitIn base #["add", "-A"]
     gitIn base #["commit", "-q", "-m", name]
     gitIn base #["checkout", "-q", "base"]
-    let out ← runRetrying base lake #["exe", "grade", name]
-    results := results.push (name, expected, out.exitCode, out.stdout ++ out.stderr)
-  let absent ← runIn base lake #["exe", "grade", "absent"]
-  return results.push ("a missing commit", 3, absent.exitCode, absent.stdout ++ absent.stderr)
+  succeedIn base lake #["build", "software_challenge/grade", ":softwareChallengeStatement"]
+  let wrapper := root / "failing-lake"
+  IO.FS.writeFile wrapper failingLake
+  IO.setAccessRights wrapper { user := { read := true, write := true, execution := true } }
+  let gradeExe := lsc / ".lake" / "build" / "bin" / "grade"
+  let failing : IO IO.Process.Output := IO.Process.output {
+    cmd := gradeExe.toString, args := #["agent-honest"], cwd := base
+    env := scrubbedEnv ++ #[("LAKE", some wrapper.toString), ("REAL_LAKE", some lake)] }
+  let cases : List (String × UInt32 × IO IO.Process.Output) :=
+    endToEnd.map (fun (name, expected) => (name, expected, runRetrying base lake #["exe", "grade", name])) ++
+    [("a commit whose grade steps fail to start", 3, failing),
+      ("a missing commit", 3, runIn base lake #["exe", "grade", "absent"])]
+  let tasks ← cases.mapM fun (name, expected, action) => do
+    return (name, expected, ← IO.asTask action (prio := .dedicated))
+  tasks.toArray.mapM fun (name, expected, task) => do
+    let out ← IO.ofExcept task.get
+    return (name, expected, out.exitCode, out.stdout ++ out.stderr)
+
+partial def copyTree (source destination : System.FilePath) : IO Unit := do
+  if ← source.isDir then
+    for entry in ← source.readDir do
+      unless entry.fileName == ".lake" || entry.fileName == "comparator.json" do
+        copyTree entry.path (destination / entry.fileName)
+  else
+    IO.FS.createDirAll destination.parent.get!
+    IO.FS.writeBinFile destination (← IO.FS.readBinFile source)
+
+def inRepoFiles : List System.FilePath := ["lakefile.lean", "lake-manifest.json", "lean-toolchain", ".gitignore",
+  "Audit.lean", "SoftwareChallenge.lean", "SoftwareChallenge", "Examples" / "ConstantFolding"]
+
+def replacedJudge : Mutant := { name := "agent-replaces-the-judge", agent := [
+  ("lakefile.lean", replacing "script grade_candidate (args) do\n"
+    "script grade_candidate (_args) do\n  return 0\n\nscript grade_candidate_replaced (args) do\n"),
+  ("Examples" / "ConstantFolding" / coreCodeFile, appending "\ntheorem ConstantFolding.broken : False := rfl\n")] }
+
+def inRepoGrade (lake : String) (lsc root : System.FilePath) : IO (String × UInt32 × UInt32 × String) := do
+  let repo := root / "inrepo"
+  for file in inRepoFiles do copyTree (lsc / file) (repo / file)
+  let template := repo / "Examples" / "ConstantFolding"
+  gitIn repo #["init", "-q"]
+  gitIn repo #["add", "-A"]
+  gitIn repo #["commit", "-q", "-m", "base"]
+  gitIn repo #["branch", "-M", "base"]
+  gitIn repo #["checkout", "-q", "-b", replacedJudge.name]
+  applyEdits repo replacedJudge replacedJudge.agent
+  gitIn repo #["add", "-A"]
+  gitIn repo #["commit", "-q", "-m", replacedJudge.name]
+  gitIn repo #["checkout", "-q", "base"]
+  let out ← runRetrying template lake #["exe", "grade", replacedJudge.name]
+  return ("an in-repo candidate that replaces the library's grade_candidate", 1, out.exitCode,
+    out.stdout ++ out.stderr)
 
 def matrixBase (lake : String) (lsc root : System.FilePath) : IO System.FilePath := do
-  let template := lsc / "Examples" / "ConstantFolding"
   let base := root / "base"
-  for source in ← template.walkDir do
-    let file := System.FilePath.mk (source.toString.drop (template.toString.length + 1)).toString
-    if (← source.isDir) || file.components.head? == some ".lake" || file.toString == "comparator.json" then continue
-    IO.FS.createDirAll (base / file).parent.get!
-    IO.FS.writeBinFile (base / file) (← IO.FS.readBinFile source)
+  copyTree (lsc / "Examples" / "ConstantFolding") base
   for file in ["lakefile.lean", "lake-manifest.json"] do
     IO.FS.writeFile (base / file) ((← IO.FS.readFile (base / file)).replace "\"../..\"" s!"\"{lsc}\"")
   IO.FS.removeFile (base / "owned.lock")
@@ -551,6 +747,12 @@ def cellOf (layer : String) (code : UInt32) : String :=
   else if layer == "grade" && code == 3 then "cannot judge (3)"
   else s!"refused ({code})"
 
+def mismatch (name : String) (wrong : Array (String × UInt32 × UInt32)) : String :=
+  s!"{name}: {", ".intercalate (wrong.map fun (layer, code, expected) =>
+    s!"{layer} exited {code}, expected {expected}").toList}, so those steps judge this mutant otherwise than the matrix \
+    states, as the log below shows. Restore the rule that decided it, or change the mutant's `exits` in `mutants` in \
+    lakefile.lean if the guarantee changed, then run `lake test`."
+
 script test_matrix do
   let lake := (← getLake).toString
   let lsc ← IO.FS.realPath (← getRootPackage).dir
@@ -558,6 +760,7 @@ script test_matrix do
   if ← root.pathExists then IO.FS.removeDirAll root
   IO.FS.createDirAll root
   try
+    let inRepo ← IO.asTask (inRepoGrade lake lsc root) (prio := .dedicated)
     let base ← matrixBase lake lsc root
     let config ← IO.FS.readFile (base / "comparator.json")
     let owned := ((← IO.FS.readFile (base / "owned.lock")).splitOn "\n").toArray.filterMap fun line =>
@@ -570,7 +773,7 @@ script test_matrix do
       let copy := root / s!"copy{index}"
       gitIn root #["clone", "-q", base.toString, copy.toString]
       return copy
-    let graded ← IO.asTask (gradeEndToEnd lake base) (prio := .dedicated)
+    let graded ← IO.asTask (gradeEndToEnd lake lsc root base) (prio := .dedicated)
     let pending ← IO.mkRef mutants
     let results ← IO.mkRef (#[] : Array (Mutant × Array (String × UInt32 × Nat) × String))
     let workers ← copies.mapM fun copy => IO.asTask (prio := .dedicated) do
@@ -585,20 +788,28 @@ script test_matrix do
     let mut rows := #[s!"| mutant | {" | ".intercalate matrixLayers} |",
       s!"|---|{"|".intercalate (matrixLayers.map fun _ => "---")}|"]
     for (m, cells, log) in done do
-      let wrong := cells.filter fun (layer, code, _) => code != m.exits.of layer
+      if cells.isEmpty then
+        failed := true
+        IO.eprintln log
+        rows := rows.push s!"| {m.name} | **could not run** |"
+        continue
+      let wrong := cells.filterMap fun (layer, code, _) =>
+        if code == m.exits.of layer then none else some (layer, code, m.exits.of layer)
       unless wrong.isEmpty do
         failed := true
-        IO.eprintln s!"{m.name}: {", ".intercalate (wrong.map fun (layer, code, _) =>
-          s!"{layer} exited {code}, expected {m.exits.of layer}").toList}\n{log}"
+        IO.eprintln s!"{mismatch m.name wrong}\n{log}"
       rows := rows.push s!"| {m.name} | {" | ".intercalate (cells.map fun (layer, code, ms) =>
         let mark := if code == m.exits.of layer then "" else "**"
         s!"{mark}{cellOf layer code}{mark} {tenths ms}").toList} |"
     rows := rows.push "\nThe grade column follows from the base's statement check, the owned-file diff, and the four \
       steps; `lake exe grade` ran end to end on:"
-    for (name, expected, code, log) in ← IO.ofExcept graded.get do
+    for (name, expected, code, log) in (← IO.ofExcept graded.get).push (← IO.ofExcept inRepo.get) do
       if code != expected then
         failed := true
-        IO.eprintln s!"lake exe grade on {name} exited {code}, expected {expected}:\n{log}"
+        IO.eprintln s!"lake exe grade on {name} exited {code}, expected {expected}, as the log below shows, so grade \
+          no longer decides that case as the matrix states. Restore what decided it in SoftwareChallenge/Grade.lean or \
+          grade_candidate in lakefile.lean, or change its expectation in lakefile.lean if the guarantee changed, then \
+          run `lake test`.\n{log}"
       rows := rows.push s!"- {name}: exit {code}{if code == expected then "" else s!", expected {expected}"}"
     IO.FS.writeFile (lsc / ".lake" / "build" / "grade.md") ("\n".intercalate rows.toList ++ "\n")
     IO.println ("\n".intercalate rows.toList)
@@ -606,12 +817,13 @@ script test_matrix do
   finally
     IO.FS.removeDirAll root
 
-def sandboxFiles (lsc scratch : System.FilePath) : List (System.FilePath × String) := [
+def sandboxFiles (lsc scratch linked : System.FilePath) : List (System.FilePath × String) := [
   ("hidden" / "lakefile.lean", "import Lake\nopen Lake DSL\npackage «hidden»\n"),
   ("consumer" / ".gitignore", "/.lake\n/comparator.json\n"),
   ("consumer" / "lakefile.lean", s!"import Lake\nopen Lake DSL\n\npackage «consumer» where\n  \
-    builtinLint := true\n  lintDriver := \"software_challenge/lint_challenge\"\n\n\
-    require software_challenge from \"{lsc}\"\nrequire hidden from \"{scratch / "hidden"}\"\n\n\
+    lintDriver := \"software_challenge/lint_challenge\"\n\n\
+    require software_challenge from \"{lsc}\"\nrequire hidden from \"{scratch / "hidden"}\"\n\
+    require linked from \"{linked}\"\n\n\
     @[default_target]\nlean_lib «Consumer» where\n  roots := #[`Consumer.Solution]\n  globs := #[.submodules `Consumer]\n\n\
     lean_lib «Challenge» where\n  leanOptions := #[⟨`warn.sorry, false⟩]\n\n{statementTarget}\n"),
   ("consumer" / "Challenge.lean", "module\n\nmeta import SoftwareChallenge\n\npublic section\n\n\
@@ -626,9 +838,13 @@ script test_sandbox do
   let lake := (← getLake).toString
   let lsc ← IO.FS.realPath (← getRootPackage).dir
   let scratch ← IO.FS.createTempDir
+  let visible := lsc / ".lake" / "build" / "sandbox-linked"
   try
     let consumer := scratch / "consumer"
-    for (file, text) in sandboxFiles lsc scratch do
+    IO.FS.createDirAll visible
+    IO.FS.writeFile (visible / "lakefile.lean") "import Lake\nopen Lake DSL\npackage «linked»\n"
+    discard <| IO.Process.output { cmd := "ln", args := #["-s", visible.toString, (scratch / "linked").toString] }
+    for (file, text) in sandboxFiles lsc scratch (scratch / "linked") do
       IO.FS.createDirAll (scratch / file).parent.get!
       IO.FS.writeFile (scratch / file) text
     IO.FS.writeFile (consumer / "lean-toolchain") (← IO.FS.readFile (lsc / "lean-toolchain"))
@@ -638,14 +854,28 @@ script test_sandbox do
     gitIn consumer #["add", "-A"]
     gitIn consumer #["commit", "-q", "-m", "consumer"]
     let grade ← runIn consumer lake #["exe", "grade", "HEAD"]
-    let hides := "the comparator's sandbox hides package hidden"
-    if lint.exitCode == 2 && (lint.stdout ++ lint.stderr).contains hides &&
-        grade.exitCode == 3 && (grade.stdout ++ grade.stderr).contains hides then return 0
-    IO.eprintln s!"a dependency under {scratch} was not reported: lake lint exited {lint.exitCode}, expected 2, and \
-      lake exe grade exited {grade.exitCode}, expected 3:\n{lint.stdout}{lint.stderr}\n{grade.stdout}{grade.stderr}"
-    return 1
+    let hides := fun (name : String) => s!"the comparator's sandbox hides package {name}"
+    let lintText := lint.stdout ++ lint.stderr
+    let gradeText := grade.stdout ++ grade.stderr
+    unless lint.exitCode == 2 && lintText.contains (hides "hidden") && lintText.contains (hides "linked") &&
+        grade.exitCode == 3 && gradeText.contains (hides "hidden") do
+      IO.eprintln s!"a dependency the comparator's sandbox hides was not reported: lake lint exited {lint.exitCode}, \
+        expected 2 naming hidden and linked, and lake exe grade exited {grade.exitCode}, expected 3 naming hidden, \
+        as the log below shows. Restore the check in hiddenFromSandbox in lakefile.lean, then run `lake test`.\n\
+        {lintText}\n{gradeText}"
+      return 1
+    let config := consumer / "lakefile.lean"
+    IO.FS.writeFile config ((← IO.FS.readFile config).replace "  lintDriver :=" "  builtinLint := true\n  lintDriver :=")
+    let twice ← runIn consumer lake #["lint"]
+    unless twice.exitCode == 1 && (twice.stdout ++ twice.stderr).contains "sets `builtinLint := true`" do
+      IO.eprintln s!"lake lint on a package that sets `builtinLint := true` exited {twice.exitCode}, expected 1 \
+        naming that setting, as the log below shows, so Lean's linters would run twice unreported. Restore the \
+        builtinLint check in lint_challenge in lakefile.lean, then run `lake test`.\n{twice.stdout}{twice.stderr}"
+      return 1
+    return 0
   finally
     IO.FS.removeDirAll scratch
+    if ← visible.pathExists then IO.FS.removeDirAll visible
 
 def ladder (lake : String) (steps : List (System.FilePath × Array String)) : IO (Option String) := do
   for (cwd, args) in steps do

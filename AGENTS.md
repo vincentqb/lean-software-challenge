@@ -1,8 +1,9 @@
 # Working on Lean Software Challenge
 
 The library is the audit, the commands (`WorldClaim`, `Check`, `@[kills]`, `@[terminates]`,
-`@[witness]`), the generated `comparator.json`, the drivers of `lake build`, `lake lint`, and
-`lake test`, and `lake exe grade`. `README.md` states what each step guarantees; keep it true, and
+`@[witness]`), the `softwareChallengeStatement` facet that `lake build` runs through the
+`statement` target and that writes `comparator.json`, the lint and test drivers `lint_challenge`
+and `test_challenge`, the `replay` script, and `lake exe grade`. `README.md` states what each step guarantees; keep it true, and
 change it in the same commit as any behavior it describes.
 
 In `Examples/ConstantFolding/`, the template, do not edit `Challenge.lean`, `owned.lock`,
@@ -16,8 +17,8 @@ In `Examples/ConstantFolding/`, the template, do not edit `Challenge.lean`, `own
   reports status; acceptance is `grade`. A challenge in progress must build: a headline the
   solution does not prove yet is reported, not an error. Never let the audit accept `sorry` or an
   axiom beyond the standard ones.
-- Every message names the declaration, file, and line, says why it matters in one clause, gives
-  the exact fix, and the command to run next.
+- Every message about a declaration names it with its file and line; every message says why it
+  matters in one clause, gives the exact fix, and the command to run next.
 - Names and structure carry the meaning. Write no comments or doc comments in Lean code, except
   each `WorldClaim`'s required doc comment and the template challenge's statement of what is and is
   not claimed.

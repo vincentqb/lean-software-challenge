@@ -10,11 +10,13 @@ You write the statement of the challenge, then review only changes to it.
 
 - `Challenge.lean`: the headlines, theorems about the program stated with `sorry`; a hole,
   `def name : T := sorry`, for each function a headline mentions; and for each headline a kill,
-  `¬` the headline with its holes replaced by a wrong implementation, marked `@[kills headline]`.
+  `¬` the headline with its holes, and any WorldSpec foreign functions, replaced by wrong
+  implementations, marked `@[kills headline]`.
 - `MyApp/CoreSpec.lean`: the types and reference definitions the headlines are stated in.
 - `MyApp/WorldSpec.lean`: each foreign function the program calls, as an `@[extern] opaque`
   declaration, and a `WorldClaim` for each assumption about one. A world claim's doc comment
   names the observation that would falsify it.
+- `MyApp/Solution.lean` containing only `module`, which agents fill in.
 - `lakefile.lean`, `lean-toolchain`, and `lake-manifest.json`, as in [Setup](#setup).
 
 To show a headline independent of the others, state its kill as `¬ H ∧ H₂ ∧ … ∧ Hₙ`: the negated
@@ -29,9 +31,10 @@ claims that mention no input, the witness assumes them first. The audit reads a 
 `Prop`-valued definitions of CoreSpec and WorldSpec unfolded, except world claims, so the
 hypotheses and inputs of such a definition are the headline's.
 
-`lake build` records a hash of each of these files in `owned.lock` when there is none. After that,
-`lake build` and `lake lint` fail if one of them changes. To record a new statement, delete
-`owned.lock` and run `lake build`.
+Once exactly one module is named `Solution`, `lake build` records a hash of each of these files but
+`Solution.lean`, and of every other module whose role is CoreSpec or WorldSpec, in `owned.lock` when
+there is none. After that, `lake build` and `lake lint` fail if one of them changes. To record a new
+statement, delete `owned.lock` and run `lake build`.
 
 ## What agents write
 
@@ -45,14 +48,17 @@ Agents write everything else:
 
 Holes are defined in CoreCode or WorldCode. Once the statements exist, the code and the proofs
 can progress independently, headline by headline. A headline that is not proved yet stays out of
-`Solution.lean`: every step passes, and `lake lint` reports it as pending. A `sorry` anywhere fails
+`Solution.lean`: `lake build` and `lake test` pass, `lake lint` exits 2 and lists it under Pending,
+and `lake comparator` and `lake exe grade` refuse until it is proved. A `sorry` anywhere fails
 `lake lint`.
 
 ## What you get
 
-Each step checks what the steps before it do not, and runs none of them; Lake reuses their builds.
+Each step adds checks the steps before it do not make, and runs none of them; Lake reuses their
+builds.
 
-When `lake build` passes, the code compiles, and the statement is well formed: every headline has
+When `lake build` passes, the code compiles, exactly one module is named `Solution`, and the
+statement is well formed: every headline has
 a kill, every precondition that mentions a hole or a foreign function has a witness, no two
 headlines state the same up to binder names, every hole is mentioned, and every hypothesis of a
 headline that mentions no input is a world claim. No owned file differs from `owned.lock`. It
@@ -63,8 +69,10 @@ When `lake lint` exits 0, Lean's linters pass, and:
 - Every headline, kill, and witness is proved in `Solution` or a module it imports, with the
   statement `Challenge.lean` gives it, up to binder names and binder kinds, as `lake comparator`
   compares them. Each hole is a `def` of the type `Challenge.lean` gives it.
-- The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, foreign code
-  enters only through WorldSpec, CoreCode never calls it, and `main` reaches every hole.
+- The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, except a
+  `partial_fixpoint` hole whose `@[terminates]` headline states where it returns; foreign code
+  enters only through WorldSpec, CoreCode never calls it, and in a program `main` reaches every
+  hole.
 - Every headline rejects a wrong implementation: each kill is proved.
 - Every headline can apply: some input meets its preconditions. Its kill shows this for
   preconditions that mention no hole or foreign function, and its proved witness for the others.
@@ -80,7 +88,7 @@ with only the standard axioms. The build alone does not ensure this: a proof can
 with `debug.skipKernelTC`.
 
 When `lake exe grade <commit>` accepts, the candidate changes no owned file, and every step above
-passes on it.
+passes on it, judged by the base's copy of this library.
 
 No check decides whether a headline says what its name says, whether it is as general as it
 could be, or whether a `Check` exercises its claim. You judge those; the report helps.
@@ -126,8 +134,10 @@ The [template](Examples/ConstantFolding) is a complete challenge.
 In `lakefile.lean`:
 
 ```lean
+import Lake
+open Lean Lake DSL
+
 package «my_app» where
-  builtinLint := true
   lintDriver := "software_challenge/lint_challenge"
   testDriver := "software_challenge/test_challenge"
   leanOptions := #[
@@ -187,24 +197,29 @@ lake comparator            # replay the proofs through the kernel in a sandbox
 lake exe grade <commit>    # owner: judge a candidate from this checkout
 ```
 
-`lake lint` exits 0 when the solution is complete, 2 when it has no error but something is
-pending, and 1 on any error. `lake test` exits with the worst code of its steps, so an own test's
-code passes through. Every message names the file and line, says why it matters, gives the fix,
-and the command to run next.
+`lake lint` runs Lean's linters itself, so the package does not set `builtinLint := true`, which
+would run them twice. It exits 0 when the solution is complete, 2 when it has no error but
+something is pending, and 1 on any error, a linter's warning included. `lake test` exits with the
+worst code of its steps, so an own test's code passes through. Every message about a declaration
+names its file and line; every message says why it matters, gives the fix, and the command to run
+next.
 
 `lake script run software_challenge/replay` runs `lake comparator` once for each theorem, several at
 a time, and writes the time each run took, slowest first, to `.lake/build/comparator.txt`: a slow
 proof shows at the top before it reaches a time limit. `SOFTWARE_CHALLENGE_JOBS` sets how many run
 at a time (default: the hardware threads, at most 16). A run's time includes the comparator's
-checks of the build and its export, not only the kernel's replay.
+checks of the build and its export, not only the kernel's replay. It exits 1 when the comparator
+rejects a theorem, and 2 when a run fails without a verdict.
 
-`lake exe grade` cannot judge a base without `owned.lock` or whose statement check fails. It
-refuses a candidate that changes an owned file; otherwise it checks the candidate out in a
-worktree under `.lake/grade/` and runs, once each, `lake build`, Lean's linters, the audit, the
-Checks, the package's own tests, and one `lake comparator` with the base's `comparator.json`. It
-exits 0 to accept, 1 to refuse, and 3 when it cannot judge: a dependency the sandbox hides, or a
-comparator that fails without a verdict. The candidate's code runs unsandboxed before the
-comparator, so grade a candidate you do not trust in a disposable container.
+`lake exe grade <commit>` checks the candidate out in a worktree under `.lake/grade/`, gives it
+the base's copy of this library and the base's dependencies, and runs, once each, `lake build`,
+`lake lint`, the Checks, the package's own tests, and one `lake comparator` with the
+`comparator.json` the base wrote before the candidate's code ran. It exits 0 to accept; 1 to
+refuse a candidate that changes an owned file, solves an older statement, or fails a step; and 3
+when it cannot judge: the base is not a git checkout, has no `owned.lock`, has uncommitted changes
+to an owned file, or fails its statement check; the candidate names no commit; the sandbox hides a
+dependency; or a step fails before judging. The candidate's code runs unsandboxed and can change
+the host and the verdict, so grade a candidate in a disposable container.
 
 ## Cite
 
