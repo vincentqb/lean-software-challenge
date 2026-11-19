@@ -1483,7 +1483,7 @@ private def solutionAudit (arguments : Arguments) : IO UInt32 := do
   unless items.isEmpty do report := report.push (listing "Pending" items)
   report := report.push s!"Edit: {" ".intercalate edit.toList}" |>.push s!"Owned: {" ".intercalate ownedNow.toList}"
   IO.println ("\n".intercalate report.toList)
-  return if !errors.isEmpty || !project.check facts.inventory then 1 else if items.isEmpty then 0 else 2
+  return if !errors.isEmpty || !(project.violations facts.inventory).isEmpty then 1 else if items.isEmpty then 0 else 2
 
 def run (args : List String) : IO UInt32 := do
   let usage := "usage: lean --run Audit.lean (statement | solution) [--executable[=<root module>]]... [--target] \

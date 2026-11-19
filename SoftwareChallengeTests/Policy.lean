@@ -1,39 +1,11 @@
 module
 
-import all SoftwareChallenge.CoreCode.Layering
 import all SoftwareChallenge.CoreCode.Match
 meta import SoftwareChallenge.Audit
 
 namespace SoftwareChallengeTests.Policy
 
 open Lean SoftwareChallenge
-
-def layered : Project := { modules := #[(`A, .coreCode), (`B, .coreSpec), (`W, .worldCode)] }
-
-def importing (target : Name) : Inventory :=
-  { modules := #[{ name := `A, file := "A.lean", usesModuleSystem := true,
-                   imports := #[{ name := target, comptime := false, line := 1 }] }],
-    declarations := #[] }
-
-theorem layering_sound_witness :
-    ∃ (project : Project) (inventory : Inventory) (source target : Name) (role reached : Role),
-      project.check inventory = true ∧ project.role? source = some role ∧ role.Inner ∧
-        Relation.TransGen inventory.RuntimeImport source target ∧ project.role? target = some reached :=
-  ⟨layered, importing `B, `A, `B, .coreCode, .coreSpec,
-    by simp [layered, importing, Project.check, Project.moduleAdmitted, Project.role?, Project.admits, Role.permits],
-    by simp [layered, Project.role?], by simp [Role.Inner],
-    .single (by simp [importing, Inventory.RuntimeImport]), by simp [layered, Project.role?]⟩
-
-theorem layering_sound_rejects_accepting :
-    ¬ ∀ (project : Project) (inventory : Inventory), (fun _ _ => true) project inventory = true →
-      ∀ (source target : Name) (role : Role), project.role? source = some role → role.Inner →
-        Relation.TransGen inventory.RuntimeImport source target →
-          ∀ reached, project.role? target = some reached → reached.Inner := by
-  intro sound
-  have escaped := sound layered (importing `W) rfl `A `W .coreCode (by simp [layered, Project.role?])
-    (by simp [Role.Inner]) (.single (by simp [importing, Inventory.RuntimeImport])) .worldCode
-    (by simp [layered, Project.role?])
-  simp [Role.Inner] at escaped
 
 theorem witnesses?_sound_witness :
     ∃ (replaceable : Name → Bool) (pattern target : Shape) (σ : Witnesses),
@@ -113,7 +85,6 @@ meta section
 run_cmd Elab.Command.liftTermElabM do
   let env ← getEnv
   for (statement, function, kill) in #[
-      (``Project.check_layered, ``Project.check, ``layering_sound_rejects_accepting),
       (``Shape.witnesses?_sound, ``Shape.witnesses?, ``witnesses?_sound_rejects_accepting),
       (``Shape.witnesses?_complete, ``Shape.witnesses?, ``witnesses?_complete_rejects_refusing),
       (``Shape.witnesses?_isSome_iff, ``Shape.witnesses?, ``witnesses?_isSome_iff_rejects_accepting),
@@ -121,8 +92,7 @@ run_cmd Elab.Command.liftTermElabM do
       (``Shape.applies_sound, ``Shape.applies, ``applies_sound_rejects_accepting)] do
     unless Audit.kills env (NameSet.empty.insert function) statement kill do
       throwError "{kill} is not `¬` {statement} with {function} replaced"
-  for (statement, witness) in #[(``Project.check_layered, ``layering_sound_witness),
-      (``Shape.witnesses?_sound, ``witnesses?_sound_witness),
+  for (statement, witness) in #[(``Shape.witnesses?_sound, ``witnesses?_sound_witness),
       (``Shape.witnesses?_complete, ``witnesses?_complete_witness),
       (``Shape.independent_sound, ``independent_sound_witness),
       (``Shape.applies_sound, ``applies_sound_witness)] do

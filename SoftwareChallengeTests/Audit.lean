@@ -93,13 +93,13 @@ private def expectedConfig : String := "{
 
 run_cmd Elab.Command.liftCoreM do
   let accepted ← Audit.collect valid
-  unless project.check accepted do
+  unless (project.violations accepted).isEmpty do
     throwError "Valid fixtures were rejected:\n{← violations project accepted}"
   let reassign (module : Name) (role : Role) : Project :=
     { modules := project.modules.map fun (name, r) => (name, if name == module then role else r) }
   let rejected ← Audit.collect (valid.push (fixture `Rejected))
   for layout in #[project, reassign (fixture `Rejected) .coreSpec] do
-    if layout.check rejected then throwError "Rejected fixtures passed"
+    if (layout.violations rejected).isEmpty then throwError "Rejected fixtures passed"
     let found ← violations layout rejected
     for (name, reason) in #[("hiddenUnsafe", "unsafe"), ("diverging", "partial"),
         ("hiddenEffect", "IO"), ("packagedEffect", "IO"), ("startup", "runs IO when the program starts"),
@@ -140,7 +140,7 @@ run_cmd Elab.Command.liftCoreM do
     throwError "An @[extern] opaque declaration was rejected in a WorldSpec module"
   let fixpoints := valid.push (fixture `Fixpoint)
   let unproved ← Audit.collect fixpoints
-  if project.check unproved then throwError "A partial_fixpoint without a termination headline passed"
+  if (project.violations unproved).isEmpty then throwError "A partial_fixpoint without a termination headline passed"
   expect (← violations project unproved) "Fixpoint.countdown" "partial"
   let covered ← Audit.collect fixpoints (NameSet.empty.insert countdown)
   expect (← violations project covered) "Fixpoint.spin" "partial"
@@ -151,10 +151,10 @@ run_cmd Elab.Command.liftCoreM do
   expect (← violations project listedPartial) "diverging" "partial"
   let legacy := { accepted with
     modules := accepted.modules.map ({ · with usesModuleSystem := false }) }
-  if project.check legacy then throwError "A file without `module` passed"
+  if (project.violations legacy).isEmpty then throwError "A file without `module` passed"
   expect (← violations project legacy) "Fixtures.CoreCode" "does not start with `module`"
   let outside : Project := { modules := project.modules.filter (·.1 != fixture `WorldCode) }
-  if outside.check accepted then throwError "A module outside the package was audited as one of it"
+  if (outside.violations accepted).isEmpty then throwError "A module outside the package was audited as one of it"
   expect (← violations outside accepted) "Fixtures.WorldCode" "no lean_lib of the package builds"
   let challenge := Audit.owned project {
     challengeImports := ← Audit.challengeImports "SoftwareChallengeTests/Fixtures/Challenge.lean" }
