@@ -405,9 +405,11 @@ def preconditionsOf (project : Project) (replaceable : NameSet) (headline : Name
     let mut inputs := #[]
     let mut premises := #[]
     let mut preconditions := #[]
-    for binder in binders do
+    for (binder, index) in binders.zipIdx do
       let statement ← Meta.inferType binder
-      if !(← Meta.isProp statement) then inputs := inputs.push binder
+      let depended ← (binders.extract (index + 1) binders.size).anyM fun later =>
+        return (← Meta.inferType later).containsFVar binder.fvarId!
+      if !(← Meta.isProp statement) || depended then inputs := inputs.push binder
       else if isWorldClaim env (conclusionHead statement) then
         unless statement.hasFVar do premises := premises.push statement
       else preconditions := preconditions.push statement

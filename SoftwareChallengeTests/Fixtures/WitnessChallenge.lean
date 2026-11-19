@@ -48,6 +48,11 @@ theorem double_nonnegative_vanishes : NonnegativeVanishes double := sorry
 
 theorem double_vanishes_only_at_zero : VanishesOnlyAtZero double := sorry
 
+theorem double_zero_fin (n : Nat) [NeZero n] (h : double (0 : Fin n).val = 0) : 0 < n := sorry
+
+@[witness double_zero_fin] theorem double_zero_fin_applies :
+    ∃ (n : Nat) (_ : NeZero n), double (0 : Fin n).val = 0 := sorry
+
 theorem succ_law : SuccLaw := sorry
 
 @[witness double] theorem double_applies : ∃ n : Nat, 0 < n := sorry

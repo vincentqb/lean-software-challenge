@@ -463,7 +463,7 @@ run_cmd Elab.Command.liftTermElabM do
   unless read.headlines == #[member `double_halves, member `double_positive, member `double_between,
       member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero,
       member `double_negative_vanishes, member `double_nonnegative_vanishes, member `double_vanishes_only_at_zero,
-      member `succ_law] do
+      member `double_zero_fin, member `succ_law] do
     throwError "A witness was read as a headline: {read.headlines}"
   unless read.misshapenWitnesses.map (·.1) == #[member `double_positive_applies_unused,
       member `double_positive_applies_replaced, member `double_zero_applies, member `double_applies] do
