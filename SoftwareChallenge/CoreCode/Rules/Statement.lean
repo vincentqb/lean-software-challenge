@@ -96,22 +96,30 @@ def duplicates (challenge : ChallengeFacts) : List (Name × Name) :=
   duplicatesFrom [] (challenge.headlines.toList.map fun headline =>
     (headline.target.constant.name, headline.target.constant.type))
 
+def laterDuplicate (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
+  (duplicates challenge).any (·.1 == headline.target.constant.name)
+
+def unreproducible (headline : HeadlineFact) : Bool :=
+  headline.target.auxiliaries.any (·.isPrivate)
+
 def mentionsReplaceable (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
   (mentioned headline.target.constant.type).any challenge.isReplaceable
 
 def killsHeadline (challenge : ChallengeFacts) (headline : HeadlineFact) (kill : Shape) : Bool :=
   killedBy challenge.isReplaceable headline.target.constant.type (challenge.othersOf headline) kill
 
+def killsAnother (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
+  challenge.headlines.any fun other => killsHeadline challenge other headline.target.constant.type
+
 def hasKill (challenge : ChallengeFacts) (headline : Name) : Bool :=
   challenge.kills.any (·.headline == headline)
 
 def settled (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
-  (duplicates challenge).any (·.1 == headline.target.constant.name) ||
-    headline.target.auxiliaries.any (·.isPrivate) || !mentionsReplaceable challenge headline
+  laterDuplicate challenge headline || unreproducible headline || !mentionsReplaceable challenge headline
 
 def unmarked (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
   challenge.headlines.any (fun other => killsHeadline challenge headline other.target.constant.type) ||
-    challenge.headlines.any fun other => killsHeadline challenge other headline.target.constant.type
+    killsAnother challenge headline
 
 def needsWitness (headline : HeadlineFact) : Bool :=
   headline.binders.any fun binder => binder.kind != .claim && binder.mentions
@@ -131,11 +139,16 @@ def ownedPaths (lake : LakeFacts) (challenge : ChallengeFacts) : Array String :=
 def digested (files : FileFacts) (path : String) : Bool :=
   files.digests.any (·.path == path)
 
+def recorded (files : FileFacts) (path : String) : Bool :=
+  match files.lock with
+  | .decoded locked => locked.any (·.path == path)
+  | _ => false
+
 def ownedFile? (lake : LakeFacts) (challenge : ChallengeFacts) (path : String) : Option OwnedFile :=
   if path = challenge.file then some .challenge
-  else if path = "lakefile.lean" ∨ path = "lakefile.toml" then some .lakefile
   else if path = "lake-manifest.json" then some .manifest
   else if path = "lean-toolchain" then some .toolchain
+  else if path = "lakefile.lean" ∨ path = "lakefile.toml" ∨ lake.configFiles.contains path then some .lakefile
   else match lake.modules.find? (·.file == path) with
     | some source =>
       if challenge.closure.contains source.module then some (.closureModule source.module)
@@ -205,12 +218,15 @@ def duplicateErrors (challenge : ChallengeFacts) : Array Error :=
 
 def mentionErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.headlines.filterMap fun headline =>
-    if mentionsReplaceable challenge headline then none else some (.mentionsNothing headline.target.constant.name)
+    if mentionsReplaceable challenge headline || laterDuplicate challenge headline || unreproducible headline ||
+        killsAnother challenge headline then none
+    else some (.mentionsNothing headline.target.constant.name)
 
 def unmarkedErrors (challenge : ChallengeFacts) : Array Error :=
-  challenge.headlines.flatMap fun headline =>
-    (challenge.headlines.filter (killsHeadline challenge headline ·.target.constant.type)).map
-      (.unmarkedKill headline.target.constant.name ·.target.constant.name)
+  (challenge.headlines.filter (!laterDuplicate challenge ·)).flatMap fun headline =>
+    (challenge.headlines.filter fun kill =>
+      !laterDuplicate challenge kill && killsHeadline challenge headline kill.target.constant.type).map
+        (.unmarkedKill headline.target.constant.name ·.target.constant.name)
 
 def noKillErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.headlines.filterMap fun headline =>
@@ -260,7 +276,8 @@ def terminationErrors (challenge : ChallengeFacts) : Array Error :=
       else #[.terminatesUnmentioned termination.headline termination.definition])
 
 def unreadErrors (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Array Error :=
-  (ownedPaths lake challenge).filterMap fun path => if digested files path then none else some (.ownedUnread path)
+  (ownedPaths lake challenge).filterMap fun path =>
+    if digested files path || recorded files path then none else some (.ownedUnread path)
 
 def lockErrors (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Array Error :=
   match files.lock with

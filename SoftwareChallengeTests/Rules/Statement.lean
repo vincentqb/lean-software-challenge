@@ -49,6 +49,9 @@ def againHeadline : HeadlineFact :=
 
 def trivialHeadline : HeadlineFact := headlineOf (targetOf `App.trivial .proved (.const ``True []) 13 "trivial")
 
+def trivialAgainHeadline : HeadlineFact :=
+  headlineOf (targetOf `App.trivial_again .proved (.const ``True []) 14 "trivial_again")
+
 def tripleHeadline : HeadlineFact :=
   headlineOf (targetOf `App.triple_even .proved (evenStatement triple) 13 "triple_even")
 
@@ -121,6 +124,29 @@ def unmarkedKill : ChallengeFacts :=
   { baseChallenge with
     kills := #[]
     headlines := #[evenHeadline, headlineOf evenKill.target] }
+
+def againKill : HeadlineFact :=
+  headlineOf (targetOf `App.double_even_rejects_again .proved (evenStatement successor).negation 12
+    "double_even_rejects_again")
+
+def unmarkedTwice : ChallengeFacts :=
+  { baseChallenge with
+    kills := #[]
+    headlines := #[evenHeadline, headlineOf evenKill.target, againKill] }
+
+def duplicatedUnmarked : ChallengeFacts :=
+  { baseChallenge with
+    kills := #[]
+    headlines := #[evenHeadline, againHeadline, headlineOf evenKill.target] }
+
+def trivialTwice : ChallengeFacts :=
+  { baseChallenge with
+    headlines := #[evenHeadline, trivialHeadline, trivialAgainHeadline] }
+
+def trivialUnreproducible : ChallengeFacts :=
+  { baseChallenge with
+    headlines := #[evenHeadline, { trivialHeadline with
+      target.auxiliaries := #[{ constantOf (privateName "proof_1") .proved nat with isPrivate := true }] }] }
 
 def killOfMissing : ChallengeFacts :=
   { baseChallenge with
@@ -310,7 +336,19 @@ end
 
 #guard refuses (.unmarkedKill `App.double_even `App.double_even_rejects) (challenge := unmarkedKill)
 
-#guard !(errorsOf (challenge := unmarkedKill)).any (· matches .noKill _ _)
+#guard errorsOf (challenge := unmarkedKill) == #[.unmarkedKill `App.double_even `App.double_even_rejects]
+
+#guard errorsOf (challenge := unmarkedTwice) ==
+  #[.duplicate `App.double_even_rejects_again `App.double_even_rejects,
+    .unmarkedKill `App.double_even `App.double_even_rejects]
+
+#guard errorsOf (challenge := duplicatedUnmarked) ==
+  #[.duplicate `App.double_even_again `App.double_even, .unmarkedKill `App.double_even `App.double_even_rejects]
+
+#guard errorsOf (challenge := trivialTwice) ==
+  #[.duplicate `App.trivial_again `App.trivial, .mentionsNothing `App.trivial]
+
+#guard errorsOf (challenge := trivialUnreproducible) == #[.privateAuxiliary `App.trivial (privateName "proof_1")]
 
 #guard refuses (.killOfNonHeadline `App.double_even_rejects `App.triple) (challenge := killOfMissing)
 
@@ -386,13 +424,20 @@ end
 
 #guard errorsOf (lake := worldRoot) == #[]
 
-#guard refuses (.ownedUnread "App/CoreSpec.lean") (files := { baseFiles with digests := digests.pop })
+#guard refuses (.ownedUnread "App/CoreSpec.lean")
+  (files := { baseFiles with lock := .missing, digests := digests.pop })
+
+#guard errorsOf (files := { baseFiles with digests := digests.pop }) ==
+  #[.lock (.missing "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec))]
 
 #guard refuses (.lock (.differs "Challenge.lean") (some .challenge))
   (files := { baseFiles with digests := changedDigests })
 
 #guard refuses (.lock (.unrecorded "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec)))
   (files := { baseFiles with lock := .decoded digests.pop })
+
+#guard refuses (.lock (.unrecorded "App/Solution.lean") none)
+  (files := { baseFiles with digests := digests.push ⟨"App/Solution.lean", "5"⟩ })
 
 #guard refuses (.lock (.missing "Gone.lean") none)
   (files := { baseFiles with lock := .decoded (digests.push ⟨"Gone.lean", "4"⟩) })

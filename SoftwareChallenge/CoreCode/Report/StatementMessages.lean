@@ -2,6 +2,7 @@ module
 
 public import SoftwareChallenge.CoreCode.Report.Message
 public import SoftwareChallenge.CoreCode.Rules.Statement
+import Lean.PrivateName
 
 public section
 
@@ -42,8 +43,11 @@ def within (challenge : ChallengeFacts) (name : Name) : String :=
   | none => ""
 
 def shown (name : Name) : String :=
-  let text := toString name
-  if text.startsWith "_private." then ".0.".intercalate ((text.splitOn ".0.").drop 1) else text
+  toString (privateToUserName name)
+
+def suffixed (challenge : ChallengeFacts) (name : Name) (suffix : String) : String :=
+  let space := ((target? challenge name).map (·.enclosingNamespace)).getD .anonymous
+  toString (((privateToUserName name).appendAfter suffix).replacePrefix space .anonymous)
 
 def templateOf (challenge : ChallengeFacts) (name : Name) : String :=
   match headline? challenge name with
@@ -82,8 +86,9 @@ def configuration : Option OwnedFile → Bool
   | some .lakefile | some .manifest | some .toolchain | some .challenge => true
   | _ => false
 
-def editable (lake : LakeFacts) (challenge : ChallengeFacts) : String :=
-  let files := (lake.modules.filter fun source => !ownsModule challenge source.module).map (·.file)
+def editable (lake : LakeFacts) (challenge : ChallengeFacts) (changed : String) : String :=
+  let files := (lake.modules.filter fun source => source.module != challenge.module && source.file != changed &&
+    !ownsModule challenge source.module).map (·.file)
   if files.isEmpty then "the CoreCode and WorldCode modules" else ", ".intercalate files.toList
 
 def restore (path : String) : String :=
@@ -102,18 +107,28 @@ def lockMessage (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFac
   let reason := ownedReason challenge owned?
   match violation with
   | .unrecorded path =>
-    { place := atLine path 1
-      what := s!"{path} is owned, because {reason}, but owned.lock does not record it"
-      why := if configuration owned? then "so a change to it would go unreviewed"
-        else "so it would change the statement unreviewed"
-      fix := if configuration owned? then s!"To record it, {recordStep next}"
-        else s!"Remove or rename {path}, or, to add it to the statement, {recordStep next}"
-      next }
+    if owned?.isNone then
+      { place := atLine path 1
+        what := s!"owned.lock does not record {path}, which LSC's facets list as an input although nothing owns it \
+          (it is not the Lake configuration, {challenge.file}, a module {challenge.file} imports, or a CoreSpec or \
+          WorldSpec module)"
+        why := "so owned.lock does not match the files the audit reads"
+        fix := s!"To record {path} in owned.lock, {recordStep next}; to stop the audit from reading it, remove it from \
+          the inputs that the facets compute in LSC's lakefile.lean"
+        next }
+    else
+      { place := atLine path 1
+        what := s!"{path} is owned, because {reason}, but owned.lock does not record it"
+        why := if configuration owned? then "so a change to it would go unreviewed"
+          else "so it would change the statement unreviewed"
+        fix := if configuration owned? then s!"To record it, {recordStep next}"
+          else s!"Remove or rename {path}, or, to add it to the statement, {recordStep next}"
+        next }
   | .differs path =>
     { place := atLine path 1
       what := s!"{path} differs from owned.lock"
       why := s!"but {reason}, which a solution must not change"
-      fix := s!"Restore it with `{restore path}` and edit {editable lake challenge} instead, or, to change the \
+      fix := s!"Restore it with `{restore path}` and edit {editable lake challenge path} instead, or, to change the \
         statement, {recordStep next}"
       next }
   | .missing path =>
@@ -131,12 +146,16 @@ def lockUnreadableMessage (problem : String) (next : Next) : Message :=
     next }
 
 def ownedUnreadMessage (lake : LakeFacts) (challenge : ChallengeFacts) (path : String) (next : Next) : Message :=
+  let owned? := ownedFile? lake challenge path
   { place := atLine path 1
-    what := s!"{path} is owned, because {ownedReason challenge (ownedFile? lake challenge path)}, yet it could not \
-      be read"
+    what := s!"{path} is owned, because {ownedReason challenge owned?}, yet it could not be read"
     why := "so owned.lock cannot record what the statement rests on"
-    fix := s!"Restore it with `git checkout -- {path}`, or remove its module from the lean_lib that builds it in \
-      {lakefile lake}, and {relock}"
+    fix := match owned? with
+      | some (.specModule _) | some (.closureModule _) =>
+        s!"Restore it with `git checkout -- {path}`, or remove its module from the lean_lib that builds it in \
+          {lakefile lake}, and {relock}"
+      | some .lakefile | some .manifest | some .toolchain | some .challenge | none =>
+        s!"Restore it with `git checkout -- {path}`, and {relock}"
     next }
 
 def noStatementTargetMessage (lake : LakeFacts) (next : Next) : Message :=
@@ -224,7 +243,7 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
     { place := placeOf challenge headline
       what := s!"{headline} has no kill"
       why := "so nothing shows that it rejects a wrong implementation"
-      fix := s!"Add `@[kills {written}] theorem {written}_rejects : \
+      fix := s!"Add `@[kills {written}] theorem {suffixed challenge headline "_rejects"} : \
         {suggestion?.getD (templateOf challenge headline)} := by sorry` to {challenge.file}\
         {within challenge headline}, replace each `?wrong_…` in it with a wrong implementation of that hole, and \
         {relock}"
@@ -344,13 +363,13 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
             statement uses from {module} into a CoreSpec module, and {relock}")
       next := .build }
   | .witnessMissing headline =>
-    let written := writtenOf challenge headline
+    let witness := suffixed challenge headline "_applies"
     { place := placeOf challenge headline
       what := s!"{headline} has a precondition or input that mentions a hole or foreign function, but its kills \
-        derived no {written}_applies"
+        derived no {witness}"
       why := s!"so nothing shows that some input meets its preconditions, and {headline} could hold vacuously"
       fix := s!"State each precondition of {headline} as a hypothesis of its own in {challenge.file}, so that \
-        `@[kills {written}]` derives {written}_applies, and {relock}"
+        `@[kills {writtenOf challenge headline}]` derives {witness}, and {relock}"
       next := .build }
   | .witnessPredeclared witness headline =>
     { place := placeOf challenge witness

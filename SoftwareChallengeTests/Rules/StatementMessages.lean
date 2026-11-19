@@ -64,6 +64,8 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
   [(.duplicate `App.double_even_again `App.double_even, duplicated, baseLake),
    (.mentionsNothing `App.trivial, trivial, baseLake),
    (.noKill `App.double_even (some template), unkilled, baseLake),
+   (.noKill (.str `App "1st") (some template), { unplainChallenge with kills := #[] }, baseLake),
+   (.noKill (privateName "double_even") (some template), privateChallenge, baseLake),
    (.unmarkedKill `App.double_even `App.double_even_rejects, unmarkedKill, baseLake),
    (.killOfNonHeadline `App.double_even_rejects `App.triple, killOfMissing, baseLake),
    (.killReplacesNothing `App.double_even_rejects `App.double_even, unreplacedKill, baseLake),
@@ -94,7 +96,10 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.noStatementTarget, baseChallenge, { baseLake with defaultTargets := #[] }),
    (.exeRootsOutsideWorldCode #[`Main], baseChallenge, toolingRoot),
    (.ownedUnread "App/CoreSpec.lean", baseChallenge, baseLake),
+   (.ownedUnread "lakefile.lean", baseChallenge, baseLake),
    (.lock (.differs "Challenge.lean") (some .challenge), baseChallenge, baseLake),
+   (.lock (.differs "App/Solution.lean") none, baseChallenge, baseLake),
+   (.lock (.unrecorded "App/Solution.lean") none, baseChallenge, baseLake),
    (.lock (.unrecorded "lakefile.lean") (some .lakefile), baseChallenge, baseLake),
    (.lock (.unrecorded "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec)), baseChallenge, baseLake),
    (.lock (.missing "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec)), baseChallenge, baseLake),
@@ -147,6 +152,13 @@ end
 #guard says (.noKill `App.double_even (some template))
   "Add `@[kills double_even] theorem double_even_rejects : ¬ ∀ (n : Nat), App.Even (?wrong_double n) := by sorry` \
     to Challenge.lean, inside `namespace App`, replace each `?wrong_…`"
+
+#guard says (.noKill (.str `App "1st") (some template))
+  "Add `@[kills «1st»] theorem «1st_rejects» : ¬ ∀ (n : Nat), App.Even (?wrong_double n) := by sorry`"
+
+#guard says (.noKill (privateName "double_even") (some template)) "theorem double_even_rejects :"
+
+#guard suffixed unplainChallenge (.str `App "1st") "_applies" == "«1st_applies»"
 
 #guard says (.unmarkedKill `App.double_even `App.double_even_rejects)
   "Challenge.lean:11: App.double_even_rejects states a kill of App.double_even (Challenge.lean:8)"
@@ -240,11 +252,26 @@ end
 
 #guard says (.ownedUnread "App/CoreSpec.lean") "Challenge.lean imports App.CoreSpec, so it is part of the statement"
 
+#guard says (.ownedUnread "App/CoreSpec.lean") "or remove its module from the lean_lib that builds it in lakefile.lean"
+
+#guard rendered (.ownedUnread "lakefile.lean") ==
+  "lakefile.lean:1: lakefile.lean is owned, because it configures how the package builds and how lint judges it, \
+    yet it could not be read, so owned.lock cannot record what the statement rests on. Restore it with \
+    `git checkout -- lakefile.lean`, and delete owned.lock if there is one, then run `lake build`."
+
 #guard says (.lock (.differs "Challenge.lean") (some .challenge))
   "Restore it with `git checkout $(git log -1 --format=%H -- owned.lock) -- Challenge.lean` and edit \
     App/CoreCode.lean, App/Solution.lean instead"
 
 #guard says (.lock (.differs "Challenge.lean") (some .challenge)) "but it states the challenge, which a solution"
+
+#guard says (.lock (.differs "App/Solution.lean") none) "and edit App/CoreCode.lean instead"
+
+#guard says (.lock (.unrecorded "App/Solution.lean") none)
+  "App/Solution.lean:1: owned.lock does not record App/Solution.lean, which LSC's facets list as an input although \
+    nothing owns it"
+
+#guard !says (.lock (.unrecorded "App/Solution.lean") none) "is owned, because"
 
 #guard says (.lock (.unrecorded "lakefile.lean") (some .lakefile))
   "To record it, delete owned.lock, then run `lake build`."

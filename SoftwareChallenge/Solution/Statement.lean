@@ -123,9 +123,21 @@ theorem mem_ownedPaths {lake : LakeFacts} {challenge : ChallengeFacts} {path : S
     path ∈ ownedPaths lake challenge ↔ lake.Owned challenge path := by
   simp [ownedPaths, LakeFacts.Owned, ownsModule_eq_true, or_assoc, and_assoc]
 
-theorem unreadErrors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
-    unreadErrors lake files challenge = #[] ↔ ∀ path, lake.Owned challenge path → files.Digested path := by
-  simp [unreadErrors, digested, FileFacts.Digested, ← mem_ownedPaths]
+theorem digested_eq_true {files : FileFacts} {path : String} :
+    digested files path = true ↔ files.Digested path := by
+  simp [digested, FileFacts.Digested]
+
+theorem recorded_eq_true {files : FileFacts} {path : String} :
+    recorded files path = true ↔ ∃ locked, files.lock = .decoded locked ∧ ∃ entry ∈ locked, entry.path = path := by
+  unfold recorded
+  cases files.lock with
+  | missing => simp
+  | unreadable problem => simp
+  | decoded locked => simp
+
+theorem digestOf_eq_none {entries : Array Lock.Entry} {path : String} :
+    Lock.digestOf entries path = none ↔ ∀ entry ∈ entries, entry.path ≠ path := by
+  simp [Lock.digestOf, Array.find?_eq_none]
 
 theorem lockErrors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
     lockErrors lake files challenge = #[] ↔ files.lock = .missing ∨ files.LockCurrent := by
@@ -134,6 +146,40 @@ theorem lockErrors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : 
   | missing => simp
   | unreadable problem => simp
   | decoded entries => simp [Lock.violations_eq_empty_iff]
+
+theorem digested_of_recorded {files : FileFacts} {path : String} (recordedPath : recorded files path = true)
+    (current : files.lock = .missing ∨ files.LockCurrent) : files.Digested path := by
+  obtain ⟨locked, decodedLock, entry, entryMember, entryPath⟩ := recorded_eq_true.mp recordedPath
+  rcases current with missing | ⟨same, sameDecoded, agree⟩
+  · rw [missing] at decodedLock
+    cases decodedLock
+  · rw [decodedLock, Decoded.decoded.injEq] at sameDecoded
+    subst sameDecoded
+    have lockedSome : Lock.digestOf locked path ≠ none := by
+      rw [ne_eq, digestOf_eq_none]
+      intro absent
+      exact absent entry entryMember entryPath
+    rw [agree path, ne_eq, digestOf_eq_none] at lockedSome
+    exact Classical.byContradiction fun absent =>
+      lockedSome fun found foundMember foundPath => absent ⟨found, foundMember, foundPath⟩
+
+theorem lockingErrors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
+    lockingErrors lake files challenge = #[] ↔
+      (∀ path, lake.Owned challenge path → files.Digested path) ∧ (files.lock = .missing ∨ files.LockCurrent) := by
+  simp only [lockingErrors, Array.append_eq_empty_iff, lockErrors_eq_empty, unreadErrors,
+    Array.filterMap_eq_empty_iff]
+  constructor
+  · rintro ⟨unread, current⟩
+    refine ⟨fun path owned => ?_, current⟩
+    have accepted := unread path (mem_ownedPaths.mpr owned)
+    cases digestedPath : digested files path
+    · cases recordedPath : recorded files path
+      · simp [digestedPath, recordedPath] at accepted
+      · exact digested_of_recorded recordedPath current
+    · exact digested_eq_true.mp digestedPath
+  · rintro ⟨owned, current⟩
+    refine ⟨fun path member => ?_, current⟩
+    simp [digested_eq_true.mpr (owned path (mem_ownedPaths.mp member))]
 
 theorem specRole_eq_true {module : Name} :
     specRole module = true ↔ Role.ofName module = .coreSpec ∨ Role.ofName module = .worldSpec := by
@@ -273,48 +319,95 @@ theorem mentionsReplaceable_eq_true {challenge : ChallengeFacts} {headline : Hea
   rw [List.any_eq_true]
   exact exists_congr fun name => by rw [mem_mentioned, and_comm]
 
-theorem mentionErrors_eq_empty {challenge : ChallengeFacts} :
-    mentionErrors challenge = #[] ↔ ∀ headline ∈ challenge.headlines,
-      ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name := by
-  simp only [mentionErrors, Array.filterMap_eq_empty_iff]
-  refine forall_congr' fun headline => imp_congr_right fun _ => ?_
-  rw [← mentionsReplaceable_eq_true]
-  cases mentionsReplaceable challenge headline <;> simp
-
-theorem unmarkedErrors_eq_empty {challenge : ChallengeFacts} :
-    unmarkedErrors challenge = #[] ↔ ∀ headline ∈ challenge.headlines, ∀ other ∈ challenge.headlines,
-      ¬ headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
-        other.target.constant.type := by
-  simp [unmarkedErrors, Array.flatMap_eq_empty_iff, killsHeadline, killedBy_eq_true]
-
 theorem target_mem_targets {challenge : ChallengeFacts} {headline : HeadlineFact}
     (member : headline ∈ challenge.headlines) : headline.target ∈ challenge.targets := by
   simp only [ChallengeFacts.targets, ChallengeFacts.theorems, Array.mem_append, Array.mem_map]
   exact .inl (.inl (.inl ⟨headline, member, rfl⟩))
 
-theorem settled_eq_false {challenge : ChallengeFacts} {headline : HeadlineFact}
-    (member : headline ∈ challenge.headlines)
-    (duplicateEmpty : duplicateErrors challenge = #[]) (auxiliaryEmpty : auxiliaryErrors challenge = #[])
-    (mentionEmpty : mentionErrors challenge = #[]) : settled challenge headline = false := by
+theorem laterDuplicate_eq_false {challenge : ChallengeFacts} {headline : HeadlineFact}
+    (duplicateEmpty : duplicateErrors challenge = #[]) : laterDuplicate challenge headline = false := by
   have noDuplicates : duplicates challenge = [] := by
     rw [duplicates_eq_nil, ← duplicateErrors_eq_empty]
     exact duplicateEmpty
+  simp [laterDuplicate, noDuplicates]
+
+theorem unreproducible_eq_false {challenge : ChallengeFacts} {headline : HeadlineFact}
+    (member : headline ∈ challenge.headlines) (auxiliaryEmpty : auxiliaryErrors challenge = #[]) :
+    unreproducible headline = false := by
   have published := (auxiliaryErrors_eq_empty.mp auxiliaryEmpty) headline.target (target_mem_targets member)
-  have mentions := mentionsReplaceable_eq_true.mpr ((mentionErrors_eq_empty.mp mentionEmpty) headline member)
-  simp only [settled, noDuplicates, Bool.or_eq_false_iff, Bool.not_eq_false', mentions, and_true]
-  refine ⟨by simp, ?_⟩
   exact Array.any_eq_false'.mpr fun auxiliary inAuxiliaries => by simp [published auxiliary inAuxiliaries]
+
+theorem killsAnother_eq_false {challenge : ChallengeFacts} {headline : HeadlineFact}
+    (member : headline ∈ challenge.headlines)
+    (marked : ∀ headline ∈ challenge.headlines, ∀ other ∈ challenge.headlines,
+      ¬ headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
+        other.target.constant.type) : killsAnother challenge headline = false := by
+  simp only [killsAnother, Array.any_eq_false']
+  intro other otherMember killed
+  exact marked other otherMember headline member (killedBy_eq_true.mp killed)
+
+theorem unmarkedErrors_empty {challenge : ChallengeFacts}
+    (marked : ∀ headline ∈ challenge.headlines, ∀ other ∈ challenge.headlines,
+      ¬ headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
+        other.target.constant.type) : unmarkedErrors challenge = #[] := by
+  simp only [unmarkedErrors, Array.flatMap_eq_empty_iff, Array.map_eq_empty_iff, Array.filter_eq_empty_iff,
+    Bool.and_eq_true, not_and]
+  intro headline headlineMember kill killMember _ killed
+  exact marked headline (Array.mem_filter.mp headlineMember).1 kill killMember (killedBy_eq_true.mp killed)
+
+theorem marked_of_unmarkedErrors {challenge : ChallengeFacts} (unmarkedEmpty : unmarkedErrors challenge = #[])
+    (duplicateEmpty : duplicateErrors challenge = #[]) :
+    ∀ headline ∈ challenge.headlines, ∀ other ∈ challenge.headlines,
+      ¬ headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
+        other.target.constant.type := by
+  intro headline member other otherMember killed
+  simp only [unmarkedErrors, Array.flatMap_eq_empty_iff, Array.map_eq_empty_iff, Array.filter_eq_empty_iff,
+    Bool.and_eq_true, not_and] at unmarkedEmpty
+  have kept : headline ∈ challenge.headlines.filter (!laterDuplicate challenge ·) :=
+    Array.mem_filter.mpr ⟨member, by simp [laterDuplicate_eq_false duplicateEmpty]⟩
+  exact unmarkedEmpty headline kept other otherMember (by simp [laterDuplicate_eq_false duplicateEmpty])
+    (killedBy_eq_true.mpr killed)
+
+theorem mentionErrors_empty {challenge : ChallengeFacts}
+    (mentions : ∀ headline ∈ challenge.headlines,
+      ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name) :
+    mentionErrors challenge = #[] := by
+  simp only [mentionErrors, Array.filterMap_eq_empty_iff]
+  intro headline member
+  simp [mentionsReplaceable_eq_true.mpr (mentions headline member)]
+
+theorem mentions_of_mentionErrors {challenge : ChallengeFacts} (mentionEmpty : mentionErrors challenge = #[])
+    (duplicateEmpty : duplicateErrors challenge = #[]) (auxiliaryEmpty : auxiliaryErrors challenge = #[])
+    (unmarkedEmpty : unmarkedErrors challenge = #[]) :
+    ∀ headline ∈ challenge.headlines,
+      ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name := by
+  intro headline member
+  simp only [mentionErrors, Array.filterMap_eq_empty_iff] at mentionEmpty
+  have accepted := mentionEmpty headline member
+  rw [laterDuplicate_eq_false duplicateEmpty, unreproducible_eq_false member auxiliaryEmpty,
+    killsAnother_eq_false member (marked_of_unmarkedErrors unmarkedEmpty duplicateEmpty)] at accepted
+  rw [← mentionsReplaceable_eq_true]
+  cases found : mentionsReplaceable challenge headline
+  · simp [found] at accepted
+  · rfl
+
+theorem settled_eq_false {challenge : ChallengeFacts} {headline : HeadlineFact}
+    (member : headline ∈ challenge.headlines)
+    (duplicateEmpty : duplicateErrors challenge = #[]) (auxiliaryEmpty : auxiliaryErrors challenge = #[])
+    (mentions : ∀ headline ∈ challenge.headlines,
+      ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name) :
+    settled challenge headline = false := by
+  simp [settled, laterDuplicate_eq_false duplicateEmpty, unreproducible_eq_false member auxiliaryEmpty,
+    mentionsReplaceable_eq_true.mpr (mentions headline member)]
 
 theorem unmarked_eq_false {challenge : ChallengeFacts} {headline : HeadlineFact}
     (member : headline ∈ challenge.headlines)
-    (unmarkedEmpty : unmarkedErrors challenge = #[]) : unmarked challenge headline = false := by
-  rw [unmarkedErrors_eq_empty] at unmarkedEmpty
-  simp only [unmarked, Bool.or_eq_false_iff, Array.any_eq_false']
-  constructor
-  · intro other otherMember killed
-    exact unmarkedEmpty headline member other otherMember (killedBy_eq_true.mp killed)
-  · intro other otherMember killed
-    exact unmarkedEmpty other otherMember headline member (killedBy_eq_true.mp killed)
+    (marked : ∀ headline ∈ challenge.headlines, ∀ other ∈ challenge.headlines,
+      ¬ headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
+        other.target.constant.type) : unmarked challenge headline = false := by
+  simp only [unmarked, killsAnother_eq_false member marked, Bool.or_false, Array.any_eq_false']
+  intro other otherMember killed
+  exact marked headline member other otherMember (killedBy_eq_true.mp killed)
 
 theorem hasKill_eq_true {challenge : ChallengeFacts} {headline : Name} :
     hasKill challenge headline = true ↔ ∃ kill ∈ challenge.kills, kill.headline = headline := by
@@ -330,13 +423,16 @@ theorem noKillErrors_empty {challenge : ChallengeFacts}
 
 theorem killed_of_noKillErrors {challenge : ChallengeFacts} (noKillEmpty : noKillErrors challenge = #[])
     (duplicateEmpty : duplicateErrors challenge = #[]) (auxiliaryEmpty : auxiliaryErrors challenge = #[])
-    (mentionEmpty : mentionErrors challenge = #[]) (unmarkedEmpty : unmarkedErrors challenge = #[]) :
+    (mentions : ∀ headline ∈ challenge.headlines,
+      ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name)
+    (marked : ∀ headline ∈ challenge.headlines, ∀ other ∈ challenge.headlines,
+      ¬ headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
+        other.target.constant.type) :
     ∀ headline ∈ challenge.headlines, ∃ kill ∈ challenge.kills, kill.headline = headline.target.constant.name := by
   intro headline member
   simp only [noKillErrors, Array.filterMap_eq_empty_iff] at noKillEmpty
   have accepted := noKillEmpty headline member
-  rw [settled_eq_false member duplicateEmpty auxiliaryEmpty mentionEmpty, unmarked_eq_false member unmarkedEmpty]
-    at accepted
+  rw [settled_eq_false member duplicateEmpty auxiliaryEmpty mentions, unmarked_eq_false member marked] at accepted
   cases found : hasKill challenge headline.target.constant.name
   · simp [found] at accepted
   · exact hasKill_eq_true.mp found
@@ -367,7 +463,8 @@ theorem killErrors_empty {challenge : ChallengeFacts}
 
 theorem killed_of_killErrors {challenge : ChallengeFacts} (killEmpty : killErrors challenge = #[])
     (duplicateEmpty : duplicateErrors challenge = #[]) (auxiliaryEmpty : auxiliaryErrors challenge = #[])
-    (mentionEmpty : mentionErrors challenge = #[]) :
+    (mentions : ∀ headline ∈ challenge.headlines,
+      ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name) :
     (∀ kill ∈ challenge.kills, ∃ headline ∈ challenge.headlines, headline.target.constant.name = kill.headline) ∧
       ∀ kill ∈ challenge.kills, ∀ headline ∈ challenge.headlines, kill.headline = headline.target.constant.name →
         headline.target.constant.type.KilledBy challenge.isReplaceable (challenge.othersOf headline)
@@ -393,7 +490,7 @@ theorem killed_of_killErrors {challenge : ChallengeFacts} (killEmpty : killError
       simp at inFilter
     · rw [Array.filterMap_eq_empty_iff] at accepted
       have judged := accepted headline inFilter
-      rw [settled_eq_false headlineMember duplicateEmpty auxiliaryEmpty mentionEmpty, Bool.false_or] at judged
+      rw [settled_eq_false headlineMember duplicateEmpty auxiliaryEmpty mentions, Bool.false_or] at judged
       cases killedIt : killsHeadline challenge headline kill.target.constant.type
       · exact absurd judged (by simp [killedIt]; split <;> simp)
       · exact killedBy_eq_true.mp killedIt
@@ -509,15 +606,16 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
   rw [errors_eq_empty]
   constructor
   · rintro ⟨locking, found⟩
-    simp only [lockingErrors, Array.append_eq_empty_iff] at locking
-    obtain ⟨unread, lock⟩ := locking
+    obtain ⟨digestedOwned, current⟩ := lockingErrors_eq_empty.mp locking
     simp only [findings, setupErrors, ownershipErrors, meaningErrors, statedErrors, Array.append_eq_empty_iff,
       and_assoc] at found
     obtain ⟨challengeEmpty, solutionEmpty, targetEmpty, programEmpty, importEmpty, closureEmpty, filledEmpty,
       axiomEmpty, privateEmpty, plainEmpty, duplicateEmpty, mentionEmpty, unmarkedEmpty, noKillEmpty, killEmpty,
       witnessEmpty, holeEmpty, terminationEmpty, hypothesisEmpty, auxiliaryEmpty⟩ := found
-    have killed := killed_of_noKillErrors noKillEmpty duplicateEmpty auxiliaryEmpty mentionEmpty unmarkedEmpty
-    have kills := killed_of_killErrors killEmpty duplicateEmpty auxiliaryEmpty mentionEmpty
+    have marked := marked_of_unmarkedErrors unmarkedEmpty duplicateEmpty
+    have mentions := mentions_of_mentionErrors mentionEmpty duplicateEmpty auxiliaryEmpty unmarkedEmpty
+    have killed := killed_of_noKillErrors noKillEmpty duplicateEmpty auxiliaryEmpty mentions marked
+    have kills := killed_of_killErrors killEmpty duplicateEmpty auxiliaryEmpty mentions
     have witnesses := witnessed_of_witnessErrors witnessEmpty killed
     have terminations := terminationErrors_eq_empty.mp terminationEmpty
     exact {
@@ -532,11 +630,11 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
       targetsPublic := privateErrors_eq_empty.mp privateEmpty
       namesPlain := plain_of_plainErrors plainEmpty privateEmpty
       auxiliariesPublic := auxiliaryErrors_eq_empty.mp auxiliaryEmpty
-      headlinesMentionHoles := mentionErrors_eq_empty.mp mentionEmpty
+      headlinesMentionHoles := mentions
       headlinesKilled := killed
       killsNameHeadlines := kills.1
       killsReject := kills.2
-      killsMarked := unmarkedErrors_eq_empty.mp unmarkedEmpty
+      killsMarked := marked
       headlinesDistinct := duplicateErrors_eq_empty.mp duplicateEmpty
       holesMentioned := holeErrors_eq_empty.mp holeEmpty
       hypothesesClaimed := hypothesisErrors_eq_empty.mp hypothesisEmpty
@@ -545,12 +643,11 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
       terminatesNamesHole := fun termination member => (terminations termination member).1
       terminatesOnKilledHeadline := fun termination member => (terminations termination member).2.1
       terminatesMentionsHole := fun termination member => (terminations termination member).2.2
-      ownedDigested := unreadErrors_eq_empty.mp unread
-      lockCurrent := lockErrors_eq_empty.mp lock }
+      ownedDigested := digestedOwned
+      lockCurrent := current }
   · intro complete
     refine ⟨?_, ?_⟩
-    · simp only [lockingErrors, Array.append_eq_empty_iff]
-      exact ⟨unreadErrors_eq_empty.mpr complete.ownedDigested, lockErrors_eq_empty.mpr complete.lockCurrent⟩
+    · exact lockingErrors_eq_empty.mpr ⟨complete.ownedDigested, complete.lockCurrent⟩
     · simp only [findings, setupErrors, ownershipErrors, meaningErrors, statedErrors, Array.append_eq_empty_iff,
         and_assoc]
       exact ⟨challengeErrors_eq_empty.mpr complete.challengeFound, solutionErrors_eq_empty.mpr complete.oneSolution,
@@ -559,7 +656,7 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
         filledErrors_eq_empty.mpr complete.declaresOnlyTheoremsAndHoles,
         axiomErrors_eq_empty.mpr complete.assumesNoAxiom, privateErrors_eq_empty.mpr complete.targetsPublic,
         plainErrors_empty complete.namesPlain, duplicateErrors_eq_empty.mpr complete.headlinesDistinct,
-        mentionErrors_eq_empty.mpr complete.headlinesMentionHoles, unmarkedErrors_eq_empty.mpr complete.killsMarked,
+        mentionErrors_empty complete.headlinesMentionHoles, unmarkedErrors_empty complete.killsMarked,
         noKillErrors_empty complete.headlinesKilled, killErrors_empty complete.killsNameHeadlines complete.killsReject,
         witnessErrors_empty complete.preconditionsWitnessed complete.witnessesDerived,
         holeErrors_eq_empty.mpr complete.holesMentioned,
