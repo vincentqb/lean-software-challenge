@@ -125,6 +125,17 @@ theorem mem_ownedPaths {lake : LakeFacts} {challenge : ChallengeFacts} {path : S
     path ∈ ownedPaths lake challenge ↔ lake.Owned challenge path := by
   simp [ownedPaths, LakeFacts.Owned, ownsModule_eq_true, or_assoc, and_assoc]
 
+theorem mem_ownedRoots {lake : LakeFacts} {challenge : ChallengeFacts} {module : Name} :
+    module ∈ ownedRoots lake challenge ↔
+      lake.Builds module ∧ module ≠ challenge.module ∧ challenge.Owns module := by
+  simp only [ownedRoots, Array.mem_map, Array.mem_filter, Bool.and_eq_true, bne_iff_ne, ne_eq, ownsModule_eq_true,
+    LakeFacts.Builds]
+  constructor
+  · rintro ⟨source, ⟨member, other, owned⟩, rfl⟩
+    exact ⟨⟨source, member, rfl⟩, other, owned⟩
+  · rintro ⟨⟨source, member, rfl⟩, other, owned⟩
+    exact ⟨source, ⟨member, other, owned⟩, rfl⟩
+
 theorem digested_eq_true {files : FileFacts} {path : String} :
     digested files path = true ↔ files.Digested path := by
   simp [digested, FileFacts.Digested]
