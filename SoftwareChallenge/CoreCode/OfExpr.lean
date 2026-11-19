@@ -17,6 +17,18 @@ def Universe.ofLevel : Level → Universe
   | .param name => .param name
   | .mvar id => .mvar id.name
 
+theorem Universe.ofLevel_injective : Function.Injective Universe.ofLevel := by
+  intro left
+  induction left <;> intro right equal <;> cases right <;>
+    simp only [Universe.ofLevel, reduceCtorEq, Universe.succ.injEq, Universe.max.injEq, Universe.imax.injEq,
+      Universe.param.injEq, Universe.mvar.injEq] at equal
+  case zero.zero => rfl
+  case succ.succ injective _ => rw [injective equal]
+  case max.max leftInjective rightInjective _ _ | imax.imax leftInjective rightInjective _ _ =>
+    rw [leftInjective equal.1, rightInjective equal.2]
+  case param.param => rw [equal]
+  case mvar.mvar left right => cases left; cases right; cases equal; rfl
+
 @[expose] def Shape.ofExpr : Expr → Shape
   | .bvar index => .bvar index
   | .fvar id => .fvar id.name
@@ -31,7 +43,5 @@ def Universe.ofLevel : Level → Universe
   | .lit (.strVal value) => .strLit value
   | .mdata _ expr => ofExpr expr
   | .proj structureName index value => .proj structureName index (ofExpr value)
-
-theorem Shape.ofExpr_mdata (data : MData) (expr : Expr) : Shape.ofExpr (.mdata data expr) = Shape.ofExpr expr := rfl
 
 end SoftwareChallenge
