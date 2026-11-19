@@ -37,8 +37,9 @@ run_cmd Elab.Command.liftCoreM do
 
 #guard Replay.lineFor `A.b { exitCode := 0, stdout := "", stderr := "" } 1234 == "A.b  1.2 s"
 
-#guard Replay.lineFor `A.b { exitCode := 1, stdout := "Challenge and solution theorem statement do not match", stderr := "" }
-  0 == "A.b  0.0 s  (rejected)"
+#guard Replay.lineFor `A.b
+  { exitCode := 1, stdout := "Challenge and solution theorem statement do not match", stderr := "" } 0 ==
+    "A.b  0.0 s  (rejected)"
 
 #guard Replay.lineFor `A.b { exitCode := 1, stdout := "bwrap: Can't bind mount", stderr := "" } 0 ==
   "A.b  0.0 s  (could not run, exit 1)"

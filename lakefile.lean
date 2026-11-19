@@ -68,6 +68,7 @@ structure Prepared where
   inputs : Array String
   challenge? : Option Lake.Module
   catalog : Array Lake.Module
+  owned : Array Lake.Module
   importers : Array Lake.Module
   lintTargets : Array String
 
@@ -108,7 +109,7 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
     ("testDriverArgs", toJson testArgs),
     ("testDriverArgsPlace", ← placeIn pkg (·.contains "testDriverArgs")),
     ("ownTests", toJson (← (testArgs.filterMapM (ownTest pkg) : IO (Array Json)))), ("inputs", toJson inputs)]
-  return { text := (Json.mkObj fields).pretty, inputs, challenge?, catalog, importers
+  return { text := (Json.mkObj fields).pretty, inputs, challenge?, catalog, owned, importers
            lintTargets := ((tops.filter (!exeRoots.contains ·.name)) ++ tops.filter (exeRoots.contains ·.name)).map
              (·.name.toString) }
 
@@ -149,10 +150,11 @@ def record (pkg : Package) (step : String) (prepared : Prepared) (args : JobM (A
     let lean := (← getLean).toString
     let out ← IO.Process.output { cmd := lean, args := stepped, cwd := pkg.dir, env := ← getAugmentedEnv }
     let code ← statusOf pkg step
-    let missing := if ← (stepDir pkg / s!"{step}.status").pathExists then "" else s!"\n`lean --run {runner} {step}` \
-      exited {out.exitCode} without recording a result, so the step did not judge the package. Fix the errors above \
-      in software_challenge, then run `{if step == "lint" then "lake lint" else "lake build"}`."
-    let shown := out.stdout ++ out.stderr ++ missing
+    let judged := (← (stepDir pkg / s!"{step}.status").pathExists) && (code == 0 || code == 2 ||
+      !(out.stdout ++ out.stderr).trimAscii.isEmpty)
+    let shown := out.stdout ++ out.stderr ++ if judged then "" else s!"\n`lean --run {runner} {step}` exited \
+      {out.exitCode} without a verdict, so the step did not judge the package. Fix the errors above in \
+      software_challenge, then run `{if step == "lint" then "lake lint" else "lake build"}`."
     IO.FS.writeFile (stepDir pkg / s!"{step}.out") shown
     unless shown.trimAscii.isEmpty do
       if code == 0 || code == 2 then logInfo ((if step == "lint" then "\n" else "") ++ shown) else logError shown
@@ -186,7 +188,8 @@ package_facet softwareChallengeStatement pkg : Unit := do
   unless prepared.importers.isEmpty do
     return ← steps.mapM fun _ => record pkg "statement" prepared (pure #["importers"])
   let some challenge := prepared.challenge? | steps.mapM fun _ => record pkg "statement" prepared
-  let arts ← (← (← challenge.imports.fetch).await).mapM fun mod => do return (← mod.leanArts.fetch).map fun _ => ()
+  let arts ← ((← (← challenge.imports.fetch).await) ++ prepared.owned).mapM fun mod => do
+    return (← mod.leanArts.fetch).map fun _ => ()
   (steps.mix (Job.mixArray arts)).mapM fun _ => record pkg "statement" prepared (compiled pkg challenge)
 
 package_facet softwareChallenge pkg : Unit := do

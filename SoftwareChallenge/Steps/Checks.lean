@@ -42,8 +42,11 @@ def run (out : String) (modules : Array (Name × String)) : CommandElabM Unit :=
   write { declared := found.map (·.2), outcomes := #[], finished := false }
   let actions ← liftCoreM <| found.mapM fun (evidence, check) => return (check, ← actionOf evidence)
   let results ← schedule (← jobsAllowed) actions fun (_, action) => action.toBaseIO
+  let errorOf : Except IO.Error Unit → Option String
+    | .ok () => none
+    | .error failure => some (toString failure)
   write { declared := found.map (·.2), finished := true
           outcomes := (actions.zip results).map fun ((check, _), (result, elapsed)) =>
-            { check, elapsed, error? := match result with | .ok () => none | .error failure => some (toString failure) } }
+            { check, elapsed, error? := errorOf result } }
 
 end SoftwareChallenge.Steps.Checks

@@ -45,7 +45,8 @@ def crashed (ran : Checks.Ran) (output : IO.Process.Output) : Checks.Ran :=
   let native := ((output.stdout ++ output.stderr).splitOn "\n").find?
     (·.contains "Could not find native implementation of external declaration")
   match native, ran.finished with
-  | some line, false => { ran with outcomes := ran.declared.map fun check => { check, elapsed := 0, error? := some line } }
+  | some line, false =>
+    { ran with outcomes := ran.declared.map fun check => { check, elapsed := 0, error? := some line } }
   | _, _ => ran
 
 def run (lakeFile : System.FilePath) : IO UInt32 := do

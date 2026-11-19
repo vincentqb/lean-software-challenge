@@ -210,12 +210,12 @@ def comparatorStage (context : Context) (checkout : System.FilePath) (config : C
   if out.exitCode == 0 then return
   match Comparator.rejection? out.exitCode text with
   | some (.missing name) =>
-    stop .comparator .refuse s!"refused: `lake comparator` rejects {candidate}: {Comparator.reason (.missing name)}, as \
-      printed above. {Comparator.remedy config.solution (.missing name)}, {context.again}."
+    stop .comparator .refuse s!"refused: `lake comparator` rejects {candidate}: {Comparator.reason (.missing name)}, \
+      as printed above. {Comparator.remedy config.solution (.missing name)}, {context.again}."
   | some rejection =>
-    stop .comparator .refuse s!"refused: `lake comparator` rejects {candidate}: {Comparator.reason rejection}, as printed \
-      above. {Comparator.remedy config.solution rejection} in {candidate}; `lake script run software_challenge/replay` in a \
-      checkout of it names the theorem, {context.again}."
+    stop .comparator .refuse s!"refused: `lake comparator` rejects {candidate}: {Comparator.reason rejection}, as \
+      printed above. {Comparator.remedy config.solution rejection} in {candidate}; `lake script run \
+      software_challenge/replay` in a checkout of it names the theorem, {context.again}."
   | none =>
     stop .comparator .cannotJudge s!"cannot judge: `lake comparator` exited {out.exitCode} without a verdict, as \
       printed above, so grade cannot tell whether {candidate} is right. Fix the cause it reports, such as `bwrap` \
@@ -235,7 +235,8 @@ def judge (context : Context) (passed : IO.Ref (Array Observation)) : Judge Unit
   accept .dependencies s!"the comparator's sandbox sees all {facts.dependencies.size} dependencies"
   let checkout ← guarded context .worktree (worktreeStage context packagePrefix facts)
   accept .worktree s!"{context.candidate} is checked out at {checkout}"
-  for (stage, step, status) in [(Stage.build, "build", "statement"), (.lint, "lint", "lint"), (.test, "test", "test")] do
+  let steps := [(Stage.build, "build", "statement"), (.lint, "lint", "lint"), (.test, "test", "test")]
+  for (stage, step, status) in steps do
     guarded context stage (stepStage context checkout stage step status)
     accept stage s!"`lake {step}` passes on {context.candidate}"
   guarded context .comparator (comparatorStage context checkout facts.config)

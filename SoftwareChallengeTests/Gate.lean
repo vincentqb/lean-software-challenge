@@ -191,8 +191,8 @@ structure Recorded where
   config : String
 
 def overridesFor (lsc : System.FilePath) : String :=
-  (Lean.Json.mkObj [("version", "1.3.0"), ("packages", Lean.Json.arr #[Lean.Json.mkObj [("type", "path"), ("scope", ""),
-    ("name", "software_challenge"), ("manifestFile", "lake-manifest.json"), ("inherited", false),
+  (Lean.Json.mkObj [("version", "1.3.0"), ("packages", Lean.Json.arr #[Lean.Json.mkObj [("type", "path"),
+    ("scope", ""), ("name", "software_challenge"), ("manifestFile", "lake-manifest.json"), ("inherited", false),
     ("dir", lsc.toString), ("copy", false), ("configFile", "lakefile.lean")]])]).pretty
 
 def requireLocally (lsc dir : System.FilePath) : IO Unit := do
@@ -338,7 +338,8 @@ def run (context : Context) : IO (Array Outcome) := do
   for (name, action) in [
       ("an owner who restates fold_keeps_literal and re-locks leaves lint pending until the agent restates it",
         ownerRestates context dir),
-      ("an owner who drops fold_normalizes' kill fails the build with the kill to write", ownerDropsKill context dir)] do
+      ("an owner who drops fold_normalizes' kill fails the build with the kill to write",
+        ownerDropsKill context dir)] do
     outcomes := outcomes.push (← check name next action)
   return outcomes
 
