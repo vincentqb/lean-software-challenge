@@ -11,7 +11,7 @@ package «constant_folding» where
     ⟨`linter.coreInternal, false⟩
   ]
 
-require software_challenge from "../.."
+require software_challenge from git "https://github.com/vincentqb/lean-software-challenge" @ "main"
 
 @[default_target]
 lean_lib «ConstantFolding» where

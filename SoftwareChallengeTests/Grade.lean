@@ -246,22 +246,19 @@ def lock : Array Lock.Entry := #[{ path := "Challenge.lean", digest := "1" },
 #guard Grade.ownedPathspecs "" #[{ path := "a b/x*.lean", digest := "3" }] ==
   #[":(top,literal)a b/x*.lean", ":(top,literal)owned.lock"]
 
-#guard Steps.Grade.lockEntries "14750095111711872102 lakefile.lean\n4606896722634636308 Challenge.lean" ==
-  some #[{ path := "lakefile.lean", digest := "14750095111711872102" },
-    { path := "Challenge.lean", digest := "4606896722634636308" }]
+def described : String :=
+  "{\"packages\": [{\"name\": \"software_challenge\", \"configured\": \"../..\", \"real\": \"/w/repo\", \
+    \"scope\": \"\", \"manifestFile\": \"lake-manifest.json\", \"configFile\": \"lakefile.lean\"}]}"
 
-#guard Steps.Grade.lockEntries "12 a path with spaces.lean" ==
-  some #[{ path := "a path with spaces.lean", digest := "12" }]
-
-#guard Steps.Grade.lockEntries (Lock.render lock) == some lock
-
-#guard Steps.Grade.lockEntries "not a lock" == none
-
-#guard ((Steps.Grade.BaseFacts.parse "{\"version\": \"1.3.0\", \"packages\": [{\"type\": \"path\", \
-  \"name\": \"software_challenge\", \"dir\": \"/w/repo\"}]}").toOption.map (·.packages)) ==
+#guard ((Steps.Grade.dependencies described).toOption.map (·.map fun found => (found.name, found.real))) ==
   some #[(`software_challenge, "/w/repo")]
 
-#guard (Steps.Grade.BaseFacts.parse "{\"version\": \"1.3.0\"}").toOption.isNone
+#guard ((Steps.Grade.dependencies described).toOption.map Steps.Grade.overrides) == some (Json.mkObj [
+  ("version", "1.3.0"), ("packages", Json.arr #[Json.mkObj [("type", "path"), ("scope", ""),
+    ("name", "software_challenge"), ("manifestFile", "lake-manifest.json"), ("inherited", false),
+    ("dir", "/w/repo"), ("copy", false), ("configFile", "lakefile.lean")]])])
+
+#guard (Steps.Grade.dependencies "{\"version\": \"1.3.0\"}").toOption.isNone
 
 #guard Steps.Grade.quoted "it's" == "'it'\\''s'"
 

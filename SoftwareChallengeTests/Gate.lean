@@ -190,20 +190,20 @@ structure Recorded where
   lock : String
   config : String
 
-def requireByRealpath (lsc dir : System.FilePath) (next : String) : Trial Unit := do
-  for file in ["lakefile.lean", "lake-manifest.json"] do
-    let text ← IO.FS.readFile (dir / file)
-    let some edited := replacing "\"../..\"" s!"\"{lsc}\"" text | throwThe String s!"Examples/ConstantFolding/{file}: \
-      it does not name the library as \"../..\" exactly once, so the gate cannot require the library by its real \
-      path in a copy outside the repository. Require software_challenge from \"../..\" in \
-      Examples/ConstantFolding/{file}, or change requireByRealpath in {source} to match, then run `{next}`."
-    IO.FS.writeFile (dir / file) edited
+def overridesFor (lsc : System.FilePath) : String :=
+  (Json.mkObj [("version", "1.3.0"), ("packages", Json.arr #[Json.mkObj [("type", "path"), ("scope", ""),
+    ("name", "software_challenge"), ("manifestFile", "lake-manifest.json"), ("inherited", false),
+    ("dir", lsc.toString), ("copy", false), ("configFile", "lakefile.lean")]])]).pretty
+
+def requireLocally (lsc dir : System.FilePath) : IO Unit := do
+  IO.FS.createDirAll (dir / ".lake")
+  IO.FS.writeFile (dir / ".lake" / "package-overrides.json") (overridesFor lsc)
 
 def prepare (context : Context) (dir : System.FilePath) (next : String) : Trial Recorded := do
   if ← dir.pathExists then IO.FS.removeDirAll dir
   copyTree (context.lsc / "Examples" / "ConstantFolding") dir fun name =>
     name == ".lake" || name == "comparator.json" || name == "owned.lock"
-  requireByRealpath context.lsc dir next
+  requireLocally context.lsc dir
   let built ← (exclusively (context.root / "template-build.lock") (context.lakeIn dir #["build"]) : IO Ran)
   succeed built "a copy of the template without owned.lock and comparator.json does not build"
     "Fix what the output below reports, in the library or in Examples/ConstantFolding" next
@@ -212,6 +212,12 @@ def prepare (context : Context) (dir : System.FilePath) (next : String) : Trial 
       throwThe String s!"{file}: `lake build` exited 0 in {dir} but did not write it, so the statement step no longer \
         records what grade and replay read. Make the statement step write {file} again, then run `{next}`.\n\
         {built.tail}"
+  let committed ← IO.FS.readFile (context.lsc / "Examples" / "ConstantFolding" / "owned.lock")
+  unless (← IO.FS.readFile (dir / "owned.lock")) == committed do
+    throwThe String s!"Examples/ConstantFolding/owned.lock: it differs from the owned.lock that `lake build` records \
+      for an unchanged copy of the template, so the template's lock is stale. Run `rm owned.lock && lake build` in \
+      a copy of Examples/ConstantFolding whose .lake/package-overrides.json points software_challenge at this \
+      checkout, copy its owned.lock into Examples/ConstantFolding, then run `{next}`."
   for args in [#["init", "-q"], #["add", "-A"], #["commit", "-q", "-m", "base"]] do
     succeed (← gitIn dir args) "the gate cannot commit the template copy that later checks reset to"
       "Fix what git reports" next
@@ -313,8 +319,8 @@ def ownerDropsKill (context : Context) (dir : System.FilePath) : Trial Unit := d
       missing-kill error and its template, then run `{next}`.\n{ran.tail}"
 
 def factsNotEmitted : String :=
-  "the reader that emits a package's facts (unit U9) and SoftwareChallengeRun.lean (Stage C1) have not landed, \
-    and the golden SoftwareChallengeTests/Golden/ConstantFolding.lean comes with them (Stage C3)"
+  "the golden SoftwareChallengeTests/Golden/ConstantFolding.lean, which `SoftwareChallengeRun.lean facts` is compared \
+    with, has not landed (Stage C3)"
 
 def run (context : Context) : IO (Array Outcome) := do
   let dir := context.root / "template"
@@ -480,7 +486,7 @@ def coversOnlyHidden (project consumer hidden : System.FilePath) : Trial Unit :=
       comparator` masks, then run `{next}`."
 
 def factsNotRead : String :=
-  "the reader's facts (unit U9) and Model.comparator (Stage C3) have not landed"
+  "Model.comparator, which predicts these verdicts from the reader's facts, has not landed (Stage C3)"
 
 def run (context : Context) : IO (Array Outcome) := do
   let dir := context.root / "comparator"
@@ -606,8 +612,8 @@ def gradings : List Grading := [
     says := "absent names no commit" }]
 
 def failingLake : String :=
-  "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = software_challenge/grade_candidate ]; then\n    \
-    echo 'error: simulated failure before judging' >&2\n    exit 1\n  fi\ndone\nexec \"$REAL_LAKE\" \"$@\"\n"
+  "#!/bin/sh\ncase \"$(pwd)\" in\n  */.lake/grade/*) echo 'error: simulated failure before judging' >&2; exit 1;;\n\
+    esac\nexec \"$REAL_LAKE\" \"$@\"\n"
 
 def positionOf (text marker : String) : Option Nat :=
   match text.splitOn marker with
@@ -629,7 +635,7 @@ def decides (ran : Ran) (grading : Grading) : Trial Unit := do
   unless ran.code == grading.code && ran.output.contains grading.says do
     throwThe String s!"`{ran.shown}` exited {ran.code} in {ran.dir}, expected {grading.code} saying \
       \"{grading.says}\", so grade no longer decides {grading.case} as the gate states. Restore what decided it in \
-      SoftwareChallenge/Steps/Grade.lean or in grade_candidate in lakefile.lean; if the guarantee changed on purpose, \
+      SoftwareChallenge/Steps/Grade.lean or in the drivers in lakefile.lean; if the guarantee changed on purpose, \
       change `gradings` in {source}. Then run `{next}`.\n{ran.tail}"
 
 def graded (context : Context) (base wrapper : System.FilePath) (grading : Grading) : Trial Unit := do
@@ -652,12 +658,12 @@ def worktreesRemoved (base : System.FilePath) : Trial Unit := do
       `{next}`.\n{listed.stdout}"
 
 def replacedJudge : List Edit := [
-  ("lakefile.lean", replacing "script grade_candidate (args) do\n"
-    "script grade_candidate (_args) do\n  return 0\n\nscript grade_candidate_replaced (args) do\n"),
+  ("lakefile.lean", replacing "script lint_challenge do\n"
+    "script lint_challenge do\n  return 0\n\nscript lint_challenge_replaced do\n"),
   ("Examples" / "ConstantFolding" / coreCodeFile, appending "\ntheorem ConstantFolding.broken : False := rfl\n")]
 
 def judgeReplacement : Grading :=
-  { case := "an in-repository candidate that replaces the library's grade_candidate",
+  { case := "an in-repository candidate that replaces the library's lint driver",
     candidate := "agent-replaces-the-judge", code := 1, says := "`lake build` fails on agent-replaces-the-judge" }
 
 def inRepository (context : Context) (dir : System.FilePath) : Trial Unit := do
@@ -678,6 +684,7 @@ def inRepository (context : Context) (dir : System.FilePath) : Trial Unit := do
   for args in [#["add", "-A"], #["commit", "-q", "-m", judgeReplacement.candidate], #["checkout", "-q", "base"]] do
     succeed (← gitIn repository args) fail "Fix what git reports" next
   let template := repository / "Examples" / "ConstantFolding"
+  requireLocally (← IO.FS.realPath repository) template
   decides (← context.lakeIn template #["exe", "grade", judgeReplacement.candidate]) judgeReplacement
   worktreesRemoved template
 
