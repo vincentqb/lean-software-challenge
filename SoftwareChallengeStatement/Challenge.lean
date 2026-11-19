@@ -25,21 +25,20 @@ kinds, metadata, and let versus have. Closure is reachability along the edges. o
 back what was written, and so does comparator.json when its names are plain. The lock check passes
 exactly when every path has the same digest in owned.lock as on disk. Grade accepts exactly when
 every stage, in order, accepted; otherwise it gives the verdict of the first stage that did not.
-The statement, lint, and test steps each exit 0 exactly when their facts meet README's list for
-that step, one condition per item, over every module, declaration, binder, and constant occurrence
-the facts hold; lint exits other than 1 exactly when the facts hold nothing README lists under
-Errors; and each step exits nonzero exactly when it reports an error, a pending item, or a failure.
+The statement, lint, and test steps each exit 0 exactly when their facts meet the conditions
+CoreSpec states for that step in Statement.Complete, Lint.Complete, and Test.Complete, over every
+module, declaration, binder shape, and constant occurrence the facts hold; lint exits other than 1
+exactly when the facts meet Lint.Clean; and each step exits nonzero exactly when it reports an
+error, a pending item, or a failure.
 
 Not claimed:
-- that the reader's facts match Lean, Lake, or the files;
-- that the reader classifies each binder as README does: as a claim, a precondition, or an input, and by whether
-  it mentions a hole or a foreign function;
+- that the reader's facts, binder shapes included, match Lean, Lake, or the files;
 - that a message's fix works;
-- that each message names an item of README's list that the facts miss;
+- that each message names a condition the facts miss;
 - that lint exits 2, rather than another code, when only pending items remain;
 - that Lake reads a plain name back as `Config.parse` does;
 - that `lake comparator` judges as the comparator model says;
-- that the derived witnesses are the ones README describes.
+- that each derived witness quantifies the binders Telescope.kept chooses.
 -/
 
 namespace SoftwareChallenge

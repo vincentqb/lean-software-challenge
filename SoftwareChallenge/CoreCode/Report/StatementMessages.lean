@@ -511,7 +511,7 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
   | .derivedPartial declaration module =>
     { place := ownedPlace lake challenge module declaration
       what := s!"`deriving` makes {ownedShown lake challenge module declaration} a `partial` definition in {module} \
-        ({Role.ofName module}), because its type is nested or mutual"
+        ({Role.ofName module})"
       why := s!"so no proof can unfold it, and a statement that uses it cannot be proved about the code, and \
         {ownerOnly module}"
       fix := s!"Write that instance by structural recursion in {fileOf lake module}, or remove the `deriving` clause, \

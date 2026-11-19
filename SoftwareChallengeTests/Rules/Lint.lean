@@ -121,6 +121,21 @@ def effectBox : Facts := withSolution fun solution => { solution with
 #guard contains (rendered effectBox) "Move App.EffectBox to a WorldCode module"
 #guard !contains (rendered effectBox) "casesOn" && !contains (rendered effectBox) "recOn"
 
+def placedConstructor : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[declaration `App.Loop `App.CoreCode 30 false,
+      { declaration `App.Loop.mk `App.CoreCode 31 true with isUnsafe := true }] },
+  places := solution.places ++ #[placeOf `App.Loop "App/CoreCode.lean" 30 "Loop",
+    placeOf `App.Loop.mk "App/CoreCode.lean" 31 "mk"] }
+
+def parentedConstructor : Facts :=
+  { placedConstructor with solution := { placedConstructor.solution with parents := #[(`App.Loop.mk, `App.Loop)] } }
+
+#guard impureErrors placedConstructor == #[.violation (.impure `App.Loop.mk .coreCode [.«unsafe»])]
+#guard impureErrors parentedConstructor == #[.violation (.impure `App.Loop .coreCode [.«unsafe»])]
+#guard contains (rendered parentedConstructor) "App/CoreCode.lean:30: App.Loop uses `unsafe` in App.CoreCode (CoreCode)"
+#guard Lint.settled #[(`App.Loop.mk.inner, `App.Loop.mk), (`App.Loop.mk, `App.Loop)] `App.Loop.mk.inner == `App.Loop
+
 def hygienic : Name := Lean.addMacroScope `App.CoreCode `App.initFn 12
 
 def initialized : Facts := withSolution fun solution => { solution with

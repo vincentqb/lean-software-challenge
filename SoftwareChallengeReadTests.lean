@@ -6,3 +6,4 @@ import SoftwareChallengeReadTests.Environment
 import SoftwareChallengeReadTests.Inventory
 import SoftwareChallengeReadTests.Challenge
 import SoftwareChallengeReadTests.Solution
+import SoftwareChallengeReadTests.Owned
