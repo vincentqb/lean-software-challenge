@@ -15,6 +15,10 @@ package «software_challenge» where
 lean_lib «SoftwareChallenge» where
   globs := #[.andSubmodules `SoftwareChallenge]
 
+lean_lib «SoftwareChallengeStatement» where
+  roots := #[`SoftwareChallengeStatement.Challenge]
+  leanOptions := #[⟨`warn.sorry, false⟩]
+
 lean_lib «SoftwareChallengeTests» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]

@@ -1,16 +1,18 @@
 module
 
-import all SoftwareChallenge.Policy
+import all SoftwareChallenge.CoreCode.Layering
+import all SoftwareChallenge.CoreCode.Match
 meta import SoftwareChallenge.Audit
 
 namespace SoftwareChallengeTests.Policy
 
-open Lean SoftwareChallenge SoftwareChallenge.Policy
+open Lean SoftwareChallenge
 
 def layered : Project := { modules := #[(`A, .coreCode), (`B, .coreSpec), (`W, .worldCode)] }
 
 def importing (target : Name) : Inventory :=
-  { modules := #[{ name := `A, usesModuleSystem := true, imports := #[{ name := target, comptime := false }] }],
+  { modules := #[{ name := `A, file := "A.lean", usesModuleSystem := true,
+                   imports := #[{ name := target, comptime := false, line := 1 }] }],
     declarations := #[] }
 
 theorem layering_sound_witness :
@@ -111,7 +113,7 @@ meta section
 run_cmd Elab.Command.liftTermElabM do
   let env ← getEnv
   for (statement, function, kill) in #[
-      (``layering_sound, ``Project.check, ``layering_sound_rejects_accepting),
+      (``Project.check_layered, ``Project.check, ``layering_sound_rejects_accepting),
       (``Shape.witnesses?_sound, ``Shape.witnesses?, ``witnesses?_sound_rejects_accepting),
       (``Shape.witnesses?_complete, ``Shape.witnesses?, ``witnesses?_complete_rejects_refusing),
       (``Shape.witnesses?_isSome_iff, ``Shape.witnesses?, ``witnesses?_isSome_iff_rejects_accepting),
@@ -119,7 +121,7 @@ run_cmd Elab.Command.liftTermElabM do
       (``Shape.applies_sound, ``Shape.applies, ``applies_sound_rejects_accepting)] do
     unless Audit.kills env (NameSet.empty.insert function) statement kill do
       throwError "{kill} is not `¬` {statement} with {function} replaced"
-  for (statement, witness) in #[(``layering_sound, ``layering_sound_witness),
+  for (statement, witness) in #[(``Project.check_layered, ``layering_sound_witness),
       (``Shape.witnesses?_sound, ``witnesses?_sound_witness),
       (``Shape.witnesses?_complete, ``witnesses?_complete_witness),
       (``Shape.independent_sound, ``independent_sound_witness),

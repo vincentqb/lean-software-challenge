@@ -75,10 +75,16 @@ theorem layering_sound (project : Project) (inventory : Inventory)
       ∀ reached, project.role? target = some reached → reached.Inner := by
   sorry
 
+@[witness layering_sound] theorem layering_sound_applies :
+    ∃ (project : Project) (inventory : Inventory) (source target : Name) (role reached : Role),
+      project.violations inventory = #[] ∧ project.role? source = some role ∧ role.Inner ∧
+        Relation.TransGen inventory.RuntimeImport source target ∧ project.role? target = some reached := by
+  sorry
+
 theorem purity_sound (project : Project) (inventory : Inventory)
     (accepted : project.violations inventory = #[]) (fact : DeclarationFact)
     (listed : fact ∈ inventory.declarations) :
-    ∃ role, project.role? fact.module = some role ∧ fact.axioms = #[] ∧
+    ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
       (fact.computational = true → fact.Allowed role) := by
   sorry
 
@@ -86,8 +92,13 @@ theorem purity_sound (project : Project) (inventory : Inventory)
     ¬ ∀ (project : Project) (inventory : Inventory),
       (fun (_ : Project) (_ : Inventory) => (#[] : Array Violation)) project inventory = #[] →
       ∀ (fact : DeclarationFact), fact ∈ inventory.declarations →
-      ∃ role, project.role? fact.module = some role ∧ fact.axioms = #[] ∧
+      ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
         (fact.computational = true → fact.Allowed role) := by
+  sorry
+
+@[witness purity_sound] theorem purity_sound_applies :
+    ∃ (project : Project) (inventory : Inventory) (fact : DeclarationFact),
+      project.violations inventory = #[] ∧ fact ∈ inventory.declarations := by
   sorry
 
 theorem Shape.witnesses?_sound {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
@@ -99,6 +110,11 @@ theorem Shape.witnesses?_sound {replaceable : Name → Bool} {pattern target : S
     ¬ ∀ {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses},
       (fun (_ : Name → Bool) (_ _ : Shape) => (some [] : Option Witnesses)) replaceable pattern target = some σ →
       (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧ pattern.subst replaceable σ = target := by
+  sorry
+
+@[witness Shape.witnesses?_sound] theorem Shape.witnesses?_sound_applies :
+    ∃ (replaceable : Name → Bool) (pattern target : Shape) (σ : Witnesses),
+      pattern.witnesses? replaceable target = some σ := by
   sorry
 
 theorem Shape.witnesses?_complete {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
@@ -127,6 +143,10 @@ theorem Shape.isKill_sound {replaceable : Name → Bool} {headline kill : Shape}
         kill = (headline.subst replaceable σ).negation := by
   sorry
 
+@[witness Shape.isKill_sound] theorem Shape.isKill_sound_applies :
+    ∃ (replaceable : Name → Bool) (headline kill : Shape), headline.isKill replaceable kill = true := by
+  sorry
+
 theorem Shape.isKill_complete {replaceable : Name → Bool} {headline : Shape} {σ : Witnesses}
     (closed : ∀ entry ∈ σ, replaceable entry.1 = true → entry.2.closedUnder 0 = true) :
     headline.isKill replaceable (headline.subst replaceable σ).negation = true := by
@@ -150,6 +170,11 @@ theorem Shape.independent_sound {replaceable : Name → Bool} {headline kill : S
       (fun (_ : Name → Bool) (_ : Shape) (_ : List Shape) (_ : Shape) => true) replaceable headline others kill = true →
       others ≠ [] ∧ ∃ σ : Witnesses, (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧
         kill = Shape.conjunction ((headline.subst replaceable σ).negation :: others.map (·.subst replaceable σ)) := by
+  sorry
+
+@[witness Shape.independent_sound] theorem Shape.independent_sound_applies :
+    ∃ (replaceable : Name → Bool) (headline kill : Shape) (others : List Shape),
+      headline.independent replaceable others kill = true := by
   sorry
 
 theorem Shape.independent_complete {replaceable : Name → Bool} {headline : Shape} {others : List Shape}
@@ -183,6 +208,10 @@ theorem Graph.closure_sound (graph : Graph) (roots : Array Name) (node : Name)
     ¬ ∀ (graph : Graph) (roots : Array Name) (node : Name),
       node ∈ (fun (_ : Graph) (roots : Array Name) => Std.HashSet.ofList (roots.push `extra).toList) graph roots →
       ∃ root ∈ roots, graph.Reaches root node := by
+  sorry
+
+@[witness Graph.closure_sound] theorem Graph.closure_sound_applies :
+    ∃ (graph : Graph) (roots : Array Name) (node : Name), node ∈ graph.closure roots := by
   sorry
 
 theorem Graph.closure_complete (graph : Graph) (roots : Array Name) (root node : Name) (rooted : root ∈ roots)

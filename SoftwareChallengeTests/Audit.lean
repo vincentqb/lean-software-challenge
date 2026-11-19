@@ -24,7 +24,7 @@ private theorem double_negative_vanishes_has_no_witness :
 
 meta section
 
-open Lean SoftwareChallenge SoftwareChallenge.Policy
+open Lean SoftwareChallenge
 
 private def fixture (name : Name) : Name := `SoftwareChallengeTests.Fixtures ++ name
 
@@ -84,11 +84,11 @@ private def expectedConfig : String := "{
 #guard Role.ofName `A.CoreCodeHelpers == .tooling
 
 #guard
-  let layout := Project.ofPackage #[`A.CoreCode.B, `A.Helpers, `A.WorldSpec] false
-  !layout.admits .coreCode { name := `A.Helpers, comptime := false } &&
-    !layout.admits .coreCode { name := `A.WorldSpec, comptime := false } &&
-    layout.admits .coreCode { name := `A.WorldSpec, comptime := true } &&
-    layout.admits .coreCode { name := `Lean.Data.Name, comptime := false } &&
+  let layout := Project.ofPackage #[`A.CoreCode.B, `A.Helpers, `A.WorldSpec]
+  !layout.admits .coreCode { name := `A.Helpers, comptime := false, line := 1 } &&
+    !layout.admits .coreCode { name := `A.WorldSpec, comptime := false, line := 1 } &&
+    layout.admits .coreCode { name := `A.WorldSpec, comptime := true, line := 1 } &&
+    layout.admits .coreCode { name := `Lean.Data.Name, comptime := false, line := 1 } &&
     layout.role? `A.CoreCode.B == some .coreCode && layout.role? `Lean.Data.Name == none
 
 run_cmd Elab.Command.liftCoreM do
@@ -188,12 +188,12 @@ run_cmd Elab.Command.liftCoreM do
     throwError "An unreached hole was reported as an error, not as pending"
   expect (Audit.sound project { entry := some (some (fixture `CoreCode), #[]) }) "main" "WorldCode module"
   let moduleOf := fun (_ : Name) => some (fixture `WorldCode)
-  let missing := Audit.entryOf { project with executable := true } env moduleOf (fun _ => true) #[`h]
+  let missing := Audit.entryOf true env moduleOf (fun _ => true) #[`h]
   unless missing matches some (none, #[]) do throwError "A missing main passed"
   expect (Audit.pending { entry := missing }) "main is not written yet" "declares a lean_exe"
   expect (Audit.pending { entry := missing, files := #[(`A.WorldCode, "A/WorldCode.lean")] })
     "A/WorldCode.lean: main is not written yet" "Add `def main : IO Unit := …` at the end of A/WorldCode.lean"
-  if (Audit.entryOf project env moduleOf (fun _ => true) #[`h]).isSome then
+  if (Audit.entryOf false env moduleOf (fun _ => true) #[`h]).isSome then
     throwError "A library without a lean_exe was required to have a main"
   let registrations := (valid.push (fixture `Rejected)).flatMap fun module =>
     (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
@@ -490,7 +490,7 @@ run_cmd Elab.Command.liftTermElabM do
   let some vacuous ← Audit.preconditionsOf project (NameSet.empty.insert pick) (fixture `pick_one_zero)
       (← getConstInfo (fixture `pick_one_zero)).type
     | throwError "The precondition of a vacuous headline was not read"
-  let refuted := Audit.toShape (← getConstInfo (fixture `pick_one_zero_has_no_witness)).type
+  let refuted := Shape.ofExpr (← getConstInfo (fixture `pick_one_zero_has_no_witness)).type
   unless vacuous.mentions == some pick &&
       refuted == (Shape.applicability vacuous.premises vacuous.inputs vacuous.preconditions).negation do
     throwError "The witness a vacuous headline needs is not the one its solution refutes"
@@ -499,7 +499,7 @@ run_cmd Elab.Command.liftTermElabM do
     "`@[witness SoftwareChallengeTests.Fixtures.pick_one_zero] theorem pick_one_zero_applies"
   let some negative := read.preconditioned.find? (·.headline == member `double_negative_vanishes)
     | throwError "The precondition a specification definition hides was not read"
-  unless Audit.toShape (← getConstInfo ``double_negative_vanishes_has_no_witness).type ==
+  unless Shape.ofExpr (← getConstInfo ``double_negative_vanishes_has_no_witness).type ==
       (Shape.applicability negative.premises negative.inputs negative.preconditions).negation do
     throwError "The witness a hidden vacuous precondition needs is not the one its refutation rules out"
   if read.preconditioned.any (·.headline == member `double_vanishes_only_at_zero) then
@@ -529,13 +529,12 @@ run_cmd Elab.Command.liftTermElabM do
   let env ← getEnv
   let moduleOf := fun (name : Name) => (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
   let running := fun name => (moduleOf name).any valid.contains
-  let program := { project with executable := true }
   let entry := fixture `loopIdentity
-  let glue ← Audit.unclaimed program moduleOf running #[fixture `identity] entry
+  let glue ← Audit.unclaimed project true moduleOf running #[fixture `identity] entry
   unless glue == some (3, #[entry]) do throwError "Glue main runs was miscounted: {glue}"
-  let covered ← Audit.unclaimed program moduleOf running #[entry] entry
+  let covered ← Audit.unclaimed project true moduleOf running #[entry] entry
   unless covered == some (3, #[]) do throwError "Code reached from a hole was counted unclaimed: {covered}"
-  if (← Audit.unclaimed project moduleOf running #[] entry).isSome then
+  if (← Audit.unclaimed project false moduleOf running #[] entry).isSome then
     throwError "A library without a lean_exe was reported unclaimed code"
 
 private def renamed (info : ConstantInfo) (name : Name) : ConstantInfo :=

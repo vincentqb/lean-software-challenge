@@ -1,12 +1,14 @@
 module
 
-public meta import SoftwareChallenge.Policy
+public meta import SoftwareChallenge.CoreCode.Layering
+public meta import SoftwareChallenge.CoreCode.Match
+public meta import SoftwareChallenge.CoreCode.OfExpr
 public meta import SoftwareChallenge.Commands
 
 public section
 meta section
 
-open Lean SoftwareChallenge.Policy
+open Lean
 
 namespace SoftwareChallenge.Audit
 
@@ -115,14 +117,15 @@ def ownerOf (name : Name) : Name :=
   | some prefixName => prefixName ++ kept
   | none => kept
 
-private def declaration (reachesIO terminating : NameSet) (info : ConstantInfo) (moduleName : Name) :
+private def declaration (reachesIO terminating : NameSet) (info : ConstantInfo) (module : Name) :
     StateRefT (Std.HashMap Name (Array Name)) CoreM DeclarationFact := do
   let env ← getEnv
   let generated := (← findDeclarationRangesCore? info.name).isNone
   let isComputational ← Meta.MetaM.run' <| computational info
   return {
     name := info.name
-    moduleName
+    module
+    line := ((← findDeclarationRangesCore? info.name).map (·.range.pos.line)).getD 0
     computational := isComputational
     isUnsafe := info.isUnsafe
     isPartial := info.isPartial && !(generated && (Compiler.isUnsafeRecName? info.name).any fun source =>
@@ -148,8 +151,8 @@ def collect (catalog : Array Name) (terminating : NameSet := {}) : CoreM Invento
     data.constants.mapM fun info => declaration reachesIO terminating info name
   return {
     modules := modules.map fun (name, data) =>
-      { name, usesModuleSystem := data.isModule,
-        imports := data.imports.map fun i => { name := i.module, comptime := i.isMeta } }
+      { name, file := "", usesModuleSystem := data.isModule,
+        imports := data.imports.map fun i => { name := i.module, comptime := i.isMeta, line := 0 } }
     declarations }
 
 private def withEnvironment {α : Type} (modules : Array Name) (action : CoreM α)
@@ -365,35 +368,10 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (writ
     return { name, assumptions, unnamed, unmatched, proved := prover.isSome, oneInstance,
              laws := ← lawCount project type, unlinted := if record.isNone then prover else none }
 
-def toUniverse : Level → Universe
-  | .zero => .zero
-  | .succ level => .succ (toUniverse level)
-  | .max left right => .max (toUniverse left) (toUniverse right)
-  | .imax left right => .imax (toUniverse left) (toUniverse right)
-  | .param name => .param name
-  | .mvar id => .mvar id.name
-
-@[expose] def toShape : Expr → Shape
-  | .bvar index => .bvar index
-  | .fvar id => .fvar id.name
-  | .mvar id => .mvar id.name
-  | .sort level => .sort (toUniverse level)
-  | .const name levels => .const name (levels.map toUniverse)
-  | .app function argument => .app (toShape function) (toShape argument)
-  | .lam _ type body _ => .lam (toShape type) (toShape body)
-  | .forallE _ type body _ => .forallE (toShape type) (toShape body)
-  | .letE _ type value body _ => .letE (toShape type) (toShape value) (toShape body)
-  | .lit (.natVal value) => .natLit value
-  | .lit (.strVal value) => .strLit value
-  | .mdata _ expr => toShape expr
-  | .proj structureName index value => .proj structureName index (toShape value)
-
-theorem toShape_mdata (data : MData) (expr : Expr) : toShape (.mdata data expr) = toShape expr := rfl
-
 def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : Bool :=
-  match env.find? headline, (env.find? kill).map (toShape ·.type) with
+  match env.find? headline, (env.find? kill).map (Shape.ofExpr ·.type) with
   | some headlineInfo, some (.app (.const ``Not _) rejected) =>
-    let stated := toShape headlineInfo.type
+    let stated := Shape.ofExpr headlineInfo.type
     (stated.witnesses? replaceable.contains rejected).isSome && stated != rejected
   | _, _ => false
 
@@ -425,29 +403,29 @@ def preconditionsOf (project : Project) (replaceable : NameSet) (headline : Name
       let type ← Meta.inferType input
       let level := (← Meta.getLevel type).normalize
       expected := mkApp2 (.const ``Exists [level]) type (← Meta.mkLambdaFVars #[input] expected)
-      quantified := quantified.push (toUniverse level, toShape (normalized (type.abstract (used.extract 0 index))))
+      quantified := quantified.push (Universe.ofLevel level, Shape.ofExpr (normalized (type.abstract (used.extract 0 index))))
     expected := premises.foldr (fun premise body => .forallE `_ premise body .default) expected
     return some {
       headline
       expected := toString (← Meta.ppExpr expected)
-      premises := (premises.map (toShape ∘ normalized)).toList
+      premises := (premises.map (Shape.ofExpr ∘ normalized)).toList
       inputs := quantified.reverse.toList
-      preconditions := (preconditions.map fun statement => toShape (normalized (statement.abstract used))).toList
+      preconditions := (preconditions.map fun statement => Shape.ofExpr (normalized (statement.abstract used))).toList
       mentions := preconditions.findSome? fun statement => statement.getUsedConstants.find? replaceable.contains }
 
 def Preconditions.witnessedBy (preconditions : Preconditions) (witness : Expr) : Bool :=
-  Shape.applies preconditions.premises preconditions.inputs preconditions.preconditions (toShape (normalized witness))
+  Shape.applies preconditions.premises preconditions.inputs preconditions.preconditions (Shape.ofExpr (normalized witness))
 
 def independent (env : Environment) (replaceable : NameSet) (headlines : Array Name) (headline kill : Name) :
     Bool :=
-  let shape := fun name => (env.find? name).map (toShape ·.type)
+  let shape := fun name => (env.find? name).map (Shape.ofExpr ·.type)
   match shape headline, shape kill, (headlines.filter (· != headline)).mapM shape with
   | some stated, some rejected, some others =>
     stated.independent replaceable.contains others.toList rejected && stated.independence others.toList != rejected
   | _, _, _ => false
 
 def unreplaced (env : Environment) (headlines : Array Name) (headline kill : Name) : Bool :=
-  let shape := fun name => (env.find? name).map (toShape ·.type)
+  let shape := fun name => (env.find? name).map (Shape.ofExpr ·.type)
   match shape headline, shape kill, (headlines.filter (· != headline)).mapM shape with
   | some stated, some rejected, others =>
     stated.negation == rejected ||
@@ -617,18 +595,18 @@ private def compiledCallees (env : Environment) (name : Name) : Array Name :=
 def reachedFrom (env : Environment) (running : Name → Bool) (root : Name) : NameSet :=
   closure (fun name => (compiledCallees env name).filter running) #[root]
 
-def entryOf (project : Project) (env : Environment) (moduleOf : Name → Option Name)
+def entryOf (executable : Bool) (env : Environment) (moduleOf : Name → Option Name)
     (running : Name → Bool) (holes : Array Name) : Option (Option Name × Array Name) :=
-  if !project.executable then none
+  if !executable then none
   else if env.contains `main then
     let reached := reachedFrom env running `main
     some (moduleOf `main, holes.filter (!reached.contains ·))
   else some (none, #[])
 
-def unclaimed (project : Project) (moduleOf : Name → Option Name) (running : Name → Bool) (holes : Array Name)
-    (entry : Name := `main) : MetaM (Option (Nat × Array Name)) := do
+def unclaimed (project : Project) (executable : Bool) (moduleOf : Name → Option Name) (running : Name → Bool)
+    (holes : Array Name) (entry : Name := `main) : MetaM (Option (Nat × Array Name)) := do
   let env ← getEnv
-  unless project.executable && env.contains entry do return none
+  unless executable && env.contains entry do return none
   let claimed := closure (fun name => (compiledCallees env name).filter running) holes
   let written ← (reachedFrom env running entry).toArray.filterM fun name => do
     let some info := env.find? name | return false
@@ -677,8 +655,8 @@ def kindMatches (stated found : ConstantInfo) : Bool :=
   | _, _ => false
 
 def sameConstant (stated found : ConstantInfo) : Bool :=
-  let value := fun (info : ConstantInfo) => (info.value? (allowOpaque := true)).map toShape
-  stated.levelParams == found.levelParams && toShape stated.type == toShape found.type &&
+  let value := fun (info : ConstantInfo) => (info.value? (allowOpaque := true)).map Shape.ofExpr
+  stated.levelParams == found.levelParams && Shape.ofExpr stated.type == Shape.ofExpr found.type &&
     value stated == value found && match stated, found with
     | .defnInfo stated, .defnInfo found =>
       stated.safety == found.safety && stated.hints == found.hints && stated.all == found.all
@@ -696,7 +674,7 @@ def standing (env : Environment) (moduleOf : Name → Option Name) (solutionImpo
   if !solutionImports.contains module then return .outside module
   if !kindMatches stated found then return .kind module (kindOf found)
   if stated.levelParams != found.levelParams then return .universes module found.levelParams
-  if toShape stated.type != toShape found.type then
+  if Shape.ofExpr stated.type != Shape.ofExpr found.type then
     let (plain, explicit) ← render found.type
     return .differs module plain explicit
   match auxiliaries.find? fun auxiliary => !((env.find? auxiliary.name).any (sameConstant auxiliary)) with
@@ -781,22 +759,26 @@ private def purity : Role → String
       runs is the code proved"
   | .tooling => "may do anything"
 
-private def offence : String → String
-  | "initializer" => "an initializer"
-  | "IO" => "IO"
-  | "dbg builtin" => "a dbg builtin"
-  | reason => s!"`{reason}`"
+private def offence : Reason → String
+  | .«unsafe» => "`unsafe`"
+  | .«partial» => "`partial`"
+  | .extern => "`@[extern]`"
+  | .implementedBy => "`@[implemented_by]`"
+  | .initializer => "an initializer"
+  | .io => "IO"
+  | .debug => "a dbg builtin"
+  | .unfoldableExtern => "`@[extern] with a body the kernel unfolds`"
 
-private def cure (name : Name) : String → String
-  | "unsafe" => s!"remove `unsafe` from {name}"
-  | "partial" => s!"remove `partial` from {name} and recurse structurally or with `termination_by`"
-  | "@[extern]" => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, as \
+private def cure (name : Name) : Reason → String
+  | .«unsafe» => s!"remove `unsafe` from {name}"
+  | .«partial» => s!"remove `partial` from {name} and recurse structurally or with `termination_by`"
+  | .extern => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, as \
       `@[extern] opaque`"
-  | "@[implemented_by]" => s!"remove `@[implemented_by]` from {name}"
-  | "IO" => s!"move {name} to a WorldCode module"
-  | "dbg builtin" => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
-  | "@[extern] with a body the kernel unfolds" => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
-  | reason => s!"remove {reason} from {name}"
+  | .implementedBy => s!"remove `@[implemented_by]` from {name}"
+  | .initializer => s!"remove an initializer from {name}"
+  | .io => s!"move {name} to a WorldCode module"
+  | .debug => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
+  | .unfoldableExtern => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
 
 private def located (project : Project) (module : Name) : String :=
   match project.role? module with
@@ -855,7 +837,7 @@ private def faultOf (axiomName culprit : Name) (nativePlace : String) : Fault :=
         fix := s!"Prove {culprit} without {shown}" }
 
 def axiomErrors (facts : Facts) : Array String := Id.run do
-  let moduleOf := fun (name : Name) => (facts.inventory.declarations.find? (·.name == name)).map (·.moduleName)
+  let moduleOf := fun (name : Name) => (facts.inventory.declarations.find? (·.name == name)).map (·.module)
   let placeOf := fun (name : Name) => (moduleOf name).map fun module => facts.place module (facts.anchor module name)
   let targets := facts.challenge.declared.map (·.name)
   let mut errors := #[]
@@ -906,21 +888,21 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
           but {role} may import {allowedImports role}, so that {importPurpose role}. {fix}, {lintNext}."
   errors := errors ++ axiomErrors facts
   let offenders := facts.inventory.declarations.filterMap fun fact =>
-    (project.role? fact.moduleName).bind fun role =>
+    (project.role? fact.module).bind fun role =>
       let reasons := fact.reasons role
       if reasons.isEmpty then none else some (fact, role, reasons)
   let named := offenders.filterMap fun (fact, _, _) =>
     if fact.name.hasMacroScopes then none
-    else some (facts.place fact.moduleName (facts.anchor fact.moduleName fact.name))
+    else some (facts.place fact.module (facts.anchor fact.module fact.name))
   for (fact, role, reasons) in offenders do
-    let anchor := facts.anchor fact.moduleName fact.name
-    let place := facts.place fact.moduleName anchor
+    let anchor := facts.anchor fact.module fact.name
+    let place := facts.place fact.module anchor
     if fact.name.hasMacroScopes && named.contains place then continue
     let shown := privateToUserName (ownerOf fact.name)
-    let site := located project fact.moduleName
-    if reasons.contains "initializer" || isInitializer fact.name then
+    let site := located project fact.module
+    if reasons.contains .initializer || isInitializer fact.name then
       let quoted := facts.firstLines.getD anchor s!"initialize {shown}"
-      let others := reasons.filter fun reason => reason != "initializer" && reason != "IO"
+      let others := reasons.filter fun reason => reason != .initializer && reason != .io
       let also := if others.isEmpty then "" else s!", and {" and ".intercalate (others.map (cure shown))}"
       errors := errors.push s!"{place}: `{quoted}` runs IO when the program starts, in {site}, but {role} code \
         {purity role}. Move it to a WorldCode module{also}, {lintNext}."
@@ -988,7 +970,7 @@ def meaningful (facts : Facts) : Array String :=
   let file := facts.challengeFile
   let here := fun (name : Name) => facts.place challengeModule name
   let written := fun (name : Name) => challenge.writtenOf name
-  let stated := challenge.headlines.filterMap fun name => (challenge.statement? name).map (name, toShape ·)
+  let stated := challenge.headlines.filterMap fun name => (challenge.statement? name).map (name, Shape.ofExpr ·)
   let mentioned := NameSet.ofList <| (challenge.headlines.flatMap fun name =>
     ((challenge.statement? name).map (·.getUsedConstants)).getD #[]).toList
   let duplicates := (stated.mapIdx fun index (later, shape) =>
@@ -1066,7 +1048,7 @@ def owned (project : Project) (facts : Facts) : Array String := Id.run do
   let file := facts.challengeFile
   let mut errors := #[]
   for dependency in facts.challengeImports do
-    unless project.admits .worldSpec { name := dependency, comptime := false } do
+    unless project.admits .worldSpec { name := dependency, comptime := false, line := 0 } do
       let line := facts.importLine challengeModule dependency
       errors := errors.push s!"{file}:{line}: {challengeModule} imports {located project dependency}, but a \
         challenge may import only CoreSpec and WorldSpec modules and modules outside the package, so that the \
@@ -1407,8 +1389,8 @@ private def gather (project : Project) (arguments : Arguments) (solution : Optio
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
           fun claim => (claim, module, project.role? module, moduleOf claim)
       terminations := terminations (fixpoint env) challenge.terminating challenge.statement?
-      entry := entryOf project env moduleOf running challenge.holes
-      unclaimed := ← unclaimed project moduleOf running challenge.holes : Facts }
+      entry := entryOf arguments.executable env moduleOf running challenge.holes
+      unclaimed := ← unclaimed project arguments.executable moduleOf running challenge.holes : Facts }
   return { facts with
     files := arguments.sources, imports, challengeFile := arguments.challengeFile, roots := arguments.roots
     solution := solution.getD .anonymous, hidden := arguments.hidden }
@@ -1421,7 +1403,7 @@ private def lockText (current : Array (String × UInt64)) : String :=
 
 private def statementAudit (arguments : Arguments) : IO UInt32 := do
   let catalog := arguments.sources.map (·.1)
-  let project := Project.ofPackage catalog arguments.executable
+  let project := Project.ofPackage catalog
   let challenge ← readChallenge project challengeModule arguments.challengeOLean
     (← IO.FS.readFile arguments.challengeFile)
   let solution := solutionOf catalog
@@ -1465,7 +1447,7 @@ private def proved (facts : Facts) : String :=
 
 private def solutionAudit (arguments : Arguments) : IO UInt32 := do
   let catalog := arguments.sources.map (·.1)
-  let project := Project.ofPackage catalog arguments.executable
+  let project := Project.ofPackage catalog
   let solution := solutionOf catalog
   let facts ← gather project arguments solution.toOption
   let edit := editableFiles project arguments.sources
