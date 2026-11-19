@@ -10,7 +10,7 @@ open Lean
 
 namespace Shape
 
-def collect (replaceable : Name → Bool) : Shape → Shape → Witnesses → Witnesses
+private def collect (replaceable : Name → Bool) : Shape → Shape → Witnesses → Witnesses
   | .const name levels, target, σ =>
     if replaceable name ∧ σ.find? name = none ∧ target ≠ .const name levels then (name, target) :: σ else σ
   | .app f a, .app g b, σ => collect replaceable a b (collect replaceable f g σ)
@@ -135,7 +135,7 @@ private theorem subst_collect {replaceable : Name → Bool} {σ' σ₀ σ : Witn
   | proj _ _ v ih => simp only [subst]; rw [ih covers]
   | _ => rfl
 
-theorem witnesses?_sound {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
+theorem witnesses?_some {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
     (found : pattern.witnesses? replaceable target = some σ) :
     (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧ pattern.subst replaceable σ = target := by
   simp only [witnesses?] at found
@@ -145,7 +145,7 @@ theorem witnesses?_sound {replaceable : Name → Bool} {pattern target : Shape} 
     exact ⟨List.all_eq_true.mp accepted.1, accepted.2⟩
   · cases found
 
-theorem witnesses?_complete {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
+theorem witnesses?_isSome_of_subst {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
     (closed : ∀ entry ∈ σ, replaceable entry.1 = true → entry.2.closedUnder 0 = true)
     (instantiates : pattern.subst replaceable σ = target) :
     (pattern.witnesses? replaceable target).isSome := by
@@ -168,9 +168,19 @@ theorem witnesses?_isSome_iff {replaceable : Name → Bool} {pattern target : Sh
   constructor
   · intro found
     obtain ⟨σ, found⟩ := Option.isSome_iff_exists.mp found
-    exact ⟨σ, witnesses?_sound found⟩
+    exact ⟨σ, witnesses?_some found⟩
   · rintro ⟨σ, closed, instantiates⟩
-    exact witnesses?_complete (fun entry member _ => closed entry member) instantiates
+    exact witnesses?_isSome_of_subst (fun entry member _ => closed entry member) instantiates
+
+def isKill (replaceable : Name → Bool) (headline kill : Shape) : Bool :=
+  match kill with
+  | .app negated rejected => negated == .const ``Not [] && (headline.witnesses? replaceable rejected).isSome
+  | _ => false
+
+theorem isKill_eq_true {replaceable : Name → Bool} {headline kill : Shape} :
+    headline.isKill replaceable kill = true ↔
+      ∃ rejected, kill = rejected.negation ∧ (headline.witnesses? replaceable rejected).isSome := by
+  cases kill <;> simp [isKill, negation, and_assoc]
 
 def independence (headline : Shape) (others : List Shape) : Shape :=
   conjunction (headline.negation :: others)
@@ -190,17 +200,18 @@ private theorem subst_conjunction {replaceable : Name → Bool} {σ : Witnesses}
     | nil => rfl
     | cons next rest => simp only [conjunction, subst, fixed.1] at ih ⊢; simp only [ih, List.map_cons]; rfl
 
-theorem independent_sound {replaceable : Name → Bool} {headline kill : Shape} {others : List Shape}
-    (accepted : independent replaceable headline others kill = true) :
-    others ≠ [] ∧ ∃ σ : Witnesses, (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧
-      kill = conjunction ((headline.subst replaceable σ).negation :: others.map (·.subst replaceable σ)) := by
-  simp only [independent, Bool.and_eq_true, Bool.not_eq_true', List.isEmpty_eq_false_iff] at accepted
-  obtain ⟨⟨⟨⟨noAnd, noNot⟩, noTrue⟩, nonempty⟩, found⟩ := accepted
-  obtain ⟨σ, found⟩ := Option.isSome_iff_exists.mp found
-  obtain ⟨closed, instantiates⟩ := witnesses?_sound found
-  refine ⟨nonempty, σ, closed, ?_⟩
-  rw [← instantiates, independence, subst_conjunction ⟨noAnd, noTrue⟩]
-  simp [negation, subst, noNot]
+theorem subst_independence {replaceable : Name → Bool} {σ : Witnesses} {headline : Shape} {others : List Shape}
+    (fixed : replaceable ``And = false ∧ replaceable ``Not = false ∧ replaceable ``True = false) :
+    (independence headline others).subst replaceable σ =
+      conjunction ((headline.subst replaceable σ).negation :: others.map (·.subst replaceable σ)) := by
+  rw [independence, subst_conjunction ⟨fixed.1, fixed.2.2⟩]
+  simp [negation, subst, fixed.2.1]
+
+theorem independent_eq_true {replaceable : Name → Bool} {headline kill : Shape} {others : List Shape} :
+    independent replaceable headline others kill = true ↔
+      (replaceable ``And = false ∧ replaceable ``Not = false ∧ replaceable ``True = false) ∧ others ≠ [] ∧
+        ((independence headline others).witnesses? replaceable kill).isSome := by
+  simp [independent, and_assoc]
 
 def existential : List (Universe × Shape) → Shape → Shape
   | [], body => body
@@ -225,7 +236,7 @@ theorem applies_sound {premises : List Shape} {inputs : List (Universe × Shape)
   simp only [applies, Bool.and_eq_true, Bool.not_eq_true', List.isEmpty_eq_false_iff] at accepted
   obtain ⟨nonempty, found⟩ := accepted
   obtain ⟨σ, found⟩ := Option.isSome_iff_exists.mp found
-  obtain ⟨_, instantiates⟩ := witnesses?_sound found
+  obtain ⟨_, instantiates⟩ := witnesses?_some found
   exact ⟨nonempty, by rw [← instantiates, subst_unreplaceable]; rfl⟩
 
 end Shape

@@ -2,6 +2,7 @@ module
 
 import all SoftwareChallenge.CoreCode.Match
 meta import SoftwareChallenge.Audit
+import SoftwareChallenge.Solution.Match
 
 namespace SoftwareChallengeTests.Policy
 
