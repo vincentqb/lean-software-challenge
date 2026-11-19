@@ -714,6 +714,7 @@ structure Facts where
   written : Std.HashMap Name String := {}
   firstLines : Std.HashMap Name String := {}
   imports : Array (Name × Array (Name × Nat × String)) := #[]
+  lints : Array (Name × Linter.LintEntry) := #[]
   challengeFile : String := "Challenge.lean"
 
 def Facts.fileOf (facts : Facts) (module : Name) : String :=
@@ -938,6 +939,15 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
           termination {t.headline} states. Define {t.definition} with `partial_fixpoint` after its body in \
           {facts.fileOf module}, {lintNext}."
   return distinct errors
+
+def warned (facts : Facts) : Array String :=
+  facts.lints.map fun (module, entry) =>
+    let file := facts.fileOf module
+    let line := (entry.position?.getD entry.message.pos).line
+    let said := (((entry.message.data.splitOn "\n").map (·.trimAscii.toString)).find? (!·.isEmpty)).getD ""
+    s!"{file}:{line}: Lean's linter {entry.linter} reports \"{said}\", so {module} does not pass Lean's linters, \
+      which `lake lint` requires of every module of the package. Change line {line} of {file} as the warning says, \
+      {lintNext}."
 
 def registered (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
@@ -1376,8 +1386,10 @@ private def gather (project : Project) (arguments : Arguments) (solution : Optio
             if let some text := textAt source ranges.selectionRange then written := written.insert info.name text
             if let some text := lineAt source ranges.range.pos.line then
               firstLines := firstLines.insert info.name text
+    let lints := (Linter.getAllLints env).flatMap fun (module, entries) =>
+      if packaged.contains module then entries.map (module, ·) else #[]
     return {
-      inventory, blames, challenge, headlines, standings, cyclic, lines, written, firstLines
+      inventory, blames, challenge, headlines, standings, cyclic, lines, written, firstLines, lints
       holes := challenge.holes.map fun hole => (hole, moduleOf hole)
       registrations := catalog.flatMap fun module =>
         (PersistentEnvExtension.getModuleEntries claimsExt env (env.getModuleIdx? module).get!).map
@@ -1459,7 +1471,8 @@ private def solutionAudit (arguments : Arguments) : IO UInt32 := do
     | .ok solution => if drifted then #[] else
       comparatorErrors (comparatorConfig solution facts.challenge) existing arguments.target
     | .error error => #[error]
-  let errors := distinct (sound project facts ++ registered project facts ++ evidenced facts ++ lockFailures ++
+  let errors := distinct (sound project facts ++ registered project facts ++ evidenced facts ++ warned facts ++
+    lockFailures ++
     comparator)
   let items := if drifted then #[] else pending facts
   let short := shorten (sharedNamespace (facts.headlines.map (·.name)))

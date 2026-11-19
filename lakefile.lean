@@ -865,6 +865,24 @@ script test_sandbox do
         {lintText}\n{gradeText}"
       return 1
     let config := consumer / "lakefile.lean"
+    let solutionFile := consumer / "Consumer" / "Solution.lean"
+    IO.FS.writeFile (consumer / "Consumer" / "Proofs.lean") "module\n\npublic import Consumer.CoreCode\n\n\
+      public section\n\ntheorem zero_eq (n : Nat) (h : n = n) : zero 0 = 0 := rfl\n"
+    IO.FS.writeFile solutionFile ((← IO.FS.readFile solutionFile).replace "public import Consumer.CoreCode\n"
+      "public import Consumer.CoreCode\npublic import Consumer.Proofs\n")
+    IO.FS.writeFile config ((← IO.FS.readFile config).replace "roots := #[`Consumer.Solution]"
+      "roots := #[`Consumer.CoreCode]")
+    IO.FS.removeFile (consumer / "owned.lock")
+    succeedIn consumer lake #["build"]
+    let unreached ← runIn consumer lake #["lint"]
+    let unreachedText := unreached.stdout ++ unreached.stderr
+    unless unreached.exitCode == 1 &&
+        unreachedText.contains "Consumer/Proofs.lean:7: Lean's linter linter.unusedVariables reports" do
+      IO.eprintln s!"a linter warning in Consumer/Proofs.lean, a module the default roots do not reach, was not \
+        reported: lake lint exited {unreached.exitCode}, expected 1 with an error naming Consumer/Proofs.lean:7, \
+        as the log below shows. Restore `warned` in SoftwareChallenge/Audit.lean, then run `lake test`.\n\
+        {unreachedText}"
+      return 1
     IO.FS.writeFile config ((← IO.FS.readFile config).replace "  lintDriver :=" "  builtinLint := true\n  lintDriver :=")
     let twice ← runIn consumer lake #["lint"]
     unless twice.exitCode == 1 && (twice.stdout ++ twice.stderr).contains "sets `builtinLint := true`" do
