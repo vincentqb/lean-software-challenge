@@ -74,7 +74,40 @@ theorem code_eq_zero_iff (failures : Array Failure) : code failures = 0 ↔ fail
     · assumption
   · simp [Array.isEmpty_iff.mp empty]
 
+theorem Failure.code_le_two (failure : Failure) : failure.code ≤ 2 := by
+  cases failure with
+  | ownTest run =>
+    show min run.code 2 ≤ 2
+    by_cases low : run.code ≤ 2
+    · simp [min, low]
+    · simp [min, low]
+  | _ => show (1 : UInt32) ≤ 2; decide
+
+theorem worst_le_two (failures : List Failure) (worst : UInt32) (bounded : worst ≤ 2) :
+    failures.foldl (fun worst failure => max worst failure.code) worst ≤ 2 := by
+  induction failures generalizing worst with
+  | nil => exact bounded
+  | cons failure rest ih =>
+    apply ih
+    by_cases higher : worst ≤ failure.code
+    · simpa [max, maxOfLe, higher] using failure.code_le_two
+    · simpa [max, maxOfLe, higher] using bounded
+
 end Test
+
+theorem Test.run_code_le_two (facts : TestFacts) : (Test.run facts).code ≤ 2 := by
+  simp only [Test.run, Test.code]
+  split
+  · decide
+  · split
+    · decide
+    · rw [← Array.foldl_toList]
+      exact Test.worst_le_two _ 0 (by decide)
+
+theorem Test.run_code_le_two_rejects_unjudged :
+    ¬ ∀ (facts : TestFacts),
+      ((fun (_ : TestFacts) => ({ failures := #[], timings := #[], code := 3 } : Test.Result)) facts).code ≤ 2 :=
+  fun holds => absurd (holds default) (by decide)
 
 theorem Test.run_code_eq_zero_iff (facts : TestFacts) : (Test.run facts).code = 0 ↔ Test.Complete facts := by
   simp only [Test.run, Test.code_eq_zero_iff, Test.failuresOf_eq_empty_iff]
