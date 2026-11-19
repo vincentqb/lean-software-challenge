@@ -5,7 +5,7 @@ meta import SoftwareChallenge.Audit
 
 namespace SoftwareChallengeTests.Policy
 
-open Lean SoftwareChallenge
+open Lean SoftwareChallenge SoftwareChallenge.Policy
 
 def layered : Project := { modules := #[(`A, .coreCode), (`B, .coreSpec), (`W, .worldCode)] }
 

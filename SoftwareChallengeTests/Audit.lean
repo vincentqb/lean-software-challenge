@@ -24,7 +24,7 @@ private theorem double_negative_vanishes_has_no_witness :
 
 meta section
 
-open Lean SoftwareChallenge
+open Lean SoftwareChallenge SoftwareChallenge.Policy
 
 private def fixture (name : Name) : Name := `SoftwareChallengeTests.Fixtures ++ name
 

@@ -1,6 +1,5 @@
 module
 
-public meta import SoftwareChallenge.Policy
 public meta import Lean
 
 public section

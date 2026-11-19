@@ -6,7 +6,7 @@ public section
 
 open Lean
 
-namespace SoftwareChallenge
+namespace SoftwareChallenge.Policy
 
 inductive Role where
   | coreSpec | worldSpec | coreCode | worldCode | tooling
@@ -417,4 +417,4 @@ theorem applies_sound {premises : List Shape} {inputs : List (Universe × Shape)
 
 end Shape
 
-end SoftwareChallenge
+end SoftwareChallenge.Policy

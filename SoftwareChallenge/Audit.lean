@@ -1,11 +1,12 @@
 module
 
+public meta import SoftwareChallenge.Policy
 public meta import SoftwareChallenge.Commands
 
 public section
 meta section
 
-open Lean
+open Lean SoftwareChallenge.Policy
 
 namespace SoftwareChallenge.Audit
 
