@@ -41,9 +41,12 @@ initialize registerBuiltinAttribute {
     let target ← realizeGlobalConstNoOverloadWithInfo stx[1]
     modifyEnv (linksExt.addEntry · { kind := .kills, source := declaration, target })
     try deriveWitness target stx
-    catch problem => logWarning m!"`@[kills {target}]` could not derive {witnessName target}, the theorem that \
-      some input meets the preconditions of {target}, because {problem.toMessageData}. `lake build` reports \
-      {target} as a headline whose kills derived no witness." }
+    catch problem =>
+      let line := ((← findDeclarationRanges? target).map (·.selectionRange.pos.line)).getD 0
+      logWarning m!"`@[kills {target}]` could not derive {witnessName target}, the theorem that some input meets \
+        the preconditions of {target} (line {line}), because {problem.toMessageData}, so nothing would show that \
+        {target} is not vacuous. State each precondition of {target} as a hypothesis of its own, delete owned.lock \
+        if there is one, then run `lake build`." }
 
 initialize registerBuiltinAttribute {
   name := `terminates

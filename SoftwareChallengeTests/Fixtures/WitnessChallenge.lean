@@ -85,6 +85,17 @@ theorem double_at (n : Nat) (_c : SuccAt n) (h : double n = 1) : n = 0 := sorry
 
 @[kills double_at] theorem double_at_rejects_one : ¬ ∀ (n : Nat), SuccAt n → (fun _ => 1) n = 1 → n = 0 := sorry
 
+theorem double_assumes_wrapped (agrees : SuccAgreesWrapped nativeSucc) (n : Nat) :
+    double (nativeSucc n) = 2 * n + 2 := sorry
+
+@[kills double_assumes_wrapped] theorem double_assumes_wrapped_rejects_zero :
+    ¬ (SuccAgreesWrapped (fun n => n + 1) → ∀ n : Nat, (fun _ => 0) ((fun n => n + 1) n) = 2 * n + 2) := sorry
+
+theorem double_hidden (n : Nat) (h : double n = 4) : NonnegativeVanishes double := sorry
+
+@[kills double_hidden] theorem double_hidden_rejects_four :
+    ¬ ∀ n : Nat, (fun _ => 4) n = 4 → NonnegativeVanishes (fun _ => 4) := sorry
+
 theorem double_odd (n : Nat) (h : double n = 3) : False := sorry
 
 theorem double_odd_applies : ∃ n, double n = 3 := sorry

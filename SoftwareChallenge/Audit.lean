@@ -172,6 +172,11 @@ structure Preconditions where
   preconditions : List Shape
   mentions : Option Name
 
+structure Unexposed where
+  name : Name
+  module : Name
+  line : Nat
+
 structure Termination where
   definition : Name
   headline : Name
@@ -195,6 +200,7 @@ structure Challenge where
   preconditioned : Array Preconditions := #[]
   misshapenWitnesses : Array (Name × Name) := #[]
   predeclared : Array (Name × Name) := #[]
+  unexposed : Array (Name × Array Unexposed) := #[]
   independent : Array (Name × Name) := #[]
   terminating : Array (Name × Name) := #[]
   misshapen : Array (Name × Name) := #[]
@@ -218,6 +224,9 @@ def Challenge.killsOf (challenge : Challenge) (headline : Name) : Array Name :=
 
 def Challenge.witnessesOf (challenge : Challenge) (headline : Name) : Array Name :=
   (challenge.witnesses.filter (·.2 == headline)).map (·.1)
+
+def Challenge.unexposedOf (challenge : Challenge) (headline : Name) : Array Unexposed :=
+  ((challenge.unexposed.find? (·.1 == headline)).map (·.2)).getD #[]
 
 def Challenge.statement? (challenge : Challenge) (name : Name) : Option Expr :=
   (challenge.statements.find? (·.1 == name)).map (·.2)
@@ -339,11 +348,12 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (writ
     let mut unmatched := #[]
     let mut oneInstance := true
     for ((binder, pattern), index) in (binders.zip patterns).zipIdx do
-      let statement ← Meta.inferType binder
+      let hypothesis ← Meta.inferType binder
+      let statement ← unfolded project hypothesis
       let claim := conclusionHead statement
       unless ← Meta.isProp statement do oneInstance := false
       if isWorldClaim env claim then
-        let (_, _, expected) ← Meta.forallMetaTelescope (← Meta.inferType pattern)
+        let (_, _, expected) ← Meta.forallMetaTelescope (← unfolded project (← Meta.inferType pattern))
         let shown := toString (← Meta.ppExpr statement)
         let (checkStatement, checkVariables) ← Meta.forallTelescope statement fun peeled conclusion => do
           let chosen ← peeled.filterMapM fun bound => do
@@ -364,10 +374,18 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (writ
         | none =>
           assumptions := assumptions.push
             { claim, statement := shown, checks, unused, checkStatement, checkVariables }
-      else if !statement.hasFVar && (← Meta.isProp statement) then
-        unnamed := unnamed.push (toString (← Meta.ppExpr statement))
+      else if !hypothesis.hasFVar && (← Meta.isProp hypothesis) then
+        unnamed := unnamed.push (toString (← Meta.ppExpr hypothesis))
     return { name, assumptions, unnamed, unmatched, proved := prover.isSome, oneInstance,
              laws := ← lawCount project type, unlinted := if record.isNone then prover else none }
+
+def oneLine (text : String) : String :=
+  " ".intercalate ((text.splitOn "\n").map (·.trimAscii.toString) |>.filter (!·.isEmpty))
+
+def render (expr : Expr) : MetaM (String × String) := do
+  let shown := fun (explicit : Bool) => withOptions (fun options => ((options.setBool `pp.proofs true).setBool
+    `pp.explicit explicit).setBool `pp.universes explicit) do return oneLine (toString (← Meta.ppExpr expr))
+  return (← shown false, ← shown true)
 
 def kills (env : Environment) (replaceable : NameSet) (headline kill : Name) : Bool :=
   match env.find? headline, (env.find? kill).map (Shape.ofExpr ·.type) with
@@ -389,13 +407,14 @@ def preconditionsOf (_project : Project) (replaceable : NameSet) (headline : Nam
     let statement ← Telescope.witnessStatement binders summary
     let shapes := fun (found : Array (Expr × Binder)) =>
       (found.map fun (statement, _) => Shape.ofExpr (normalized (statement.abstract binders))).toList
+    let mentions ← stated.findSomeM? fun (statement, binder) => do
+      if binder.kind == .claim then return none
+      return (← Telescope.unfolded statement).getUsedConstants.find? replaceable.contains
     return some {
-      headline, statement
-      expected := toString (← Meta.ppExpr statement)
+      headline, statement, mentions
+      expected := (← render statement).1
       premises := shapes ((ofKind .claim).filter (·.2.refers.isEmpty))
-      preconditions := shapes preconditions
-      mentions := stated.findSome? fun (statement, binder) =>
-        if binder.kind == .claim then none else statement.getUsedConstants.find? replaceable.contains }
+      preconditions := shapes preconditions }
 
 def Preconditions.witnessedBy (preconditions : Preconditions) (witness : Expr) : Bool :=
   Shape.ofExpr (normalized witness) == Shape.ofExpr (normalized preconditions.statement)
@@ -416,9 +435,6 @@ def unreplaced (env : Environment) (headlines : Array Name) (headline kill : Nam
       others.any fun others => !others.isEmpty && stated.independence others.toList == rejected
   | _, _, _ => false
 
-
-def oneLine (text : String) : String :=
-  " ".intercalate ((text.splitOn "\n").map (·.trimAscii.toString) |>.filter (!·.isEmpty))
 
 private def lastOf : Name → String
   | .str _ last => last
@@ -448,11 +464,6 @@ def lineAt (source : String) (line : Nat) : Option String := do
   let text := (← (source.splitOn "\n")[line - 1]?).trimAscii.toString
   if text.isEmpty then none else some text
 
-def render (expr : Expr) : MetaM (String × String) := do
-  let shown := fun (explicit : Bool) => withOptions (fun options => ((options.setBool `pp.proofs true).setBool
-    `pp.explicit explicit).setBool `pp.universes explicit) do return oneLine (toString (← Meta.ppExpr expr))
-  return (← shown false, ← shown true)
-
 def killTemplate (type : Expr) (replaced : Array Name) : MetaM String := do
   let mut holes : Std.HashMap Name Expr := {}
   for name in replaced do
@@ -476,6 +487,12 @@ def auxiliariesOf (env : Environment) (inChallenge : Name → Bool) (targets : N
   ((closure uses (root.type.getUsedConstants.filter auxiliary)).toArray.filterMap env.find?).qsort
     (toString ·.name < toString ·.name)
 
+def exposedBodies (modules : Array Name) : IO NameSet :=
+  modules.toList.eraseDups.foldlM (init := {}) fun exposed module => do
+    let some (data, _) := (← readModuleDataParts #[← findOLean module])[0]? | return exposed
+    return data.constants.foldl (init := exposed) fun exposed info =>
+      if info.hasValue then exposed.insert info.name else exposed
+
 def readChallenge (project : Project) (challenge : Name) (olean : System.FilePath) (source : String := "") :
     IO Challenge := do
   let parts ← #[olean, olean.addExtension "server", olean.addExtension "private"].filterM (·.pathExists)
@@ -495,7 +512,7 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
     let usesSorry := fun (info : ConstantInfo) =>
       (info.value?.map (·.getUsedConstants.contains ``sorryAx)).getD false
     let foreign := (env.header.modules.zip env.header.moduleData).flatMap fun (module, data) =>
-      if project.role? module.module == some .worldSpec then
+      if Role.ofName module.module == .worldSpec then
         (data.constants.filter (isExtern env ·.name)).map (·.name)
       else #[]
     let holes := (declared.filter fun info => !info.isTheorem && usesSorry info).map (·.name)
@@ -550,10 +567,21 @@ def readChallenge (project : Project) (challenge : Name) (olean : System.FilePat
       match preconditioned.find? (·.headline == headline), env.find? witness with
       | some preconditions, some info => preconditions.witnessedBy info.type
       | _, _ => false
+    let moduleOf := fun (name : Name) => (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
+    let unfoldedBy ← Meta.MetaM.run' <| headlines.filterMapM fun name => do
+      let some info := env.find? name | return none
+      return some (name, ← Telescope.unfoldedDefinitions info.type)
+    let exposed ← exposedBodies (unfoldedBy.flatMap fun (_, definitions) => definitions.toArray.filterMap moduleOf)
+    let unexposed ← unfoldedBy.filterMapM fun (name, definitions) => do
+      let hidden ← (definitions.filter (!exposed.contains ·)).toArray.filterMapM fun definition => do
+        let some module := moduleOf definition | return none
+        let line := ((← findDeclarationRangesCore? definition).map (·.selectionRange.pos.line)).getD 0
+        return some { name := definition, module, line : Unexposed }
+      return if hidden.isEmpty then none else some (name, hidden)
     let unmarked := headlines.flatMap fun headline =>
       (headlines.filter (kills env replaceable headline)).map (·, headline)
     return { found with
-      preconditioned, rendered, hypotheses, templates, unmarked
+      preconditioned, rendered, hypotheses, templates, unmarked, unexposed
       fixed := headlines.filter fun name => !templates.any (·.1 == name) && !unmarked.any (·.1 == name)
       misshapenWitnesses := derived.filter fun (witness, headline) => !witnessed witness headline
       misshapen := found.kills.filter fun (kill, headline) => !headlines.contains headline ||
@@ -977,8 +1005,12 @@ def meaningful (facts : Facts) : Array String :=
     if auxiliaries.any (isPrivateName ·.name) then some name else none
   let settled := fun (name : Name) => duplicates.any (·.1 == name) || unreproducible.contains name
   let candidates := ", ".intercalate (challenge.headlines.map written).toList
-  let exposeFix := fun (headline : Name) => s!"Mark each `Prop` definition in the statement of {headline} \
-    `@[expose]` in its CoreSpec or WorldSpec module, delete owned.lock if there is one, {buildNext}."
+  let exposeFix := fun (headline : Name) =>
+    let hidden := (challenge.unexposedOf headline).map fun definition =>
+      s!"`def {lastOf definition.name}` at {facts.fileOf definition.module}:{definition.line}"
+    if hidden.isEmpty then s!"State each precondition of {headline} as a hypothesis of its own in {file}, delete \
+      owned.lock if there is one, {buildNext}."
+    else s!"Mark {" and ".intercalate hidden.toList} `@[expose]`, delete owned.lock if there is one, {buildNext}."
   let templateOf := fun (name : Name) =>
     ((challenge.templates.find? (·.1 == name)).map (·.2)).getD s!"¬ ({(challenge.renderedOf name).1})"
   let replacedIn := fun (name : Name) =>
@@ -987,7 +1019,7 @@ def meaningful (facts : Facts) : Array String :=
     if holes.isEmpty then "each foreign function it mentions" else " and ".intercalate (holes.map toString).toList
   (duplicates.map fun (later, earlier) =>
     s!"{here later}: {later} states the same as {earlier} ({here earlier}), up to binder names, so it claims \
-      nothing new. Remove {later} and its kills and witnesses from {file}, {buildNext}.") ++
+      nothing new. Remove {later} and its kills from {file}, {buildNext}.") ++
   ((challenge.fixed.filter (!settled ·)).map fun headline =>
     s!"{here headline}: {headline} mentions no hole or foreign function, so no implementation can make it false, \
       and no kill can show that it rejects one. State it about a hole, or move it to a CoreSpec module as a \

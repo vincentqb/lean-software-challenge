@@ -36,13 +36,16 @@ private def abbreviates (name : Name) : MetaM Bool := do
   unless !isWorldClaim env name && roleOf env name matches .coreSpec | .worldSpec do return false
   forallTelescopeReducing info.type fun _ result => return (← whnf result).isProp
 
-partial def unfolded (type : Expr) : MetaM Expr :=
+partial def unfolding (type : Expr) : MetaM (Expr × List Name) :=
   forallTelescope type fun binders body => do
     let body := body.consumeMData
-    let .const name _ := body.getAppFn | return type
-    unless ← abbreviates name do return type
-    let some expanded ← delta? body (· == name) | return type
-    mkForallFVars binders (← unfolded expanded)
+    let .const name _ := body.getAppFn | return (type, [])
+    unless ← abbreviates name do return (type, [])
+    let some expanded ← delta? body (· == name) | return (type, [])
+    let (meaning, inner) ← unfolding expanded
+    return (← mkForallFVars binders meaning, name :: inner)
+
+def unfolded (type : Expr) : MetaM Expr := return (← unfolding type).1
 
 def summarize (replaceable : Name → Bool) (binders : Array Expr) : MetaM (Array Binder) := do
   let env ← getEnv
@@ -50,18 +53,27 @@ def summarize (replaceable : Name → Bool) (binders : Array Expr) : MetaM (Arra
   let mut summary := #[]
   for (binder, index) in binders.zipIdx do
     let type := types[index]!
+    let meaning ← unfolded type
     let depended := (types.extract (index + 1) types.size).any (·.containsFVar binder.fvarId!)
     let kind ← if depended || !(← isProp type) then pure BinderKind.input
-      else if isWorldClaim env (conclusionHead type) then pure .claim
+      else if isWorldClaim env (conclusionHead meaning) then pure .claim
       else pure .precondition
     summary := summary.push {
       kind
-      mentions := type.getUsedConstants.any replaceable
+      mentions := meaning.getUsedConstants.any replaceable
       refers := (List.range index).filter fun earlier => type.containsFVar binders[earlier]!.fvarId! }
   return summary
 
 def summaries (replaceable : Name → Bool) (type : Expr) : MetaM (List Binder) := do
   forallTelescope (← unfolded type) fun binders _ => return (← summarize replaceable binders).toList
+
+def unfoldedDefinitions (type : Expr) : MetaM (List Name) := do
+  let (meaning, outer) ← unfolding type
+  forallTelescope meaning fun binders _ => do
+    let mut found := outer
+    for binder in binders do
+      found := found ++ (← unfolding (← inferType binder)).2
+    return found.eraseDups
 
 def witnessStatement (binders : Array Expr) (summary : Array Binder) : MetaM Expr := do
   let kept := kept summary.toList

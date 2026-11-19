@@ -354,7 +354,7 @@ run_cmd Elab.Command.liftTermElabM do
     statements := ← statements #[fixture `identity_fixed, fixture `identity_fixed_again, fixture `identity_three] }
   let repeated := Audit.meaningful { challenge := restated }
   expect repeated "identity_fixed_again states the same as SoftwareChallengeTests.Fixtures.identity_fixed"
-    "Remove SoftwareChallengeTests.Fixtures.identity_fixed_again and its kills and witnesses from Challenge.lean"
+    "Remove SoftwareChallengeTests.Fixtures.identity_fixed_again and its kills from Challenge.lean"
   if repeated.any (contains · "identity_three states") then
     throwError "A headline with a different statement was reported as a duplicate: {repeated}"
   if repeated.any (contains · "identity_fixed_again has no kill") then
@@ -466,7 +466,7 @@ run_cmd Elab.Command.liftTermElabM do
       member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero,
       member `double_negative_vanishes, member `double_nonnegative_vanishes, member `double_vanishes_only_at_zero,
       member `double_zero_fin, member `double_first, member `double_fin, member `double_under_claim, member `double_at,
-      member `double_odd, member `succ_law] do
+      member `double_assumes_wrapped, member `double_hidden, member `double_odd, member `succ_law] do
     throwError "A kill or a witness was read as a headline: {read.headlines}"
   let derived := [
     (`double_halves, ← `(∃ n, double n = 4)),
@@ -479,7 +479,8 @@ run_cmd Elab.Command.liftTermElabM do
     (`double_first, ← `(∃ (n : Nat) (h : 0 < double n), (⟨0, h⟩ : Fin (double n)).val = 0)),
     (`double_fin, ← `(∃ _ : Fin (double 2), True)),
     (`double_under_claim, ← `((∀ m, m > 0 → SuccAt m) → ∃ n, double n < 5)),
-    (`double_at, ← `(∃ n, double n = 1))]
+    (`double_at, ← `(∃ n, double n = 1)),
+    (`double_hidden, ← `(∃ n, double n = 4))]
   unless read.witnesses == ((derived.map fun (headline, _) => (witnessName (member headline), member headline)).toArray.push
       (member `double_odd_applies, member `double_odd)) do
     throwError "The witnesses were misread: {read.witnesses}"
@@ -496,30 +497,51 @@ run_cmd Elab.Command.liftTermElabM do
         read.namespaceOf witness == `SoftwareChallengeTests.Fixtures.WitnessChallenge do
       throwError "{witness} is written as {read.writtenOf witness} in {read.namespaceOf witness}"
   for name in [`double_small, `double_zero, `double_vanishes_only_at_zero, `double_nonnegative_vanishes, `double,
-      `succ_law] do
+      `succ_law, `double_assumes_wrapped] do
     if (← getEnv).contains (witnessName (member name)) then
       throwError "{witnessName (member name)} was derived, though {name} needs none or its kill cannot unfold it"
-  unless read.predeclared == #[(member `double_odd_applies, member `double_odd)] && read.misshapenWitnesses.isEmpty do
+  unless read.predeclared == #[(member `double_odd_applies, member `double_odd)] &&
+      read.misshapenWitnesses == #[(member `double_hidden_applies, member `double_hidden)] do
     throwError "A stated or a derived witness was misjudged: {read.predeclared} {read.misshapenWitnesses}"
+  unless (read.unexposedOf (member `double_hidden)).map (·.name) == #[fixture `NonnegativeVanishes] &&
+      (read.unexposedOf (member `double_hidden)).map (·.line) == #[18] &&
+      (read.unexposedOf (member `double_negative_vanishes)).isEmpty do
+    throwError "The definitions a statement hides from its kills were misread: {read.unexposed.map (·.1)}"
   for (name, binders) in [(`double_fin, [{ kind := .input, mentions := true, refers := [] }]),
       (`double_first, [{ kind := .input, mentions := false, refers := [] }, { kind := .input, mentions := true, refers := [0] },
         { kind := .precondition, mentions := true, refers := [0, 1] }]),
       (`double_zero_fin, [{ kind := .input, mentions := false, refers := [] }, { kind := .input, mentions := false, refers := [0] },
         { kind := .precondition, mentions := true, refers := [0, 1] }]),
       (`double_under_claim, [{ kind := .input, mentions := false, refers := [] }, { kind := .claim, mentions := false, refers := [] },
-        { kind := .precondition, mentions := true, refers := [0] }])] do
+        { kind := .precondition, mentions := true, refers := [0] }]),
+      (`double_assumes_wrapped, [{ kind := .claim, mentions := false, refers := [] },
+        { kind := .input, mentions := false, refers := [] }])] do
     let found ← Telescope.summaries (· == member `double) (← getConstInfo (member name)).type
     unless found == binders do throwError "The binders of {name} were summarized as {repr found}"
+  let wrapped ← analysed (allEvidence (← getEnv)) (member `double_assumes_wrapped)
+  unless wrapped.assumptions.map (·.claim) == #[fixture `SuccAgrees] && wrapped.assumptions.map (·.checks) == #[2] &&
+      wrapped.unnamed.isEmpty do
+    throwError "A world claim a hypothesis wraps in a WorldSpec definition was not read as assumed: \
+      {wrapped.assumptions.map (·.claim)} {wrapped.unnamed}"
 
 run_cmd Elab.Command.liftTermElabM do
   let member := fun (name : Name) => fixture (`WitnessChallenge ++ name)
   let read ← Audit.readChallenge project (fixture `WitnessChallenge) (← findOLean (fixture `WitnessChallenge))
-  let errors := Audit.meaningful { challenge := read }
+    (← IO.FS.readFile "SoftwareChallengeTests/Fixtures/WitnessChallenge.lean")
+  let errors := Audit.meaningful
+    { challenge := read, files := #[(fixture `CoreSpec, "SoftwareChallengeTests/Fixtures/CoreSpec.lean")] }
+  let exposeFix := "Mark `def NonnegativeVanishes` at SoftwareChallengeTests/Fixtures/CoreSpec.lean:18 `@[expose]`, \
+    delete owned.lock if there is one, then run `lake build`."
   expect errors "double_nonnegative_vanishes has a precondition or input that mentions \
       SoftwareChallengeTests.Fixtures.WitnessChallenge.double, but its kills derived no \
-      SoftwareChallengeTests.Fixtures.WitnessChallenge.double_nonnegative_vanishes_applies"
-    "Mark each `Prop` definition in the statement of \
-      SoftwareChallengeTests.Fixtures.WitnessChallenge.double_nonnegative_vanishes `@[expose]`"
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double_nonnegative_vanishes_applies" exposeFix
+  let hidden := "Challenge.lean:96: `@[kills double_hidden]` derived \
+    SoftwareChallengeTests.Fixtures.WitnessChallenge.double_hidden_applies as \
+    `∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4`"
+  expect errors hidden "but the compiled statement of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_hidden \
+    calls for `∃ n n_1, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4 ∧ \
+    0 ≤ SoftwareChallengeTests.Fixtures.WitnessChallenge.double n_1`, so"
+  expect errors hidden exposeFix
   expect errors "double_odd_applies is stated in Challenge.lean, but `@[kills"
     "Delete theorem SoftwareChallengeTests.Fixtures.WitnessChallenge.double_odd_applies from Challenge.lean"
   if errors.any fun error => contains error "derived no" && !contains error "double_nonnegative_vanishes" ||
