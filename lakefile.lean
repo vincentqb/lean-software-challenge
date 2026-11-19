@@ -2,8 +2,8 @@ import Lake
 open Lean Lake DSL
 
 package «software_challenge» where
-  builtinLint := true
   fixedToolchain := true
+  lintDriver := "lint_challenge"
   testDriver := "test_challenge"
   testDriverArgs := #["SoftwareChallengeTests", "SoftwareChallengeReadTests", "real_runs"]
   leanOptions := #[
@@ -46,6 +46,10 @@ lean_exe «grade» where
 
 lean_exe «lsc-gate» where
   root := `SoftwareChallengeTests.Gate
+
+@[default_target]
+target statement pkg : Unit := do
+  return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())
 
 def placeIn (pkg : Package) (holds : String → Bool) : IO Json := do
   let lines ← if ← pkg.configFile.pathExists then do pure ((← IO.FS.readFile pkg.configFile).splitOn "\n") else pure []
