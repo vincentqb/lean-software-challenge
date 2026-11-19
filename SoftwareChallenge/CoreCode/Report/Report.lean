@@ -13,19 +13,12 @@ open Lean
 
 namespace Report
 
-private def commandOf : Next → String
-  | .build => "lake build"
-  | .lint => "lake lint"
-  | .test => "lake test"
-  | .comparator => "lake comparator"
-  | .replay => "lake script run software_challenge/replay"
-  | .grade commit => s!"lake exe grade {commit}"
-
 def item (message : Message) : String :=
-  let head := s!"{message.place.file}:{message.place.line}: {message.what}, {message.why}. "
   match message.fix.splitOn "\n\n" with
-  | fix :: block@(_ :: _) => head ++ s!"{fix}, then run `{commandOf message.next}`:\n\n{"\n\n".intercalate block}"
-  | _ => head ++ s!"{message.fix}, then run `{commandOf message.next}`."
+  | fix :: block@(_ :: _) =>
+    s!"{Message.cite message.place}: {message.what}, {message.why}. {fix}, then run `{message.next.command}`:\n\n" ++
+      "\n\n".intercalate block
+  | _ => message.render
 
 def listing (title : String) (items : Array String) : String :=
   "\n".intercalate (s!"{title}: {items.size}" :: items.toList.map fun item => "  " ++ item.replace "\n" "\n    ")
