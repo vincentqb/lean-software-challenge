@@ -1,0 +1,7 @@
+module
+
+import SoftwareChallengeReadTests.Lake
+import SoftwareChallengeReadTests.Files
+import SoftwareChallengeReadTests.Inventory
+import SoftwareChallengeReadTests.Challenge
+import SoftwareChallengeReadTests.Solution

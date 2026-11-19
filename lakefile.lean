@@ -23,6 +23,15 @@ lean_lib «SoftwareChallengeTests» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
+lean_lib «SoftwareChallengeFixtures» where
+  roots := #[]
+  globs := #[.submodules `SoftwareChallengeTests.Fixtures]
+  precompileModules := true
+  leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
+
+lean_lib «SoftwareChallengeReadTests» where
+  needs := #[`@/SoftwareChallengeFixtures:leanArts]
+
 def challengeUndeclared : String :=
   "lakefile.lean declares no lean_lib «Challenge», so Challenge.lean, which states the challenge, is not part of the \
     package. Add the line ``lean_lib «Challenge» where leanOptions := #[⟨`warn.sorry, false⟩]`` to lakefile.lean, \
@@ -962,7 +971,8 @@ def ladder (lake : String) (steps : List (System.FilePath × Array String)) : IO
   let template := root / "Examples" / "ConstantFolding"
   let slow := root / "SoftwareChallengeTests" / "SlowKills"
   let start ← IO.monoMsNow
-  let ladders := [[(root, #["build"]), (root, #["build", "grade", "SoftwareChallengeTests"]), (root, #["lint"])],
+  let ladders := [[(root, #["build"]), (root, #["build", "grade", "SoftwareChallengeTests"]),
+      (root, #["build", "SoftwareChallengeReadTests"]), (root, #["lint"])],
     [(template, #["build"]), (template, #["lint"]), (template, #["test"])],
     [(slow, #["build"]), (slow, #["lint"]), (slow, #["test"]), (slow, #["script", "run", "software_challenge/replay"])],
     [(root, #["script", "run", "test_sandbox"])]]

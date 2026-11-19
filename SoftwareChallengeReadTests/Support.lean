@@ -1,0 +1,40 @@
+module
+
+public meta import SoftwareChallenge.Read
+
+public section
+meta section
+
+open Lean SoftwareChallenge SoftwareChallenge.Read
+
+namespace SoftwareChallengeReadTests
+
+def fixture (name : Name) : Name := `SoftwareChallengeTests.Fixtures ++ name
+
+def contains (text fragment : String) : Bool := (text.splitOn fragment).length > 1
+
+def lakeOf (modules : Array Name) (challenge? : Option Name := none) (inputs : Array String := #[]) :
+    IO LakeFacts := do
+  return {
+    packageDir := (← IO.currentDir).toString, repository? := none, configFiles := #["lakefile.lean"]
+    modules := modules.map fun module => ⟨module, sourcePath module⟩
+    challengeCandidates := (challenge?.map fun module => #[⟨module, sourcePath module⟩]).getD #[]
+    exeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := ""
+    testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs }
+
+def challengeNamed (module : Name) : IO ChallengeFacts := do
+  readChallenge (← lakeOf #[] (some module))
+
+def headlineNamed? (challenge : ChallengeFacts) (name : Name) : Option HeadlineFact :=
+  challenge.headlines.find? (·.target.constant.name == name)
+
+def declarationNamed? (inventory : Inventory) (module name : Name) : Option DeclarationFact :=
+  inventory.declarations.find? fun fact => fact.module == module && fact.name == name
+
+def refusal (action : IO Unit) : IO (Option String) :=
+  try action; pure none catch failure => pure (some (toString failure))
+
+def check (holds : Bool) (failure : String) : IO Unit := do
+  unless holds do throw <| .userError failure
+
+end SoftwareChallengeReadTests
