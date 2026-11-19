@@ -11,3 +11,7 @@ import SoftwareChallengeTests.Complete
 import SoftwareChallengeTests.Grade
 import SoftwareChallengeTests.Rules.Statement
 import SoftwareChallengeTests.Rules.StatementMessages
+import SoftwareChallengeTests.Rules.Lint
+import SoftwareChallengeTests.Rules.LintMessages
+import SoftwareChallengeTests.Rules.LintReport
+import SoftwareChallengeTests.Rules.Test
