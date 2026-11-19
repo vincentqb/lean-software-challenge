@@ -19,4 +19,18 @@ structure Message where
   next : Next
   deriving BEq, Repr, Inhabited
 
+def Next.command : Next → String
+  | .build => "lake build"
+  | .lint => "lake lint"
+  | .test => "lake test"
+  | .comparator => "lake comparator"
+  | .replay => "lake script run software_challenge/replay"
+  | .grade commit => s!"lake exe grade {commit}"
+
+def Message.cite (place : Place) : String :=
+  s!"{place.file}:{place.line}"
+
+def Message.render (message : Message) : String :=
+  s!"{Message.cite message.place}: {message.what}, {message.why}. {message.fix}, then run `{message.next.command}`."
+
 end SoftwareChallenge

@@ -9,3 +9,5 @@ import SoftwareChallengeTests.Format
 import SoftwareChallengeTests.Graph
 import SoftwareChallengeTests.Complete
 import SoftwareChallengeTests.Grade
+import SoftwareChallengeTests.Rules.Statement
+import SoftwareChallengeTests.Rules.StatementMessages
