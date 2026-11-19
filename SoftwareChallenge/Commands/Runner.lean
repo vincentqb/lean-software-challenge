@@ -10,7 +10,7 @@ open Lean Elab Command
 
 namespace SoftwareChallenge
 
-structure CheckOutcome where
+structure CheckRun where
   file : String
   line : Nat
   claim : Name
@@ -35,7 +35,7 @@ def concurrently (actions : Array (IO Unit)) (jobs : Nat) : IO (Array (Nat × Ex
   for task in workers do IO.ofExcept task.get
   return ((← results.get).qsort (·.1 < ·.1)).map fun (_, elapsed, outcome) => (elapsed, outcome)
 
-def runAllChecks (modules : Array (Name × String)) (jobs : Option Nat := none) : CoreM (Array CheckOutcome) := do
+def runAllChecks (modules : Array (Name × String)) (jobs : Option Nat := none) : CoreM (Array CheckRun) := do
   let env ← getEnv
   let mut found := #[]
   for evidence in allEvidence env do
@@ -51,14 +51,14 @@ def runAllChecks (modules : Array (Name × String)) (jobs : Option Nat := none) 
       | .ok _ => none
       | .error error => some (toString error) }
 
-def CheckOutcome.failure? (run : CheckOutcome) : Option String :=
+def CheckRun.failure? (run : CheckRun) : Option String :=
   run.error.map fun error => s!"{run.file}:{run.line}: the Check of {run.claim} failed: {error}. A Check tests a \
     world claim against the real foreign code, so either the Check is wrong or {run.claim} is false. Fix the Check; \
     if {run.claim} is false, the statement assumes something false: remove {run.claim} from the headlines of \
     Challenge.lean and from its WorldSpec module, delete owned.lock, and run `lake build` to record the new \
     statement. Then run `lake test`."
 
-def timings (runs : Array CheckOutcome) : Array String :=
+def timings (runs : Array CheckRun) : Array String :=
   (runs.qsort (·.elapsed > ·.elapsed)).map fun run =>
     s!"{run.file}:{run.line} {run.claim}  {run.elapsed / 1000}.{run.elapsed % 1000 / 100} s"
 
