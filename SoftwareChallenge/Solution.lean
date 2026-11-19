@@ -6,3 +6,4 @@ public import SoftwareChallenge.Solution.Match
 public import SoftwareChallenge.Solution.OfExpr
 public import SoftwareChallenge.Solution.Format
 public import SoftwareChallenge.Solution.Graph
+public import SoftwareChallenge.Solution.Grade

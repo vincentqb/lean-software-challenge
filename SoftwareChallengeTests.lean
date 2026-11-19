@@ -8,3 +8,4 @@ import SoftwareChallengeTests.Match
 import SoftwareChallengeTests.Format
 import SoftwareChallengeTests.Graph
 import SoftwareChallengeTests.Complete
+import SoftwareChallengeTests.Grade

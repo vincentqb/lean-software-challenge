@@ -107,6 +107,8 @@ def addFileTraces (pkg : Package) (files : List String) : JobM Unit := do
   for file in files do
     if ← (pkg.dir / file).pathExists then addTrace (← BuildTrace.compute (TextFilePath.mk (pkg.dir / file)))
 
+def statementDir (pkg : Package) : System.FilePath := pkg.buildDir / "softwareChallenge" / "statement"
+
 package_facet softwareChallengeStatement pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error auditMissing
   let challenge ← match ← challengeOf pkg with | .ok challenge => pure challenge | .error message => error message
@@ -130,8 +132,8 @@ package_facet softwareChallengeStatement pkg : Unit := do
     unless current.isSome && current == previous && (← (pkg.dir / "owned.lock").pathExists) do
       if ← (report.addExtension "trace").pathExists then IO.FS.removeFile (report.addExtension "trace")
     buildUnlessUpToDate report (← getTrace) (report.addExtension "trace") do
-      let olean := pkg.buildDir / "softwareChallenge" / "statement" / "Challenge.olean"
-      IO.FS.createDirAll (pkg.buildDir / "softwareChallenge" / "statement")
+      let olean := statementDir pkg / "Challenge.olean"
+      IO.FS.createDirAll (statementDir pkg)
       let compiled ← IO.Process.output {
         cmd := (← getLean).toString
         args := #[challenge.leanFile.toString, "-o", olean.toString] ++ challenge.leanOptions.values.foldl
@@ -374,14 +376,33 @@ script replay do
     return 1
   replayEach (← getLake).toString pkg.dir pkg.buildDir
 
-script grade_packages do
+script grade_base do
   let workspace ← getWorkspace
   let entries ← (workspace.packages.filter (!·.isRoot)).mapM fun pkg => do
     return Json.mkObj [("type", "path"), ("scope", toJson pkg.scope), ("name", toJson pkg.baseName),
       ("manifestFile", toJson pkg.relManifestFile.toString), ("inherited", toJson false),
       ("dir", toJson (← IO.FS.realPath pkg.dir).toString), ("copy", toJson false),
       ("configFile", toJson pkg.relConfigFile.toString)]
-  IO.println (Json.mkObj [("version", "1.3.0"), ("packages", toJson entries)]).pretty
+  IO.println (Json.mkObj [("overrides", Json.mkObj [("version", "1.3.0"), ("packages", toJson entries)]),
+    ("statement", toJson (← IO.FS.realPath (statementDir (← getRootPackage))).toString)]).pretty
+  return 0
+
+script grade_modules (args) do
+  let workspace ← getWorkspace
+  let root ← getRootPackage
+  let mut found : Array Lake.Module := #[]
+  for name in args do
+    let some mod := workspace.findModule? name.toName | continue
+    unless mod.pkg.keyName == root.keyName || found.any (·.name == mod.name) do
+      if ← mod.leanFile.pathExists then found := found.push mod
+  let pinned ← runBuild do
+    let mut pinned := #[]
+    for mod in found do
+      let closure ← (← mod.transImports.fetch).await
+      unless closure.any (·.pkg.keyName == root.keyName) do
+        pinned := pinned.push #[mod.pkg.baseName.toString, mod.name.toString]
+    return Job.pure pinned
+  IO.println (Json.mkObj [("targets", toJson pinned)]).compress
   return 0
 
 script grade_candidate (args) do
@@ -389,43 +410,45 @@ script grade_candidate (args) do
   let pkg ← getRootPackage
   let commit := args.headD "the candidate"
   let again := s!"then run `lake exe grade {commit}` from the base checkout"
-  let hidden ← hiddenFromSandbox (← getWorkspace) pkg
-  for (name, dir, real) in hidden do
-    let move := if sandboxCovers.any (within real ·) then "" else s!", such as its real path {real}"
-    IO.eprintln s!"cannot judge: the comparator's sandbox hides package {name} at {dir}, because it mounts empty \
-      directories over /home, /root, /run, /tmp, and /var, so `lake comparator` cannot build {commit}. In \
-      lakefile.lean, require {name} from git or from a directory outside those{move}, delete owned.lock, run \
-      `lake build`, and commit, {again}."
-  unless hidden.isEmpty do return 3
-  if let some line ← builtinLintLine pkg then
-    IO.eprintln s!"cannot judge: lakefile.lean:{line} sets `builtinLint := true`, so `lake lint` fails on every \
-      candidate, since it runs Lean's linters itself. In the base, remove that line, delete owned.lock, run \
-      `lake build`, and commit; merge that commit into {commit}, {again}."
-    return 3
   let refuse (step : String) : ScriptM UInt32 := do
     IO.eprintln s!"refused: `{step}` fails on {commit}, as printed above. Fix what it reports in {commit}, {again}."
     return 10
-  unless (← (← IO.Process.spawn { cmd := lake, args := #["build"], cwd := pkg.dir }).wait) == 0 do
-    return ← refuse "lake build"
-  match ← lintChallenge pkg with
-  | 0 => pure ()
-  | 2 =>
-    IO.eprintln s!"refused: {commit} is not complete: `lake lint` lists pending items above. Finish them in \
-      {commit}, {again}."
-    return 10
-  | _ => return ← refuse "lake lint"
-  unless (← runChecks lake pkg) == 0 do return ← refuse "lake script run software_challenge/run_checks"
-  let own ← if pkg.testDriver == "software_challenge/test_challenge" then ownTests pkg pkg.testDriverArgs.toList
-    else if pkg.testDriver.isEmpty then pure 0
-    else (← IO.Process.spawn { cmd := lake, args := #["test"], cwd := pkg.dir }).wait
-  unless own == 0 do
-    IO.eprintln s!"refused: the package's own tests fail on {commit}, as printed above. Fix them in {commit}, \
-      {again}."
-    return 10
-  return 0
+  match args.drop 1 with
+  | ["build"] =>
+    unless (← (← IO.Process.spawn { cmd := lake, args := #["build"], cwd := pkg.dir }).wait) == 0 do
+      return ← refuse "lake build"
+    return 0
+  | ["lint"] =>
+    if let some line ← builtinLintLine pkg then
+      IO.eprintln s!"cannot judge: lakefile.lean:{line} sets `builtinLint := true`, so `lake lint` fails on every \
+        candidate, since it runs Lean's linters itself. In the base, remove that line, delete owned.lock, run \
+        `lake build`, and commit; merge that commit into {commit}, {again}."
+      return 3
+    match ← lintChallenge pkg with
+    | 0 => return 0
+    | 2 =>
+      IO.eprintln s!"refused: {commit} is not complete: `lake lint` lists pending items above. Finish them in \
+        {commit}, {again}."
+      return 10
+    | _ => refuse "lake lint"
+  | ["test"] =>
+    unless (← runChecks lake pkg) == 0 do return ← refuse "lake script run software_challenge/run_checks"
+    let own ← if pkg.testDriver == "software_challenge/test_challenge" then ownTests pkg pkg.testDriverArgs.toList
+      else if pkg.testDriver.isEmpty then pure 0
+      else (← IO.Process.spawn { cmd := lake, args := #["test"], cwd := pkg.dir }).wait
+    unless own == 0 do
+      IO.eprintln s!"refused: the package's own tests fail on {commit}, as printed above. Fix them in {commit}, \
+        {again}."
+      return 10
+    return 0
+  | _ =>
+    IO.eprintln s!"usage: `lake script run software_challenge/grade_candidate <commit> (build | lint | test)` runs \
+      one of the steps `lake exe grade` judges a candidate by; got {args}. Run `lake exe grade <commit>` from the \
+      base checkout."
+    return 3
 
 lean_exe «grade» where
-  root := `SoftwareChallenge.Grade
+  root := `SoftwareChallenge.Steps.Grade
 
 def replayTimes (report : String) : Array (String × Nat) :=
   (report.splitOn "\n").toArray.filterMap fun line =>
@@ -811,9 +834,9 @@ script test_matrix do
       if code != expected then
         failed := true
         IO.eprintln s!"lake exe grade on {name} exited {code}, expected {expected}, as the log below shows, so grade \
-          no longer decides that case as the matrix states. Restore what decided it in SoftwareChallenge/Grade.lean or \
-          grade_candidate in lakefile.lean, or change its expectation in lakefile.lean if the guarantee changed, then \
-          run `lake test`.\n{log}"
+          no longer decides that case as the matrix states. Restore what decided it in \
+          SoftwareChallenge/Steps/Grade.lean or grade_candidate in lakefile.lean, or change its expectation in \
+          lakefile.lean if the guarantee changed, then run `lake test`.\n{log}"
       rows := rows.push s!"- {name}: exit {code}{if code == expected then "" else s!", expected {expected}"}"
     IO.FS.writeFile (lsc / ".lake" / "build" / "grade.md") ("\n".intercalate rows.toList ++ "\n")
     IO.println ("\n".intercalate rows.toList)
