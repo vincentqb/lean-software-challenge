@@ -10,6 +10,7 @@ namespace Test
 
 inductive Failure where
   | checkFailed (outcome : CheckOutcome)
+  | nativeCodeMissing (outcome : CheckOutcome) (declaration : String) (place : Place)
   | checkNotRun (check : CheckFact)
   | ownTest (run : OwnTestRun)
   | ownTestNotRun (test : OwnTestFact)

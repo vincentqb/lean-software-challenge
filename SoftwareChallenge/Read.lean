@@ -23,9 +23,9 @@ def challengeOf? (lake : LakeFacts) : Option SourceFact :=
 
 def readChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do
   let some candidate := challengeOf? lake | return emptyChallenge .anonymous ""
-  let env ← challengeEnv lake candidate.module next
-  let challenge ← challengeFacts lake candidate env next
-  requireChallengeCensus env challenge next
+  let imported ← challengeEnv lake candidate.module next
+  let challenge ← challengeFacts lake candidate imported next
+  requireChallengeCensus imported.env challenge next
   return challenge
 
 def readSolution (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) : IO SolutionFacts := do
@@ -34,11 +34,16 @@ def readSolution (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) :
   requireCatalogCensus imported lake (catalog lake challenge.module) solution next
   return solution
 
+def readListedChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do
+  let challenge ← readChallenge lake next
+  requireClosureCensus lake challenge next
+  return challenge
+
 def readStatement (lake : LakeFacts) (next : Next) : IO (FileFacts × ChallengeFacts) :=
-  return (← fileFacts lake next, ← readChallenge lake next)
+  return (← fileFacts lake next, ← readListedChallenge lake next)
 
 def readFacts (lake : LakeFacts) (next : Next) : IO Facts := do
-  let challenge ← readChallenge lake next
+  let challenge ← readListedChallenge lake next
   return { lake, files := ← fileFacts lake next, challenge, solution := ← readSolution lake challenge next }
 
 end SoftwareChallenge.Read

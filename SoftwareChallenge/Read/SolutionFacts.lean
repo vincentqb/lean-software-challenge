@@ -114,11 +114,7 @@ def solutionFacts (lake : LakeFacts) (challenge : ChallengeFacts) (imported : Im
       premiseUses
       claimUses := ← claimUses challenge evidence
       checks := evidence.map (·.2)
-      registrations := modules.flatMap fun module =>
-        (PersistentEnvExtension.getModuleEntries claimsExt env module.index).map fun claim =>
-          let home? := moduleOf? env claim
-          { claim, module := module.name, home?
-            place := if home? == some module.name then module.place env claim else { file := module.file, line := 0 } }
+      registrations := registrationsOf env modules
       lints := modules.flatMap (lintsOf env)
       linted := linted.map (·.name)
       sorries := owned.filterMap fun (module, info) =>
@@ -127,9 +123,7 @@ def solutionFacts (lake : LakeFacts) (challenge : ChallengeFacts) (imported : Im
       fixpoints := (owned.filter fun (_, info) => fixpoint env info.name).map (·.2.name)
       main? := (owned.find? fun (_, info) => info.name == `main).map fun (module, info) =>
         (module.name, module.place env info.name)
-      places := owned.filterMap fun (module, info) => (rangesIn env module.index info.name).map fun ranges =>
-        { name := info.name, place := { file := module.file, line := ranges.range.pos.line }
-          written := textAt module.source ranges.selectionRange
-          firstLine := lineAt module.source ranges.range.pos.line } }
+      places := placesOf env modules
+      parents := parentsOf env modules }
 
 end SoftwareChallenge.Read

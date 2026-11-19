@@ -32,9 +32,13 @@ inductive Error where
   | terminatesNotHole (headline definition : Name)
   | terminatesWithoutKill (headline definition : Name)
   | terminatesUnmentioned (headline definition : Name)
-  | unnamedHypothesis (headline : Name) (hypothesis : String)
+  | unnamedHypothesis (headline : Name) (hypothesis : BinderFact)
   | privateAuxiliary (headline auxiliary : Name)
   | codeInClosure (module : Name)
+  | ownedViolation (violation : Violation)
+  | specImport (module : Name) (dependency : ImportFact)
+  | ownedClaim (registration : RegistrationFact)
+  | derivedPartial (declaration module : Name)
   | witnessMissing (headline : Name)
   | witnessPredeclared (witness headline : Name)
   | unplainName (name : Name)
@@ -102,10 +106,10 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
   headlinesDistinct : (challenge.headlines.toList.map (·.target.constant.type)).Nodup
   holesMentioned : ∀ hole ∈ challenge.holes,
     ∃ headline ∈ challenge.headlines, headline.target.constant.type.Mentions hole.constant.name
-  hypothesesClaimed : ∀ headline ∈ challenge.headlines, ∀ binder ∈ headline.binders,
-    binder.kind = .precondition → binder.refers ≠ []
+  hypothesesClaimed : ∀ headline ∈ challenge.headlines, ∀ index binder, headline.telescope[index]? = some binder →
+    headline.Precondition challenge.claims index → binder.Open index
   preconditionsWitnessed : ∀ headline ∈ challenge.headlines,
-    (∃ binder ∈ headline.binders, binder.kind ≠ .claim ∧ binder.mentions = true) →
+    (∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index) →
       ∃ witness ∈ challenge.witnesses, witness.headline = headline.target.constant.name
   witnessesDerived : ∀ witness ∈ challenge.witnesses, witness.derived = true
   terminatesNamesHole : ∀ termination ∈ challenge.terminating,
@@ -115,6 +119,12 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
       ∃ kill ∈ challenge.kills, kill.headline = termination.headline
   terminatesMentionsHole : ∀ termination ∈ challenge.terminating, ∀ headline ∈ challenge.headlines,
     headline.target.constant.name = termination.headline → headline.target.constant.type.Mentions termination.definition
+  ownedAdmitted : lake.project.Admits (challenge.owned.inventory.restrictedTo challenge.owns)
+  specImportsOwned : ∀ fact ∈ challenge.owned.inventory.modules, (Role.ofName fact.name).Owned →
+    ∀ dependency ∈ fact.imports, lake.Builds dependency.name → challenge.Owns dependency.name
+  ownedClaimsDeclared : ∀ registration ∈ challenge.owned.registrations, challenge.Owns registration.module →
+    registration.home? = some registration.module ∧ lake.project.role? registration.module = some .worldSpec
+  ownedDerivedTotal : ∀ derived ∈ challenge.owned.derivedPartials, ¬ challenge.Owns derived.2
   ownedDigested : ∀ path, lake.Owned challenge path → files.Digested path
   lockCurrent : files.lock = .missing ∨ files.LockCurrent
 

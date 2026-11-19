@@ -2,6 +2,7 @@ module
 
 public meta import Lean
 public meta import SoftwareChallenge.CoreCode.Facts
+public meta import SoftwareChallenge.CoreCode.Rules.Statement
 public meta import SoftwareChallenge.Read.Source
 meta import all Lean.Environment
 
@@ -143,8 +144,8 @@ def importEnvironment (lake : LakeFacts) (roots : Array Name) (next : Next) : IO
         throw <| .userError ("\n".intercalate (outside.map (clashMessage lake imported · next)).toList)
       return imported
 
-def challengeEnv (lake : LakeFacts) (challenge : Name) (next : Next) : IO Environment :=
-  return (← importEnvironment lake #[challenge] next).env
+def challengeEnv (lake : LakeFacts) (challenge : Name) (next : Next) : IO Imported :=
+  importEnvironment lake (Statement.statementRoots lake challenge) next
 
 def catalogEnv (lake : LakeFacts) (challenge : Name) (next : Next) : IO Imported :=
   importEnvironment lake (catalog lake challenge) next

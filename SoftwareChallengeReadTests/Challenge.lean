@@ -10,7 +10,7 @@ open Lean SoftwareChallenge SoftwareChallenge.Read SoftwareChallengeReadTests
 
 def lastNames (names : Array Name) : Array String := names.map fun name => name.componentsRev.head!.toString
 
-def binder (kind : BinderKind) (mentions : Bool) (refers : List Nat) : Binder := { kind, mentions, refers }
+def binder (kind : BinderKind) (prop mentions : Bool) (refers : List Nat) : Binder := { kind, prop, mentions, refers }
 
 def headline (challenge : ChallengeFacts) (name : Name) : IO HeadlineFact :=
   match headlineNamed? challenge name with
@@ -56,7 +56,7 @@ run_cmd Elab.Command.liftCoreM do
       contains doubleEven.target.renderedExplicit "@HMod.hMod")
     s!"a headline was rendered otherwise: {doubleEven.target.rendered} {doubleEven.target.renderedExplicit}"
   let zero ← headline challenge (member `double_zero)
-  check (zero.killTemplate? == some "¬?wrong_double 0 = 0" && zero.binders.isEmpty)
+  check (zero.killTemplate? == some "¬?wrong_double 0 = 0" && zero.telescope.isEmpty)
     s!"a kill template was misread: {zero.killTemplate?}"
   check ((← headline challenge (member `double_one_rejects_one)).killTemplate?.isNone)
     "a headline that mentions no hole got a kill template"
@@ -82,7 +82,8 @@ run_cmd Elab.Command.liftCoreM do
     (`double_first, "∃ n h, ↑⟨0, h⟩ = 0", 72), (`double_fin, "∃ i, True", 77),
     (`double_under_claim, "(∀ (m : Nat), m > 0 → SoftwareChallengeTests.Fixtures.SuccAt m) → ∃ n, \
       SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 5", 81),
-    (`double_at, "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 1", 86),
+    (`double_at, "∃ n, SoftwareChallengeTests.Fixtures.SuccAt n → \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 1", 86),
     (`double_hidden, "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4", 96)]
   let expected := (derived.map fun (name, statement, line) =>
     (witnessName (member name), member name, true, statement, line, s!"{name}_applies")).toArray.push
@@ -97,24 +98,34 @@ run_cmd Elab.Command.liftCoreM do
     "a witness's namespace or signature was misread"
   check (challenge.kills.any fun kill => kill.headline == member `double && kill.target.constant.name ==
       member `double_rejects_nothing) "a kill of a hole, which is not a headline, was not read"
-  for (name, binders) in [(`double_fin, [binder .input true []]),
-      (`double_first, [binder .input false [], binder .input true [0], binder .precondition true [0, 1]]),
-      (`double_zero_fin, [binder .input false [], binder .input false [0], binder .precondition true [0, 1]]),
-      (`double_under_claim, [binder .input false [], binder .claim false [], binder .precondition true [0]]),
-      (`double_at, [binder .input false [], binder .claim false [0], binder .precondition true [0]]),
-      (`double_assumes_wrapped, [binder .claim true [], binder .input false []]),
-      (`double_negative_vanishes, [binder .input false [], binder .precondition true [0]]),
-      (`double_nonnegative_vanishes, [binder .input false [], binder .precondition true [0]]),
-      (`double_vanishes_only_at_zero, []), (`succ_law, [binder .claim true [], binder .input false []])] do
+  for (name, binders) in [(`double_fin, [binder .input false true []]),
+      (`double_first, [binder .input false false [], binder .input true true [0],
+        binder .precondition true true [0, 1]]),
+      (`double_zero_fin, [binder .input false false [], binder .input true false [0],
+        binder .precondition true true [0, 1]]),
+      (`double_under_claim, [binder .input false false [], binder .claim true false [],
+        binder .precondition true true [0]]),
+      (`double_at, [binder .input false false [], binder .claim true false [0], binder .precondition true true [0]]),
+      (`double_assumes_wrapped, [binder .claim true true [], binder .input false false []]),
+      (`double_negative_vanishes, [binder .input false false [], binder .precondition true true [0]]),
+      (`double_nonnegative_vanishes, [binder .input false false [], binder .precondition true true [0]]),
+      (`double_vanishes_only_at_zero, []), (`succ_law, [binder .claim true true [], binder .input false false []])] do
     let found ← headline challenge (member name)
-    check (found.binders == binders) s!"the binders of {name} were summarized as {repr found.binders}"
-  check ((← headline challenge (member `double_under_claim)).claims == #[(1, fixture `SuccAt,
+    check (found.binders challenge == binders)
+      s!"the binders of {name} were classified as {repr (found.binders challenge)}"
+  let underClaim ← headline challenge (member `double_under_claim)
+  check (underClaim.claimed challenge == #[(1, fixture `SuccAt,
       "∀ (m : Nat), m > 0 → SoftwareChallengeTests.Fixtures.SuccAt m")])
     "a world claim under ∀ and → was not read as a claim"
-  check ((← headline challenge (member `double_assumes_wrapped)).claims.map (·.2.1) == #[fixture `SuccAgrees])
-    "a world claim a WorldSpec definition wraps was not read as assumed"
+  check ((underClaim.telescope[1]?).map (fun binder => (binder.conclusion, binder.variables)) ==
+      some ("SoftwareChallengeTests.Fixtures.SuccAt m", #["m"]))
+    "the peeled conclusion or variables of a claim under ∀ and → were misread"
+  check (((← headline challenge (member `double_assumes_wrapped)).claimed challenge).map (·.2.1) ==
+      #[fixture `SuccAgrees]) "a world claim a WorldSpec definition wraps was not read as assumed"
+  check (challenge.claims.contains (fixture `SuccAgrees) && challenge.claims.contains (fixture `SuccAt))
+    "the world claims of the challenge's environment were misread"
   let hidden ← headline challenge (member `double_nonnegative_vanishes)
-  check (Telescope.needsWitness hidden.binders &&
+  check (Telescope.needsWitness (hidden.binders challenge) &&
       !challenge.witnesses.any (·.headline == hidden.target.constant.name) &&
       hidden.witness? == some "∃ n, 0 ≤ SoftwareChallengeTests.Fixtures.WitnessChallenge.double n")
     "a precondition that a hidden definition holds was not read as needing a witness that no kill derived"
@@ -132,16 +143,28 @@ run_cmd Elab.Command.liftCoreM do
   let member := fun (name : Name) => fixture (`KeptChallenge ++ name)
   let challenge ← challengeNamed (fixture `KeptChallenge)
   let positive ← headline challenge (member `double_positive_one)
-  check (positive.binders == [binder .precondition true []] &&
-      positive.unnamed == #["0 < SoftwareChallengeTests.Fixtures.KeptChallenge.double 1"])
-    s!"a hypothesis about a hole that mentions no input was misread: {positive.unnamed}"
-  check ((← headline challenge (member `double_kept)).binders == [binder .input false [], binder .input true [0],
-      binder .input true [0, 1], binder .precondition false [0]]) "a hypothesis a later input depends on was misread"
-  check ((← headline challenge (member `double_kept_plain)).binders == [binder .input false [],
-      binder .input false [0], binder .input false [0, 1], binder .precondition true [0]])
+  check (positive.binders challenge == [binder .precondition true true []] &&
+      (Statement.closedHypotheses challenge positive).map (·.shown) ==
+        ["0 < SoftwareChallengeTests.Fixtures.KeptChallenge.double 1"])
+    "a hypothesis about a hole that mentions no input was misread"
+  check (Statement.hypothesisErrors challenge == #[.unnamedHypothesis (member `double_positive_one)
+      (positive.telescope[0]!)] && Statement.witnessErrors challenge == #[])
+    "a hypothesis about a hole that mentions no input did not get exactly one fix"
+  check ((← headline challenge (member `double_kept)).binders challenge == [binder .input false false [],
+      binder .input true true [0], binder .input false true [0, 1], binder .precondition true false [0]])
+    "a hypothesis a later input depends on was misread"
+  check ((← headline challenge (member `double_kept_plain)).binders challenge == [binder .input false false [],
+      binder .input true false [0], binder .input false false [0, 1], binder .precondition true true [0]])
     "a plain hypothesis a later input depends on was misread"
-  check (challenge.witnesses.any fun witness => witness.headline == member `double_kept && witness.derived &&
-      witness.target.rendered == "∃ n h _x, n < 2") "the witness of double_kept does not keep its hypothesis input"
+  let witnessOf := fun (headline : Name) =>
+    (challenge.witnesses.find? fun witness => witness.headline == member headline && witness.derived).map
+      (·.target.rendered)
+  check (witnessOf `double_kept == some "∃ n h _x, n < 2")
+    "the witness of double_kept does not keep its hypothesis input"
+  check (witnessOf `double_kept_plain == some "∃ n h, SoftwareChallengeTests.Fixtures.KeptChallenge.double n < 2")
+    "the witness of double_kept_plain drops the hypothesis a later input depends on"
+  check (witnessOf `double_positive_one == some "0 < SoftwareChallengeTests.Fixtures.KeptChallenge.double 1")
+    "a hypothesis that mentions no input was dropped from the witness"
 
 run_cmd Elab.Command.liftCoreM do
   let member := fun (name : Name) => fixture (`StrayChallenge ++ name)
@@ -158,7 +181,7 @@ run_cmd Elab.Command.liftCoreM do
   check (#[(`Color, 21), (`triple, 25), (`Color._sizeOf_inst, 21), (`Color.rec, 0)].all fun (name, line) =>
       challenge.filled.any fun (found, place) => found == member name && place.line == line)
     "a declaration of the challenge was not placed at its own line, or a generated one at its owner's"
-  let env ← challengeEnv (← lakeOf #[] (some (fixture `StrayChallenge))) (fixture `StrayChallenge) .build
+  let env := (← challengeEnv (← lakeOf #[] (some (fixture `StrayChallenge))) (fixture `StrayChallenge) .build).env
   check (challengeMisses env challenge).isEmpty "the census found a constant of the challenge the facts miss"
   let dropped := { challenge with filled := challenge.filled.filter (·.1 != member `Color.rec) }
   check (challengeMisses env dropped == #[member `Color.rec]) "the census missed a constant the facts drop"

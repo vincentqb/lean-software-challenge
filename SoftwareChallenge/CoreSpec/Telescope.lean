@@ -10,6 +10,7 @@ inductive BinderKind where
 
 structure Binder where
   kind : BinderKind
+  prop : Bool
   mentions : Bool
   refers : List Nat
   deriving DecidableEq, Repr, Inhabited
@@ -17,25 +18,26 @@ structure Binder where
 namespace Telescope
 
 inductive Needed (binders : List Binder) : Nat → Prop where
-  | referredInput {index : Nat} {input referrer : Binder} :
-      binders[index]? = some input → input.kind = .input → referrer ∈ binders →
-      referrer.kind = .precondition → index ∈ referrer.refers → Needed binders index
+  | hypothesis {index : Nat} {binder : Binder} :
+      binders[index]? = some binder → binder.prop = true → Needed binders index
   | mentioningInput {index : Nat} {input : Binder} :
       binders[index]? = some input → input.kind = .input → input.mentions = true → Needed binders index
-  | referredPrecondition {index : Nat} {precondition referrer : Binder} :
-      binders[index]? = some precondition → precondition.kind = .precondition → referrer ∈ binders →
-      referrer.kind = .precondition → index ∈ referrer.refers → Needed binders index
+  | dependingInput {index earlier : Nat} {input held : Binder} :
+      binders[index]? = some input → input.kind = .input → earlier ∈ input.refers → binders[earlier]? = some held →
+      held.prop = true → held.mentions = true → Needed binders index
   | referredByNeeded {index needed : Nat} {binder : Binder} :
       Needed binders needed → binders[needed]? = some binder → index ∈ binder.refers →
       index < binders.length → Needed binders index
 
+def heldMentioning (binders : List Binder) (earlier : Nat) : Bool :=
+  match binders[earlier]? with
+  | some held => held.prop && held.mentions
+  | none => false
+
 def seeded (binders : List Binder) (index : Nat) : Bool :=
-  let referred := binders.any fun referrer => referrer.kind == .precondition && referrer.refers.contains index
   match binders[index]? with
-  | some binder => match binder.kind with
-    | .input => binder.mentions || referred
-    | .precondition => referred
-    | .claim => false
+  | some binder =>
+    binder.prop || binder.kind == .input && (binder.mentions || binder.refers.any (heldMentioning binders))
   | none => false
 
 def expand (binders : List Binder) (needed : List Nat) : List Nat :=
@@ -151,38 +153,29 @@ private theorem seeds_subset_close (binders : List Binder) (rounds : Nat) :
     rw [close_succ]
     exact fun _ member => subset_expand (close_bounded binders rounds) (ih member)
 
+private theorem heldMentioning_eq_true {binders : List Binder} {earlier : Nat} :
+    heldMentioning binders earlier = true ↔ ∃ held, binders[earlier]? = some held ∧ held.prop = true ∧
+      held.mentions = true := by
+  unfold heldMentioning
+  cases binders[earlier]? <;> simp
+
 private theorem needed_of_seeded {binders : List Binder} {index : Nat} (seed : seeded binders index = true) :
     Needed binders index := by
-  have referred : (binders.any fun referrer => referrer.kind == .precondition && referrer.refers.contains index) =
-      true → ∃ referrer ∈ binders, referrer.kind = .precondition ∧ index ∈ referrer.refers := by
-    simp
   unfold seeded at seed
   cases found : binders[index]? with
   | none => simp [found] at seed
   | some binder =>
-    simp only [found] at seed
-    cases kind : binder.kind with
-    | input =>
-      simp only [kind, Bool.or_eq_true] at seed
-      rcases seed with mentions | seed
-      · exact .mentioningInput found kind mentions
-      · obtain ⟨referrer, member, precondition, refers⟩ := referred seed
-        exact .referredInput found kind member precondition refers
-    | precondition =>
-      simp only [kind] at seed
-      obtain ⟨referrer, member, precondition, refers⟩ := referred seed
-      exact .referredPrecondition found kind member precondition refers
-    | claim => simp [kind] at seed
+    simp only [found, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, List.any_eq_true] at seed
+    rcases seed with prop | ⟨kind, mentions | ⟨earlier, refers, held⟩⟩
+    · exact .hypothesis found prop
+    · exact .mentioningInput found kind mentions
+    · obtain ⟨held, heldFound, heldProp, heldMentions⟩ := heldMentioning_eq_true.mp held
+      exact .dependingInput found kind refers heldFound heldProp heldMentions
 
 private theorem mem_kept_of_seeded {binders : List Binder} {index : Nat} {binder : Binder}
     (found : binders[index]? = some binder) (seed : seeded binders index = true) : index ∈ kept binders :=
   seeds_subset_close binders binders.length
     (List.mem_filter.mpr ⟨List.mem_range.mpr (List.getElem?_eq_some_iff.mp found).1, seed⟩)
-
-private theorem referred_of_mem {binders : List Binder} {index : Nat} {referrer : Binder} (member : referrer ∈ binders)
-    (precondition : referrer.kind = .precondition) (refers : index ∈ referrer.refers) :
-    (binders.any fun referrer => referrer.kind == .precondition && referrer.refers.contains index) = true :=
-  List.any_eq_true.mpr ⟨referrer, member, by simp [precondition, refers]⟩
 
 theorem kept_iff_needed (binders : List Binder) (index : Nat) :
     index ∈ kept binders ↔ Needed binders index := by
@@ -200,13 +193,16 @@ theorem kept_iff_needed (binders : List Binder) (index : Nat) :
       · exact .referredByNeeded (ih other inside) found refers bounded
   · intro needed
     induction needed with
-    | referredInput found kind member precondition refers =>
-      exact mem_kept_of_seeded found (by simp only [seeded, found, kind, referred_of_mem member precondition refers,
-        Bool.or_true])
+    | hypothesis found prop =>
+      exact mem_kept_of_seeded found (by simp only [seeded, found, prop, Bool.true_or])
     | mentioningInput found kind mentions =>
-      exact mem_kept_of_seeded found (by simp only [seeded, found, kind, mentions, Bool.true_or])
-    | referredPrecondition found kind member precondition refers =>
-      exact mem_kept_of_seeded found (by simp only [seeded, found, kind, referred_of_mem member precondition refers])
+      exact mem_kept_of_seeded found (by simp only [seeded, found, kind, mentions, beq_self_eq_true, Bool.true_or,
+        Bool.and_self, Bool.or_true])
+    | dependingInput found kind refers heldFound heldProp heldMentions =>
+      have held : heldMentioning binders _ = true := heldMentioning_eq_true.mpr ⟨_, heldFound, heldProp, heldMentions⟩
+      have listed := List.any_eq_true.mpr ⟨_, refers, held⟩
+      exact mem_kept_of_seeded found (by simp only [seeded, found, kind, listed, beq_self_eq_true, Bool.or_true,
+        Bool.and_self])
     | referredByNeeded _ found refers bounded ih =>
       exact kept_fixed binders (mem_expand.mpr ⟨bounded, .inr ⟨_, ih, _, found, refers⟩⟩)
 

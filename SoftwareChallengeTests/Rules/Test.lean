@@ -28,7 +28,7 @@ def ownExecutable : OwnTestFact := { name := "app_tests", kind := .executable, p
 def complete : TestFacts :=
   { declaredChecks := #[agrees, advances], checks := #[passed agrees 120, passed advances 1530],
     declaredOwnTests := #[ownScript, ownLibrary], ownTests := #[⟨ownScript, 0⟩, ⟨ownLibrary, 0⟩],
-    unknownOwnTests := #[] }
+    unknownOwnTests := #[], testDriverArgsPlace := ⟨"lakefile.lean", 8⟩, libraryPlace := ⟨"lakefile.lean", 14⟩ }
 
 #guard (Test.run complete).code == 0
 #guard (Test.run complete).failures.isEmpty
@@ -67,26 +67,32 @@ def ownNotRun : TestFacts := { complete with ownTests := #[⟨ownScript, 0⟩] }
 
 def unknown : TestFacts := { complete with unknownOwnTests := #["missing_test"] }
 
-#guard refuses unknown 1 (· matches .unknownOwnTest "missing_test" _)
+#guard refuses unknown 1 (· matches .unknownOwnTest "missing_test" ⟨"lakefile.lean", 8⟩)
 
 def failureTag : Test.Failure → Nat
   | .checkFailed _ => 0
-  | .checkNotRun _ => 1
-  | .ownTest _ => 2
-  | .ownTestNotRun _ => 3
-  | .unknownOwnTest _ _ => 4
+  | .nativeCodeMissing .. => 1
+  | .checkNotRun _ => 2
+  | .ownTest _ => 3
+  | .ownTestNotRun _ => 4
+  | .unknownOwnTest _ _ => 5
+
+def nativeError : String :=
+  "Could not find native implementation of external declaration 'App.nativeAdd' (symbols 'l_App_nativeAdd___boxed' \
+    or 'l_App_nativeAdd')"
 
 def samples : Array Test.Failure :=
-  #[.checkFailed { passed agrees 120 with error? := some "expected 3,\n  got 4" }, .checkNotRun agrees,
-    .ownTest ⟨ownScript, 2⟩, .ownTest ⟨ownLibrary, 1⟩, .ownTest ⟨ownExecutable, 3⟩, .ownTestNotRun ownLibrary,
-    .unknownOwnTest "missing_test" ⟨"lakefile.lean", 1⟩]
+  #[.checkFailed { passed agrees 120 with error? := some "expected 3,\n  got 4" },
+    .nativeCodeMissing { passed agrees 3 with error? := some nativeError } "App.nativeAdd" ⟨"lakefile.lean", 14⟩,
+    .checkNotRun agrees, .ownTest ⟨ownScript, 2⟩, .ownTest ⟨ownLibrary, 1⟩, .ownTest ⟨ownExecutable, 3⟩,
+    .ownTestNotRun ownLibrary, .unknownOwnTest "missing_test" ⟨"lakefile.lean", 8⟩]
 
 def follows (message : Message) : Bool :=
   let text := (Report.item message).toLower
   !message.place.file.isEmpty && message.place.line ≥ 1 && !message.what.isEmpty && !message.why.isEmpty &&
     !message.fix.isEmpty && !contains text " ask " && !contains text "owner" && message.next == .test
 
-#guard (List.range 5).all fun tag => samples.any (failureTag · == tag)
+#guard (List.range 6).all fun tag => samples.any (failureTag · == tag)
 #guard samples.all fun failure => follows (failure.message "Challenge.lean")
 
 def says (failure : Test.Failure) (fragments : List String) : Bool :=
@@ -106,17 +112,13 @@ def says (failure : Test.Failure) (fragments : List String) : Bool :=
   ["library AppTests, which testDriverArgs names, does not build", "Run `lake build AppTests`"]
 #guard says (.ownTest ⟨ownExecutable, 3⟩) ["executable app_tests, which testDriverArgs names, exited 3", "`lake exe app_tests`"]
 #guard says (.ownTestNotRun ownLibrary) ["library AppTests, which testDriverArgs names, did not run"]
-#guard says (.unknownOwnTest "missing_test" ⟨"lakefile.lean", 1⟩)
-  ["lakefile.lean:1: testDriverArgs names missing_test, but lakefile.lean declares no script, library, or executable \
+#guard says (.unknownOwnTest "missing_test" ⟨"lakefile.lean", 8⟩)
+  ["lakefile.lean:8: testDriverArgs names missing_test, but lakefile.lean declares no script, library, or executable \
     missing_test", "Declare `script missing_test do …` in lakefile.lean, or remove \"missing_test\" from \
     testDriverArgs", "delete owned.lock and run `lake build`"]
 
 #guard (Report.test "Challenge.lean" (Test.run failing)).size == 3
 #guard contains ((Report.test "Challenge.lean" (Test.run failing))[2]!) "the Check of App.AddAgrees failed"
-
-def nativeError : String :=
-  "Could not find native implementation of external declaration 'App.nativeAdd' (symbols 'l_App_nativeAdd___boxed' \
-    or 'l_App_nativeAdd')"
 
 def nativeMissing : TestFacts :=
   { complete with checks := #[{ passed agrees 3 with error? := some nativeError },
@@ -124,13 +126,14 @@ def nativeMissing : TestFacts :=
 
 #guard Test.nativeMissing? nativeError == some "App.nativeAdd"
 #guard Test.nativeMissing? "expected 3, got 4" == none
-#guard says (.checkFailed { passed agrees 3 with error? := some nativeError })
-  ["lakefile.lean:1: the Checks could not run: they call App.nativeAdd, an `@[extern]` declaration, whose native \
+#guard refuses nativeMissing 1 (· matches .nativeCodeMissing _ "App.nativeAdd" ⟨"lakefile.lean", 14⟩)
+#guard !(Test.run nativeMissing).failures.any (· matches .checkFailed _)
+#guard says (samples[1]!)
+  ["lakefile.lean:14: the Checks could not run: they call App.nativeAdd, an `@[extern]` declaration, whose native \
     code Lean's interpreter finds only in precompiled modules, and the package does not precompile them",
     "Add `precompileModules := true` to the package's default lean_lib in lakefile.lean, then delete owned.lock and \
       run `lake build`, then run `lake test`."]
-#guard !says (.checkFailed { passed agrees 3 with error? := some nativeError }) ["Fix the Check"]
-#guard (Test.run nativeMissing).code == 1
+#guard !says (samples[1]!) ["Fix the Check"]
 #guard ((Report.test "Challenge.lean" (Test.run nativeMissing)).filter (contains · "precompileModules")).size == 1
 
 end

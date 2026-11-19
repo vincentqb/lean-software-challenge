@@ -75,10 +75,9 @@ def witnessed : Facts := withChallenge fun challenge => { challenge with
 
 def twice : Facts := withChallenge fun challenge => { challenge with
   headlines := challenge.headlines.map fun headline => { headline with
-    binders := headline.binders ++ [⟨.claim, false, []⟩],
-    claims := headline.claims.push (2, `App.AddAgrees, "AddAgrees nativeAdd") } }
+    telescope := headline.telescope ++ [binderOf "again" agreesType true "AddAgrees nativeAdd"] } }
 
-#guard (Lint.assumed (twice.challenge.headlines[0]!)).map (·.binders) == #[#[1, 2]]
+#guard (Lint.assumed twice.challenge (twice.challenge.headlines[0]!)).map (·.binders) == #[#[1, 2]]
 #guard headlineLine { twice with solution := { solution with premiseUses := #[(`App.fold_correct, #[2])] } } ==
   "fold_correct  assumes AddAgrees (1 check)"
 #guard headlineLine { twice with solution := { solution with premiseUses := #[(`App.fold_correct, #[0])] } } ==
@@ -100,8 +99,7 @@ def idempotent : TargetFact :=
     "∀ (e : Expr), fold (fold e) = fold e"
 
 def idempotentHeadline : HeadlineFact :=
-  { target := idempotent, binders := [⟨.input, false, []⟩], claims := #[], unnamed := #[], mentions := #[`App.fold],
-    killTemplate? := none, witness? := none }
+  { target := idempotent, telescope := [binderOf "e" expr false "Expr"], killTemplate? := none, witness? := none }
 
 def replacement : Witnesses := [(`App.fold, .lam expr (.bvar 0))]
 

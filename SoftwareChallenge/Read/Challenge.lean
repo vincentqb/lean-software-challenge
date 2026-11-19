@@ -7,6 +7,8 @@ public meta import SoftwareChallenge.Read.Source
 public meta import SoftwareChallenge.Read.Files
 public meta import SoftwareChallenge.Read.Constants
 public meta import SoftwareChallenge.Read.Environment
+public meta import SoftwareChallenge.Read.Inventory
+public meta import SoftwareChallenge.CoreCode.Rules.Statement
 
 public section
 meta section
@@ -69,34 +71,58 @@ def Placed.before (earlier later : Placed) : Bool :=
     earlier.ranges.range.pos.line == later.ranges.range.pos.line &&
       earlier.ranges.range.pos.column < later.ranges.range.pos.column
 
+def binderFacts (locals : Array Expr) : MetaM (List BinderFact) := do
+  let mut found := #[]
+  for (binder, index) in locals.zipIdx do
+    let earlier := locals.extract 0 index
+    let type ← inferType binder
+    let meaning ← Telescope.unfolded type
+    let (conclusion, variables) ← forallTelescope meaning fun peeled body => do
+      let chosen ← peeled.filterMapM fun bound => do
+        if ← isProp (← inferType bound) then return none
+        return some (toString (← bound.fvarId!.getUserName).eraseMacroScopes)
+      return (← shown body, chosen)
+    found := found.push {
+      name := toString (← binder.fvarId!.getUserName).eraseMacroScopes
+      type := Shape.ofExpr (type.abstract earlier)
+      meaning := Shape.ofExpr (meaning.abstract earlier)
+      prop := ← isProp type
+      shown := ← shown type
+      conclusion, variables }
+  return found.toList
+
 def headlineFact (replaceable : Name → Bool) (holes foreign : Array Name) (target : TargetFact)
     (info : ConstantInfo) : MetaM HeadlineFact := do
   let used := info.type.getUsedConstants
   let replaced := if used.any holes.contains then used.filter holes.contains else used.filter foreign.contains
   let killTemplate? ← if replaced.isEmpty then pure none else some <$> killTemplate info.type replaced
   let witness? ← (← Telescope.witnessType replaceable info.type).mapM shown
-  forallTelescope (← Telescope.unfolded info.type) fun locals body => do
-    let summary ← Telescope.summarize replaceable locals
-    let mut claims := #[]
-    let mut unnamed := #[]
-    let mut meanings := #[body]
-    for (binder, index) in locals.zipIdx do
-      let type ← inferType binder
-      let meaning ← Telescope.unfolded type
-      meanings := meanings.push meaning
-      if let some summarized := summary[index]? then
-        if summarized.kind == .claim then claims := claims.push (index, conclusionHead meaning, ← shown type)
-        else if summarized.kind == .precondition && summarized.refers.isEmpty then
-          unnamed := unnamed.push (← shown type)
-    return { target, binders := summary.toList, claims, unnamed, mentions := usedNames meanings, killTemplate?,
-             witness? }
+  let telescope ← forallTelescope (← Telescope.unfolded info.type) fun locals _ => binderFacts locals
+  return { target, telescope, killTemplate?, witness? }
 
 def emptyChallenge (module : Name) (file : String) : ChallengeFacts :=
   { module, file, runtimeImports := #[], metaImports := #[], closure := #[], headlines := #[], kills := #[],
     witnesses := #[], holes := #[], filled := #[], axioms := #[], terminating := #[], replaceable := #[] }
 
-def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environment) (next : Next) :
+def ownedFacts (lake : LakeFacts) (challenge : Name) (imported : Imported) (next : Next) : IO OwnedFacts := do
+  let env := imported.env
+  let names := (lake.modules.map (·.module)).filter fun module =>
+    module != challenge && (env.getModuleIdx? module).isSome
+  let modules ← catalogModules lake names imported next
+  runIn env do
+    let read ← inventoryFacts modules #[]
+    return {
+      inventory := read.inventory
+      imports := modules.flatMap (·.imports)
+      blames := read.blames
+      registrations := registrationsOf env modules
+      derivedPartials := derivedPartialsOf env modules
+      places := placesOf env modules
+      parents := parentsOf env modules }
+
+def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (imported : Imported) (next : Next) :
     IO ChallengeFacts := do
+  let env := imported.env
   let some (index, data) := moduleData? env challenge.module
     | throw <| .userError s!"{challenge.file}:1: {challenge.module} did not load from its compiled module, so its \
         statements cannot be read. Run `lake build {challenge.module}`, then run `{next.command}`."
@@ -123,6 +149,7 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environmen
   let accounted := fun (info : ConstantInfo) =>
     targetNames.contains info.name || info.isAxiom || !isWritten info.name && auxiliaryNames.contains info.name
   let writtenOf := fun (placed : Placed) => textAt source placed.ranges.selectionRange
+  let owned ← ownedFacts lake challenge.module imported next
   runIn env do
     let targetOf := fun (placed : Placed) (writtenName : String) (derived : Bool) => do
       let (rendered, renderedExplicit) ← render placed.info.type
@@ -140,9 +167,8 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environmen
     for placed in theorems do
       if isKill placed.info.name || (derivedOf placed.info.name).isSome then continue
       let some headline := theorems.find? (witnessName ·.info.name == placed.info.name) | continue
-      unless killLinks.any (·.2 == headline.info.name) do continue
-      let binders ← Telescope.summaries replaceable.contains headline.info.type
-      if Telescope.needsWitness binders then statedWitnesses := statedWitnesses.push (placed.info.name, headline)
+      if killLinks.any (·.2 == headline.info.name) then
+        statedWitnesses := statedWitnesses.push (placed.info.name, headline)
     let mut headlines := #[]
     let mut kills := #[]
     let mut witnesses := #[]
@@ -179,6 +205,10 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environmen
       axioms := (data.constants.filter (·.isAxiom)).map fun info => (info.name, placeOf info.name)
       terminating := (moduleLinks env index .terminates).map fun (headline, definition) =>
         { definition, headline, place := placeOf headline }
-      replaceable }
+      replaceable
+      imports := (env.header.moduleNames.zip env.header.moduleData).map fun (module, data) =>
+        (module, data.imports.map (·.module))
+      claims := claimsExt.getState env
+      owned }
 
 end SoftwareChallenge.Read

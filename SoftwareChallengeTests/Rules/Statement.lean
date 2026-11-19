@@ -33,9 +33,15 @@ def targetOf (name : Name) (kind : ConstantKind) (type : Shape) (line : Nat) (wr
 
 def template : String := "¬ ∀ (n : Nat), App.Even (?wrong_double n)"
 
+def binderFact (name : String) (type : Shape) (prop : Bool) (shown : String) : BinderFact :=
+  { name, type, meaning := type, prop, shown, conclusion := shown, variables := #[] }
+
+def natBinder : BinderFact := binderFact "n" nat false "Nat"
+
+def equal (left right : Shape) : Shape := .app (.app (.app (.const ``Eq [.succ .zero]) nat) left) right
+
 def headlineOf (target : TargetFact) : HeadlineFact :=
-  { target, binders := [{ kind := .input, mentions := false, refers := [] }], claims := #[], unnamed := #[],
-    mentions := #[], killTemplate? := some template, witness? := none }
+  { target, telescope := [natBinder], killTemplate? := some template, witness? := none }
 
 def doubleHole : TargetFact := targetOf `App.double (.defined .safe) (.forallE nat nat) 5 "double"
 
@@ -216,17 +222,33 @@ def terminatesHere : ChallengeFacts :=
   { baseChallenge with
     terminating := #[{ definition := `App.double, headline := `App.double_even, place := ⟨"Challenge.lean", 8⟩ }] }
 
+def closedBinder : BinderFact := binderFact "h" (equal (.natLit 1) (.natLit 1)) true "1 = 1"
+
 def closedHypothesis : ChallengeFacts :=
   { baseChallenge with
-    headlines := #[{ evenHeadline with
-      binders := [{ kind := .precondition, mentions := false, refers := [] }]
-      unnamed := #["1 = 1"] }] }
+    headlines := #[{ evenHeadline with telescope := [closedBinder] }] }
 
 def openHypothesis : ChallengeFacts :=
   { baseChallenge with
     headlines := #[{ evenHeadline with
-      binders := [{ kind := .input, mentions := false, refers := [] },
-        { kind := .precondition, mentions := false, refers := [0] }] }] }
+      telescope := [natBinder, binderFact "h" (equal (.bvar 0) (.bvar 0)) true "n = n"] }] }
+
+def agrees (argument : Shape) : Shape := .app (.const `App.Agrees []) argument
+
+def claimedHypotheses : ChallengeFacts :=
+  { baseChallenge with
+    claims := #[`App.Agrees]
+    headlines := #[{ evenHeadline with
+      telescope := [binderFact "a" (agrees double) true "App.Agrees App.double",
+        binderFact "b" (.forallE nat (agrees (.app double (.bvar 0)))) true "∀ m, App.Agrees (App.double m)",
+        natBinder] }] }
+
+def unclaimedHypotheses : ChallengeFacts := { claimedHypotheses with claims := #[], witnesses := #[witnessOf true] }
+
+def dependedHypothesis : ChallengeFacts :=
+  { baseChallenge with
+    headlines := #[{ evenHeadline with
+      telescope := [closedBinder, binderFact "x" (.app (.const `App.Witness []) (.bvar 0)) false "App.Witness h"] }] }
 
 def privateAuxiliary : ChallengeFacts :=
   { baseChallenge with
@@ -235,7 +257,71 @@ def privateAuxiliary : ChallengeFacts :=
 
 def holeTypedInput : HeadlineFact :=
   { evenHeadline with
-    binders := [{ kind := .input, mentions := true, refers := [] }] }
+    telescope := [binderFact "i" (.app (.const ``Fin []) (.app double (.natLit 2))) false "Fin (App.double 2)"] }
+
+def declarationIn (module name : Name) : DeclarationFact :=
+  { name, module, line := 4, computational := true, isUnsafe := false, isPartial := false, external := false,
+    unfoldable := true, replaced := false, initializes := false, effects := false, debug := false, axioms := #[] }
+
+def moduleNamed (name : Name) (imports : Array ImportFact := #[]) (usesModuleSystem : Bool := true) : ModuleFact :=
+  { name, file := "/".intercalate (name.components.map toString) ++ ".lean", usesModuleSystem, imports }
+
+def withOwned (owned : OwnedFacts) : ChallengeFacts := { baseChallenge with owned }
+
+def unsafeSpec : DeclarationFact := { declarationIn `App.CoreSpec `App.CoreSpec.loop with isUnsafe := true }
+
+def ownedImpure : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[unsafeSpec]⟩ }
+
+def editableImpure : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreCode],
+    #[{ declarationIn `App.CoreCode `App.CoreCode.loop with isUnsafe := true }]⟩ }
+
+def cheatingSpec : DeclarationFact := { declarationIn `App.CoreSpec `App.CoreSpec.lemma with axioms := #[``sorryAx] }
+
+def ownedSorry : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[cheatingSpec]⟩
+              blames := #[{ declaration := `App.CoreSpec.lemma, axiomName := ``sorryAx, culprit := `App.CoreSpec.lemma
+                            culpritModule? := some `App.CoreSpec }] }
+
+def ownedLegacy : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec (usesModuleSystem := false)], #[]⟩ }
+
+def ownedLayering : ChallengeFacts :=
+  withOwned
+    { inventory := ⟨#[moduleNamed `App.CoreSpec #[{ name := `App.CoreCode, comptime := false, line := 3 }]], #[]⟩ }
+
+def codeMetaImport : ImportFact := { name := `App.CoreCode, comptime := true, line := 3 }
+
+def specImportsCode : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec #[codeMetaImport]], #[]⟩ }
+
+def editableImportsCode : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.Solution #[codeMetaImport]], #[]⟩ }
+
+def claimIn (module : Name) (home? : Option Name) : RegistrationFact :=
+  { claim := module ++ `Agrees, module, home?
+    place := ⟨"/".intercalate (module.components.map toString) ++ ".lean", 6⟩ }
+
+def worldLake : LakeFacts := { baseLake with modules := baseLake.modules.push ⟨`App.WorldSpec, "App/WorldSpec.lean"⟩ }
+
+def worldFiles : FileFacts :=
+  { lock := .decoded (digests.push ⟨"App/WorldSpec.lean", "5"⟩), comparator := .missing,
+    digests := digests.push ⟨"App/WorldSpec.lean", "5"⟩ }
+
+def ownedClaimOutside : ChallengeFacts := withOwned { registrations := #[claimIn `App.CoreSpec (some `App.CoreSpec)] }
+
+def ownedClaimUnregistered : ChallengeFacts := withOwned { registrations := #[claimIn `App.WorldSpec (some `Other)] }
+
+def ownedClaimHome : ChallengeFacts := withOwned { registrations := #[claimIn `App.WorldSpec (some `App.WorldSpec)] }
+
+def derivedSpec : ChallengeFacts := withOwned { derivedPartials := #[(`App.CoreSpec.instBEqTree, `App.CoreSpec)] }
+
+def derivedCode : ChallengeFacts := withOwned { derivedPartials := #[(`App.CoreCode.instBEqTree, `App.CoreCode)] }
+
+def reachedThrough : ChallengeFacts :=
+  { codeReached with
+    imports := #[(`App.CoreSpec, #[`App.CoreSpec.Helpers]), (`App.CoreSpec.Helpers, #[`App.CoreCode])] }
 
 def unwitnessed : ChallengeFacts :=
   { baseChallenge with
@@ -303,7 +389,7 @@ end
 #guard plain `App.double && !plain (.str `App "1st") && !plain (.num `App 0) && !plain .anonymous &&
   !plain (.str `App "a.b") && !plain (.str `App "") && plain (.str `App "with space")
 
-#guard mentioned (evenStatement double) == [``Nat, `App.Even, `App.double]
+#guard (evenStatement double).constants == [``Nat, `App.Even, `App.double]
 
 #guard killedBy (· == `App.double) (evenStatement double) [] (evenStatement successor).negation
 
@@ -386,9 +472,61 @@ end
 
 #guard errorsOf (challenge := terminatesHere) == #[]
 
-#guard refuses (.unnamedHypothesis `App.double_even "1 = 1") (challenge := closedHypothesis)
+#guard refuses (.unnamedHypothesis `App.double_even closedBinder) (challenge := closedHypothesis)
 
 #guard errorsOf (challenge := openHypothesis) == #[]
+
+#guard errorsOf (challenge := claimedHypotheses) == #[]
+
+#guard (errorsOf (challenge := unclaimedHypotheses)).size == 2
+
+#guard (errorsOf (challenge := unclaimedHypotheses)).all (· matches .unnamedHypothesis `App.double_even _)
+
+#guard errorsOf (challenge := dependedHypothesis) == #[]
+
+#guard ((claimedHypotheses.headlines[0]!).binders claimedHypotheses).map (·.kind) == [.claim, .claim, .input]
+
+#guard ((unclaimedHypotheses.headlines[0]!).binders unclaimedHypotheses).map (·.kind) ==
+  [.precondition, .precondition, .input]
+
+#guard ((dependedHypothesis.headlines[0]!).binders dependedHypothesis).map
+  (fun binder => (binder.kind, binder.refers)) == [(.input, []), (.input, [0])]
+
+#guard (claimedHypotheses.headlines[0]!).claimed claimedHypotheses ==
+  #[(0, `App.Agrees, "App.Agrees App.double"), (1, `App.Agrees, "∀ m, App.Agrees (App.double m)")]
+
+#guard (holeTypedInput.binders baseChallenge).map (·.mentions) == [true]
+
+#guard needsWitness baseChallenge holeTypedInput && !needsWitness claimedHypotheses (claimedHypotheses.headlines[0]!)
+
+#guard refuses (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«unsafe»])) (challenge := ownedImpure)
+
+#guard errorsOf (challenge := editableImpure) == #[]
+
+#guard refuses (.ownedViolation (.axioms `App.CoreSpec.lemma #[``sorryAx])) (challenge := ownedSorry)
+
+#guard refuses (.ownedViolation (.legacy `App.CoreSpec)) (challenge := ownedLegacy)
+
+#guard refuses (.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)) (challenge := ownedLayering)
+
+#guard refuses (.specImport `App.CoreSpec codeMetaImport) (challenge := specImportsCode)
+
+#guard errorsOf (challenge := specImportsCode) == #[.specImport `App.CoreSpec codeMetaImport]
+
+#guard errorsOf (challenge := editableImportsCode) == #[]
+
+#guard refuses (.ownedClaim (claimIn `App.CoreSpec (some `App.CoreSpec))) (challenge := ownedClaimOutside)
+
+#guard refuses (.ownedClaim (claimIn `App.WorldSpec (some `Other))) (lake := worldLake) (files := worldFiles)
+  (challenge := ownedClaimUnregistered)
+
+#guard errorsOf (lake := worldLake) (files := worldFiles) (challenge := ownedClaimHome) == #[]
+
+#guard refuses (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec) (challenge := derivedSpec)
+
+#guard errorsOf (challenge := derivedCode) == #[]
+
+#guard statementRoots worldLake `Challenge == #[`Challenge, `App.CoreSpec, `App.WorldSpec]
 
 #guard refuses (.privateAuxiliary `App.double_even (privateName "proof_1")) (challenge := privateAuxiliary)
 

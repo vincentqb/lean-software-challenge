@@ -55,11 +55,12 @@ def summarize (replaceable : Name → Bool) (binders : Array Expr) : MetaM (Arra
     let type := types[index]!
     let meaning ← unfolded type
     let depended := (types.extract (index + 1) types.size).any (·.containsFVar binder.fvarId!)
-    let kind ← if depended || !(← isProp type) then pure BinderKind.input
-      else if isWorldClaim env (conclusionHead meaning) then pure .claim
-      else pure .precondition
+    let prop ← isProp type
+    let kind := if depended || !prop then BinderKind.input
+      else if isWorldClaim env (conclusionHead meaning) then .claim
+      else .precondition
     summary := summary.push {
-      kind
+      kind, prop
       mentions := meaning.getUsedConstants.any replaceable
       refers := (List.range index).filter fun earlier => type.containsFVar binders[earlier]!.fvarId! }
   return summary
@@ -77,16 +78,20 @@ def unfoldedDefinitions (type : Expr) : MetaM (List Name) := do
 
 def witnessStatement (binders : Array Expr) (summary : Array Binder) : MetaM Expr := do
   let kept := kept summary.toList
-  let unkept := fun (kind : BinderKind) => (List.range binders.size).filter fun index =>
-    summary[index]!.kind == kind && !kept.contains index
-  let mut statement := mkAndN (← (unkept .precondition).mapM fun index => inferType binders[index]!)
-  for index in kept.reverse do
+  let keptOf := fun (kind : BinderKind) => kept.filter (summary[·]!.kind == kind)
+  let claims := keptOf .claim
+  let premise := fun (index : Nat) (statement : Expr) => do
+    return Expr.forallE (← binders[index]!.fvarId!.getUserName) (← inferType binders[index]!) statement .default
+  let mut statement := mkAndN (← (keptOf .precondition).mapM fun index => inferType binders[index]!)
+  for index in (claims.filter (!summary[·]!.refers.isEmpty)).reverse do
+    statement ← premise index statement
+  for index in (keptOf .input).reverse do
     let binder := binders[index]!
     let type ← inferType binder
     statement := mkApp2 (.const ``Exists [(← getLevel type).normalize]) type
       (.lam (← binder.fvarId!.getUserName).eraseMacroScopes type (statement.abstract #[binder]) .default)
-  for index in ((unkept .claim).filter (summary[·]!.refers.isEmpty)).reverse do
-    statement := .forallE (← binders[index]!.fvarId!.getUserName) (← inferType binders[index]!) statement .default
+  for index in (claims.filter (summary[·]!.refers.isEmpty)).reverse do
+    statement ← premise index statement
   return statement
 
 def witnessType (replaceable : Name → Bool) (type : Expr) : MetaM (Option Expr) := do

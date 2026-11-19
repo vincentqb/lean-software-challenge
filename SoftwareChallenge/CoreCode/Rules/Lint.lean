@@ -281,18 +281,16 @@ def claimUseOf (facts : Facts) (headline : HeadlineFact) (index : Nat) : ClaimUs
   match facts.solution.claimUses.find? fun use => use.headline == name && use.binder == index with
   | some use => use
   | none =>
-    let (claim, statement) := ((headline.claims.find? (·.1 == index)).map (·.2)).getD (.anonymous, "")
+    let claim := (((headline.claimed facts.challenge).find? (·.1 == index)).map (·.2.1)).getD .anonymous
+    let statement := ((headline.telescope[index]?).map (·.conclusion)).getD ""
     { headline := name, binder := index, claim, statement, checks := #[] }
 
 def uncheckedClaims (facts : Facts) : Array Pending :=
   facts.challenge.headlines.flatMap fun headline =>
-    (Array.range headline.binders.length).filterMap fun index =>
-      match headline.binders[index]? with
-      | some binder =>
-        if (binder.kind = .claim → ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧
-            use.binder = index ∧ ∃ check ∈ use.checks, check.2 = .matched) then none
-        else some (.uncheckedClaim (claimUseOf facts headline index))
-      | none => none
+    (headline.claimed facts.challenge).filterMap fun (index, _, _) =>
+      if (∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧
+          use.binder = index ∧ ∃ check ∈ use.checks, check.2 = .matched) then none
+      else some (.uncheckedClaim (claimUseOf facts headline index))
 
 def hiddenDependencies (facts : Facts) : Array Pending :=
   facts.lake.packages.filterMap fun package =>

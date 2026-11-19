@@ -1,6 +1,7 @@
 module
 
 public meta import Lean
+public meta import SoftwareChallenge.Commands.Extensions
 public meta import SoftwareChallenge.CoreCode.Facts
 public meta import SoftwareChallenge.CoreCode.Graph
 public meta import SoftwareChallenge.Read.Source
@@ -149,6 +150,37 @@ def blameOf (env : Environment) (fact : DeclarationFact) (own : ConstantInfo) (a
     AxiomWalk AxiomBlame := do
   let culprit ← culpritOf axiomName own
   return { declaration := fact.name, axiomName, culprit, culpritModule? := moduleOf? env culprit }
+
+def parentOf? (env : Environment) (name : Name) : Option Name :=
+  match env.find? name with
+  | some (.ctorInfo info) => some info.induct
+  | some (.recInfo _) => some name.getPrefix
+  | _ => match env.getProjectionFnInfo? name with
+    | some projection => some projection.ctorName.getPrefix
+    | none => if isAuxRecursor env name || isNoConfusion env name then some name.getPrefix else none
+
+def parentsOf (env : Environment) (modules : Array CatalogModule) : Array (Name × Name) :=
+  modules.flatMap fun module => module.data.constants.filterMap fun info =>
+    (parentOf? env info.name).map (info.name, ·)
+
+def registrationsOf (env : Environment) (modules : Array CatalogModule) : Array RegistrationFact :=
+  modules.flatMap fun module =>
+    (PersistentEnvExtension.getModuleEntries claimsExt env module.index).map fun claim =>
+      let home? := moduleOf? env claim
+      { claim, module := module.name, home?
+        place := if home? == some module.name then module.place env claim else { file := module.file, line := 0 } }
+
+def placesOf (env : Environment) (modules : Array CatalogModule) : Array DeclarationPlace :=
+  modules.flatMap fun module => module.data.constants.filterMap fun info =>
+    (rangesIn env module.index info.name).map fun ranges =>
+      { name := info.name, place := { file := module.file, line := ranges.range.pos.line }
+        written := textAt module.source ranges.selectionRange
+        firstLine := lineAt module.source ranges.range.pos.line }
+
+def derivedPartialsOf (env : Environment) (modules : Array CatalogModule) : Array (Name × Name) :=
+  modules.flatMap fun module =>
+    (module.data.constants.filter fun info => info.isPartial && derivedInstance env info.name).map
+      (·.name, module.name)
 
 structure InventoryFacts where
   inventory : Inventory

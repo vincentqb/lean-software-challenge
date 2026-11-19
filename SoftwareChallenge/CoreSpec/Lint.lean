@@ -140,9 +140,9 @@ structure Lint.Complete (facts : Facts) : Prop extends Lint.Clean facts where
   witnessesProved : ∀ witness ∈ facts.challenge.witnesses, facts.solution.Holds witness.target
   mainReachesHoles : facts.lake.Program → (∃ main, facts.solution.main? = some main) ∧
     ∀ hole ∈ facts.challenge.holes, Relation.TransGen facts.solution.Calls `main hole.constant.name
-  claimsChecked : ∀ headline ∈ facts.challenge.headlines, ∀ index binder, headline.binders[index]? = some binder →
-    binder.kind = .claim → ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧
-      use.binder = index ∧ ∃ check ∈ use.checks, check.2 = .matched
+  claimsChecked : ∀ headline ∈ facts.challenge.headlines, ∀ index, headline.Claim facts.challenge.claims index →
+    ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧ use.binder = index ∧
+      ∃ check ∈ use.checks, check.2 = .matched
   checksDecided : ∀ use ∈ facts.solution.claimUses, ∀ check ∈ use.checks, check.2 ≠ .undecided
   dependenciesVisible : ∀ package ∈ facts.lake.packages, package.Visible facts.lake.packageDir
 

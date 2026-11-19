@@ -109,12 +109,19 @@ structure TargetFact where
   auxiliaries : Array ConstantFact
   deriving BEq, Repr, Inhabited
 
+structure BinderFact where
+  name : String
+  type : Shape
+  meaning : Shape
+  prop : Bool
+  shown : String
+  conclusion : String
+  variables : Array String
+  deriving BEq, Repr, Inhabited
+
 structure HeadlineFact where
   target : TargetFact
-  binders : List Binder
-  claims : Array (Nat × Name × String)
-  unnamed : Array String
-  mentions : Array Name
+  telescope : List BinderFact
   killTemplate? : Option String
   witness? : Option String
   deriving BEq, Repr, Inhabited
@@ -136,12 +143,44 @@ structure TerminationFact where
   place : Place
   deriving BEq, Repr, Inhabited
 
+structure AxiomBlame where
+  declaration : Name
+  axiomName : Name
+  culprit : Name
+  culpritModule? : Option Name
+  deriving BEq, Repr, Inhabited
+
+structure RegistrationFact where
+  claim : Name
+  module : Name
+  home? : Option Name
+  place : Place
+  deriving BEq, Repr, Inhabited
+
+structure DeclarationPlace where
+  name : Name
+  place : Place
+  written : String
+  firstLine : String
+  deriving BEq, Repr, Inhabited
+
+structure OwnedFacts where
+  inventory : Inventory := ⟨#[], #[]⟩
+  imports : Array ImportLine := #[]
+  blames : Array AxiomBlame := #[]
+  registrations : Array RegistrationFact := #[]
+  derivedPartials : Array (Name × Name) := #[]
+  places : Array DeclarationPlace := #[]
+  parents : Array (Name × Name) := #[]
+  deriving BEq, Repr, Inhabited
+
 structure ChallengeFacts where
   module : Name
   file : String
   runtimeImports : Array ImportLine
   metaImports : Array ImportLine
   closure : Array Name
+  imports : Array (Name × Array Name) := #[]
   headlines : Array HeadlineFact
   kills : Array KillFact
   witnesses : Array WitnessFact
@@ -150,6 +189,8 @@ structure ChallengeFacts where
   axioms : Array (Name × Place)
   terminating : Array TerminationFact
   replaceable : Array Name
+  claims : Array Name := #[]
+  owned : OwnedFacts := {}
   deriving BEq, Repr, Inhabited
 
 structure FoundFact where
@@ -159,13 +200,6 @@ structure FoundFact where
   compiled : Bool
   rendered : String
   renderedExplicit : String
-  deriving BEq, Repr, Inhabited
-
-structure AxiomBlame where
-  declaration : Name
-  axiomName : Name
-  culprit : Name
-  culpritModule? : Option Name
   deriving BEq, Repr, Inhabited
 
 structure CheckFact where
@@ -186,25 +220,11 @@ structure ClaimUse where
   checks : Array (CheckFact × MatchOutcome)
   deriving BEq, Repr, Inhabited
 
-structure RegistrationFact where
-  claim : Name
-  module : Name
-  home? : Option Name
-  place : Place
-  deriving BEq, Repr, Inhabited
-
 structure LintFact where
   module : Name
   place : Place
   linter : Name
   message : String
-  deriving BEq, Repr, Inhabited
-
-structure DeclarationPlace where
-  name : Name
-  place : Place
-  written : String
-  firstLine : String
   deriving BEq, Repr, Inhabited
 
 structure SolutionFacts where
@@ -228,6 +248,7 @@ structure SolutionFacts where
   fixpoints : Array Name
   main? : Option (Name × Place)
   places : Array DeclarationPlace
+  parents : Array (Name × Name) := #[]
   deriving BEq, Repr, Inhabited
 
 structure CheckOutcome where
@@ -247,6 +268,8 @@ structure TestFacts where
   declaredOwnTests : Array OwnTestFact
   ownTests : Array OwnTestRun
   unknownOwnTests : Array String
+  testDriverArgsPlace : Place
+  libraryPlace : Place
   deriving BEq, Repr, Inhabited
 
 structure Facts where
@@ -275,6 +298,29 @@ def LakeFacts.Program (lake : LakeFacts) : Prop :=
 
 def ChallengeFacts.Owns (challenge : ChallengeFacts) (module : Name) : Prop :=
   module ∈ challenge.closure ∨ (Role.ofName module).Owned
+
+def ChallengeFacts.owns (challenge : ChallengeFacts) (module : Name) : Bool :=
+  challenge.closure.contains module || Role.ofName module == .coreSpec || Role.ofName module == .worldSpec
+
+def Inventory.restrictedTo (inventory : Inventory) (keep : Name → Bool) : Inventory :=
+  { modules := inventory.modules.filter (keep ·.name), declarations := inventory.declarations.filter (keep ·.module) }
+
+def Telescope.Depended (telescope : List BinderFact) (index : Nat) : Prop :=
+  ∃ later binder, telescope[later]? = some binder ∧ index < later ∧ binder.type.Refers (later - 1 - index)
+
+def HeadlineFact.Claim (claims : Array Name) (headline : HeadlineFact) (index : Nat) : Prop :=
+  ∃ binder, headline.telescope[index]? = some binder ∧ binder.prop = true ∧
+    ¬ Telescope.Depended headline.telescope index ∧ ∃ claim ∈ claims, binder.meaning.Concludes claim
+
+def HeadlineFact.Precondition (claims : Array Name) (headline : HeadlineFact) (index : Nat) : Prop :=
+  ∃ binder, headline.telescope[index]? = some binder ∧ binder.prop = true ∧
+    ¬ Telescope.Depended headline.telescope index ∧ ¬ ∃ claim ∈ claims, binder.meaning.Concludes claim
+
+def HeadlineFact.Mentions (replaceable : Name → Bool) (headline : HeadlineFact) (index : Nat) : Prop :=
+  ∃ binder, headline.telescope[index]? = some binder ∧ ∃ name, replaceable name = true ∧ binder.meaning.Mentions name
+
+def BinderFact.Open (binder : BinderFact) (index : Nat) : Prop :=
+  ∃ earlier < index, binder.type.Refers earlier
 
 def LakeFacts.Owned (lake : LakeFacts) (challenge : ChallengeFacts) (path : String) : Prop :=
   path ∈ lake.configFiles ∨ path = challenge.file ∨

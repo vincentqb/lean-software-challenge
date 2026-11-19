@@ -39,16 +39,22 @@ def foldCorrect : TargetFact :=
 def foldCorrectRejects : TargetFact :=
   target `App.fold_correct_rejects .proved rejectsType 11 "fold_correct_rejects" ": ¬ wrong" "¬wrong"
 
+def agreesType : Shape := .app (.const `App.AddAgrees []) (.const `App.nativeAdd [])
+
+def binderOf (name : String) (type : Shape) (prop : Bool) (shown : String) (variables : Array String := #[])
+    (conclusion : String := shown) : BinderFact :=
+  { name, type, meaning := type, prop, shown, conclusion, variables }
+
 def correctHeadline : HeadlineFact :=
-  { target := foldCorrect, binders := [⟨.input, false, []⟩, ⟨.claim, false, []⟩],
-    claims := #[(1, `App.AddAgrees, "AddAgrees nativeAdd")], unnamed := #[], mentions := #[`App.fold],
+  { target := foldCorrect
+    telescope := [binderOf "e" expr false "Expr", binderOf "h" agreesType true "AddAgrees nativeAdd"]
     killTemplate? := none, witness? := none }
 
 def challenge : ChallengeFacts :=
   { module := `Challenge, file := "Challenge.lean", runtimeImports := #[], metaImports := #[],
     closure := #[`App.CoreSpec, `App.WorldSpec], headlines := #[correctHeadline],
     kills := #[{ target := foldCorrectRejects, headline := `App.fold_correct }], witnesses := #[], holes := #[fold],
-    filled := #[], axioms := #[], terminating := #[], replaceable := #[`App.fold] }
+    filled := #[], axioms := #[], terminating := #[], replaceable := #[`App.fold], claims := #[`App.AddAgrees] }
 
 def source (module : Name) (file : String) : SourceFact := { module, file }
 

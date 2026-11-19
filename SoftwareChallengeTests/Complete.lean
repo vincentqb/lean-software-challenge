@@ -41,7 +41,8 @@ def completeFacts : Facts :=
   { lake := completeLake, files := completeFiles, challenge := completeChallenge, solution := completeSolution }
 
 def completeTests : TestFacts :=
-  { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[] }
+  { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[],
+    testDriverArgsPlace := ⟨"lakefile.lean", 9⟩, libraryPlace := ⟨"lakefile.lean", 14⟩ }
 
 theorem completeOwnedDigested (path : String) (owned : completeLake.Owned completeChallenge path) :
     completeFiles.Digested path := by
@@ -82,6 +83,14 @@ theorem statementComplete : Statement.Complete completeLake completeFiles comple
   terminatesNamesHole := by simp [completeChallenge]
   terminatesOnKilledHeadline := by simp [completeChallenge]
   terminatesMentionsHole := by simp [completeChallenge]
+  ownedAdmitted := {
+    placed := by simp [completeChallenge, Inventory.restrictedTo]
+    modular := by simp [completeChallenge, Inventory.restrictedTo]
+    layered := by simp [completeChallenge, Inventory.restrictedTo]
+    pure := by simp [completeChallenge, Inventory.restrictedTo] }
+  specImportsOwned := by simp [completeChallenge]
+  ownedClaimsDeclared := by simp [completeChallenge]
+  ownedDerivedTotal := by simp [completeChallenge]
   ownedDigested := completeOwnedDigested
   lockCurrent := .inr ⟨digested, rfl, fun _ => rfl⟩
 
@@ -221,6 +230,74 @@ theorem toolingExe_incomplete (world : Role.ofName `App.WorldCode = .worldCode)
     subst member
     rw [tooling] at rooted
     cases rooted
+
+def impureSpec : DeclarationFact :=
+  { name := `App.CoreSpec.loop, module := `App.CoreSpec, line := 4, computational := true, isUnsafe := false,
+    isPartial := true, external := false, unfoldable := true, replaced := false, initializes := false,
+    effects := false, debug := false, axioms := #[] }
+
+def specModuleFact (imports : Array ImportFact) : ModuleFact :=
+  { name := `App.CoreSpec, file := "App/CoreSpec.lean", usesModuleSystem := true, imports }
+
+def impureSpecOwned : OwnedFacts := { inventory := ⟨#[specModuleFact #[]], #[impureSpec]⟩ }
+
+def impureSpecChallenge : ChallengeFacts := { completeChallenge with owned := impureSpecOwned }
+
+def impureSpecLake : LakeFacts :=
+  { completeLake with modules := completeLake.modules.push ⟨`App.CoreSpec, "App/CoreSpec.lean"⟩ }
+
+#guard Role.ofName `App.CoreSpec == .coreSpec
+
+theorem impureSpec_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec) :
+    ¬ Statement.Complete impureSpecLake completeFiles impureSpecChallenge := fun complete => by
+  have kept :
+      impureSpec ∈ (impureSpecChallenge.owned.inventory.restrictedTo impureSpecChallenge.owns).declarations := by
+    simp [impureSpecChallenge, impureSpecOwned, Inventory.restrictedTo, ChallengeFacts.owns, impureSpec, spec]
+  obtain ⟨role, classified, -, allowed⟩ := complete.ownedAdmitted.pure impureSpec kept
+  have placed : role = .coreSpec := by
+    simp [Project.role?, LakeFacts.project, impureSpecLake, completeLake, impureSpec, spec] at classified
+    exact classified.symm
+  subst placed
+  simp [DeclarationFact.Allowed, impureSpec] at allowed
+
+def misplacedClaim : RegistrationFact :=
+  { claim := `App.CoreSpec.Agrees, module := `App.CoreSpec, home? := some `App.CoreSpec,
+    place := ⟨"App/CoreSpec.lean", 6⟩ }
+
+def misplacedClaimChallenge : ChallengeFacts :=
+  { completeChallenge with owned := { registrations := #[misplacedClaim] } }
+
+theorem misplacedClaim_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec) :
+    ¬ Statement.Complete impureSpecLake completeFiles misplacedClaimChallenge := fun complete => by
+  have declared := complete.ownedClaimsDeclared misplacedClaim (by simp [misplacedClaimChallenge])
+    (Or.inr (Or.inl spec))
+  simp [Project.role?, LakeFacts.project, impureSpecLake, completeLake, misplacedClaim, spec] at declared
+
+def derivedInstance : Name × Name := (`App.CoreSpec.instBEqTree, `App.CoreSpec)
+
+def derivedChallenge : ChallengeFacts := { completeChallenge with owned := { derivedPartials := #[derivedInstance] } }
+
+theorem derived_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec) :
+    ¬ Statement.Complete impureSpecLake completeFiles derivedChallenge := fun complete =>
+  complete.ownedDerivedTotal derivedInstance (by simp [derivedChallenge]) (Or.inr (Or.inl spec))
+
+def editableSpecImport : ChallengeFacts :=
+  { completeChallenge with
+    owned := { inventory := ⟨#[specModuleFact #[{ name := `App.Tactic, comptime := true, line := 3 }]], #[]⟩ } }
+
+theorem editableSpecImport_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec)
+    (tooling : Role.ofName `App.Tactic = .tooling) :
+    ¬ Statement.Complete tacticLake completeFiles editableSpecImport := fun complete => by
+  have owned := complete.specImportsOwned (specModuleFact #[{ name := `App.Tactic, comptime := true, line := 3 }])
+    (by simp [editableSpecImport]) (Or.inl spec) { name := `App.Tactic, comptime := true, line := 3 }
+    (by simp [specModuleFact])
+    ⟨⟨`App.Tactic, "App/Tactic.lean"⟩, by simp [tacticLake, completeLake], rfl⟩
+  rcases owned with closed | owned
+  · simp [editableSpecImport, completeChallenge] at closed
+  · rw [tooling] at owned
+    simp [Role.Owned] at owned
+
+#guard Role.ofName `App.Tactic == .tooling
 
 def declaredCheck : CheckFact :=
   { claim := `App.WorldSpec.Agrees, statement := "Agrees 1", place := ⟨"App/WorldCode.lean", 9⟩ }

@@ -387,12 +387,17 @@ def closureOwned : Facts := { owning with challenge := { challenge with closure 
   ["Challenge.lean:8: App.fold_correct assumes the world claim AddAgrees nativeAdd, which no Check tests against \
     the real foreign code", "Add `Check AddAgrees nativeAdd := do …`, or `Check AddAgrees nativeAdd : <an instance it \
       implies>`, to App/WorldCode.lean, then run `lake lint`."]
+def underTrials : BinderFact :=
+  binderOf "h" (.forallE expr (.app (.const `App.AddAgrees []) (.bvar 0))) true "∀ t ∈ trials, AddAgrees t" #["t"]
+    "AddAgrees t"
+
 #guard pendingSays (withChallenge fun challenge => { challenge with
     headlines := challenge.headlines.map fun headline => { headline with
-      claims := #[(1, `App.AddAgrees, "∀ t ∈ trials, AddAgrees t")] } })
+      telescope := [binderOf "e" expr false "Expr", underTrials] } })
   (.uncheckedClaim { use with statement := "AddAgrees t" })
   ["assumes the world claim ∀ t ∈ trials, AddAgrees t", "`Check AddAgrees t := do …`",
-    "with a value of your choice in place of each variable it quantifies"]
+    "with a value of your choice in place of t, then run `lake lint`."]
+#guard !pendingSays complete (.uncheckedClaim use) ["in place of"]
 #guard pendingSays complete (.hiddenDependency hiddenDependency)
   ["lakefile.lean:1: the comparator's sandbox hides package software_challenge at /tmp/software_challenge",
     "require software_challenge from git", "run `lake update software_challenge`"]

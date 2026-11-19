@@ -24,8 +24,18 @@ def sameKind : OwnTestKind → OwnTestKind → Bool
 def sameOwnTest (left right : OwnTestFact) : Bool :=
   left.name == right.name && sameKind left.kind right.kind && samePlace left.place right.place
 
+def nativeMissing? (error : String) : Option String :=
+  match error.splitOn "Could not find native implementation of external declaration '" with
+  | _ :: rest :: _ => (rest.splitOn "'").head?
+  | _ => none
+
+def failureOf (facts : TestFacts) (outcome : CheckOutcome) (error : String) : Failure :=
+  match nativeMissing? error with
+  | some declaration => .nativeCodeMissing outcome declaration facts.libraryPlace
+  | none => .checkFailed outcome
+
 def failedChecks (facts : TestFacts) : Array Failure :=
-  facts.checks.filterMap fun outcome => outcome.error?.map fun _ => .checkFailed outcome
+  facts.checks.filterMap fun outcome => outcome.error?.map (failureOf facts outcome)
 
 def checksNotRun (facts : TestFacts) : Array Failure :=
   facts.declaredChecks.filterMap fun check =>
@@ -39,7 +49,7 @@ def ownTestsNotRun (facts : TestFacts) : Array Failure :=
     if facts.ownTests.any (sameOwnTest ·.test test) then none else some (.ownTestNotRun test)
 
 def undeclaredOwnTests (facts : TestFacts) : Array Failure :=
-  facts.unknownOwnTests.map fun name => .unknownOwnTest name ⟨"lakefile.lean", 1⟩
+  facts.unknownOwnTests.map fun name => .unknownOwnTest name facts.testDriverArgsPlace
 
 def failuresOf (facts : TestFacts) : Array Failure :=
   failedChecks facts ++ checksNotRun facts ++ failedOwnTests facts ++ ownTestsNotRun facts ++ undeclaredOwnTests facts

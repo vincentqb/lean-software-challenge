@@ -479,7 +479,7 @@ run_cmd Elab.Command.liftTermElabM do
     (`double_first, ← `(∃ (n : Nat) (h : 0 < double n), (⟨0, h⟩ : Fin (double n)).val = 0)),
     (`double_fin, ← `(∃ _ : Fin (double 2), True)),
     (`double_under_claim, ← `((∀ m, m > 0 → SuccAt m) → ∃ n, double n < 5)),
-    (`double_at, ← `(∃ n, double n = 1)),
+    (`double_at, ← `(∃ n, SuccAt n → double n = 1)),
     (`double_hidden, ← `(∃ n, double n = 4))]
   unless read.witnesses == ((derived.map fun (headline, _) => (witnessName (member headline), member headline)).toArray.push
       (member `double_odd_applies, member `double_odd)) do
@@ -507,15 +507,18 @@ run_cmd Elab.Command.liftTermElabM do
       (read.unexposedOf (member `double_hidden)).map (·.line) == #[18] &&
       (read.unexposedOf (member `double_negative_vanishes)).isEmpty do
     throwError "The definitions a statement hides from its kills were misread: {read.unexposed.map (·.1)}"
-  for (name, binders) in [(`double_fin, [{ kind := .input, mentions := true, refers := [] }]),
-      (`double_first, [{ kind := .input, mentions := false, refers := [] }, { kind := .input, mentions := true, refers := [0] },
-        { kind := .precondition, mentions := true, refers := [0, 1] }]),
-      (`double_zero_fin, [{ kind := .input, mentions := false, refers := [] }, { kind := .input, mentions := false, refers := [0] },
-        { kind := .precondition, mentions := true, refers := [0, 1] }]),
-      (`double_under_claim, [{ kind := .input, mentions := false, refers := [] }, { kind := .claim, mentions := false, refers := [] },
-        { kind := .precondition, mentions := true, refers := [0] }]),
-      (`double_assumes_wrapped, [{ kind := .claim, mentions := false, refers := [] },
-        { kind := .input, mentions := false, refers := [] }])] do
+  for (name, binders) in [(`double_fin, [{ kind := .input, prop := false, mentions := true, refers := [] }]),
+      (`double_first, [{ kind := .input, prop := false, mentions := false, refers := [] },
+        { kind := .input, prop := true, mentions := true, refers := [0] },
+        { kind := .precondition, prop := true, mentions := true, refers := [0, 1] }]),
+      (`double_zero_fin, [{ kind := .input, prop := false, mentions := false, refers := [] },
+        { kind := .input, prop := true, mentions := false, refers := [0] },
+        { kind := .precondition, prop := true, mentions := true, refers := [0, 1] }]),
+      (`double_under_claim, [{ kind := .input, prop := false, mentions := false, refers := [] },
+        { kind := .claim, prop := true, mentions := false, refers := [] },
+        { kind := .precondition, prop := true, mentions := true, refers := [0] }]),
+      (`double_assumes_wrapped, [{ kind := .claim, prop := true, mentions := false, refers := [] },
+        { kind := .input, prop := false, mentions := false, refers := [] }])] do
     let found ← Telescope.summaries (· == member `double) (← getConstInfo (member name)).type
     unless found == binders do throwError "The binders of {name} were summarized as {repr found}"
   let wrapped ← analysed (allEvidence (← getEnv)) (member `double_assumes_wrapped)

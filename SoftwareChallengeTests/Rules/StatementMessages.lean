@@ -41,6 +41,10 @@ def tag : Error → Nat
   | .ownedUnread .. => 28
   | .lock .. => 29
   | .lockUnreadable .. => 30
+  | .ownedViolation .. => 31
+  | .specImport .. => 32
+  | .ownedClaim .. => 33
+  | .derivedPartial .. => 34
 
 def challengeImporter : ImportLine :=
   { module := `App.Solution, fact := { name := `Challenge, comptime := false, line := 2 }, text := "import Challenge" }
@@ -49,11 +53,26 @@ def metaCodeImport : ImportLine :=
   { module := `Challenge, fact := { name := `App.CoreCode, comptime := true, line := 5 },
     text := "meta import App.CoreCode" }
 
+def holeBinder : BinderFact := binderFact "h" (equal (.app double (.natLit 1)) (.natLit 2)) true "App.double 1 = 2"
+
 def aboutHole : ChallengeFacts :=
   { baseChallenge with
-    headlines := #[{ evenHeadline with
-      binders := [{ kind := .precondition, mentions := true, refers := [] }]
-      unnamed := #["App.double 1 = 2"] }] }
+    headlines := #[{ evenHeadline with telescope := [holeBinder] }] }
+
+def initializerSpec : DeclarationFact :=
+  { declarationIn `App.CoreSpec `App.CoreSpec.initFn with initializes := true, effects := true }
+
+def ownedInitializer : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[initializerSpec]⟩
+              places := #[{ name := `App.CoreSpec.initFn, place := ⟨"App/CoreSpec.lean", 9⟩, written := "initFn"
+                            firstLine := "initialize initFn : IO.Ref Nat ← IO.mkRef 0" }] }
+
+def placedImpure : ChallengeFacts :=
+  { ownedImpure with
+    owned := { ownedImpure.owned with
+      places := #[{ name := `App.CoreSpec.Loop, place := ⟨"App/CoreSpec.lean", 12⟩, written := "Loop"
+                    firstLine := "unsafe inductive Loop" }]
+      parents := #[(`App.CoreSpec.loop, `App.CoreSpec.Loop)] } }
 
 def metaReached : ChallengeFacts :=
   { baseChallenge with
@@ -78,8 +97,8 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.terminatesNotHole `App.double_even `App.helper, terminatesHelper, baseLake),
    (.terminatesWithoutKill `App.missing `App.double, terminatesMissing, baseLake),
    (.terminatesUnmentioned `App.double_even `App.triple, terminatesElsewhere, baseLake),
-   (.unnamedHypothesis `App.double_even "1 = 1", closedHypothesis, baseLake),
-   (.unnamedHypothesis `App.double_even "App.double 1 = 2", aboutHole, baseLake),
+   (.unnamedHypothesis `App.double_even closedBinder, closedHypothesis, baseLake),
+   (.unnamedHypothesis `App.double_even holeBinder, aboutHole, baseLake),
    (.privateAuxiliary `App.double_even (privateName "proof_1"), privateAuxiliary, baseLake),
    (.codeInClosure `App.CoreCode, codeReached, baseLake),
    (.codeInClosure `App.CoreCode, metaReached, baseLake),
@@ -104,7 +123,19 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.lock (.unrecorded "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec)), baseChallenge, baseLake),
    (.lock (.missing "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec)), baseChallenge, baseLake),
    (.lock (.missing "Gone.lean") none, baseChallenge, baseLake),
-   (.lockUnreadable "expected an object", baseChallenge, baseLake)]
+   (.lockUnreadable "expected an object", baseChallenge, baseLake),
+   (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«unsafe»]), ownedImpure, baseLake),
+   (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«partial»]), placedImpure, baseLake),
+   (.ownedViolation (.impure `App.CoreSpec.initFn .coreSpec [.initializer, .io]), ownedInitializer, baseLake),
+   (.ownedViolation (.axioms `App.CoreSpec.lemma #[``sorryAx]), ownedSorry, baseLake),
+   (.ownedViolation (.legacy `App.CoreSpec), ownedLegacy, baseLake),
+   (.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec), ownedLayering, baseLake),
+   (.ownedViolation (.unplaced `App.Other.CoreSpec), baseChallenge, baseLake),
+   (.specImport `App.CoreSpec codeMetaImport, specImportsCode, baseLake),
+   (.ownedClaim (claimIn `App.CoreSpec (some `App.CoreSpec)), ownedClaimOutside, baseLake),
+   (.ownedClaim (claimIn `App.WorldSpec (some `Other)), ownedClaimUnregistered, worldLake),
+   (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec, derivedSpec, baseLake),
+   (.codeInClosure `App.CoreCode, reachedThrough, baseLake)]
 
 def messageOf (sample : Error × ChallengeFacts × LakeFacts) : Message :=
   sample.1.message sample.2.2 baseFiles sample.2.1
@@ -126,9 +157,14 @@ def conventional (message : Message) : Bool :=
 def says (error : Error) (fragment : String) : Bool :=
   ((rendered error).splitOn fragment).length > 1
 
+def renderedIn (error : Error) (challenge : ChallengeFacts) (lake : LakeFacts := baseLake) : String :=
+  (error.message lake baseFiles challenge).render
+
+def mentions (text fragment : String) : Bool := (text.splitOn fragment).length > 1
+
 end
 
-#guard (List.range 31).all fun index => samples.any (tag ·.1 == index)
+#guard (List.range 35).all fun index => samples.any (tag ·.1 == index)
 
 #guard samples.all (conventional ∘ messageOf)
 
@@ -192,14 +228,80 @@ end
 
 #guard says (.terminatesUnmentioned `App.double_even `App.triple) "which does not mention App.triple"
 
-#guard says (.unnamedHypothesis `App.double_even "1 = 1") "assumes `1 = 1`, which is not a WorldClaim"
+#guard says (.unnamedHypothesis `App.double_even closedBinder) "assumes `1 = 1`, which is not a WorldClaim"
 
-#guard says (.unnamedHypothesis `App.double_even "1 = 1") "`WorldClaim Name := 1 = 1`"
+#guard says (.unnamedHypothesis `App.double_even closedBinder) "`WorldClaim Name := 1 = 1`"
 
-#guard says (.unnamedHypothesis `App.double_even "App.double 1 = 2")
+#guard says (.unnamedHypothesis `App.double_even holeBinder)
   "assumes `App.double 1 = 2`, which mentions a hole or foreign function and no input"
 
-#guard !says (.unnamedHypothesis `App.double_even "App.double 1 = 2") "WorldClaim Name"
+#guard says (.unnamedHypothesis `App.double_even holeBinder)
+  "Remove `App.double 1 = 2` from App.double_even, or state it as its own headline with a kill"
+
+#guard !says (.unnamedHypothesis `App.double_even holeBinder) "WorldClaim Name"
+
+#guard mentions (renderedIn (.codeInClosure `App.CoreCode) reachedThrough)
+  "Challenge.lean:3: Challenge reaches App.CoreCode (CoreCode) through its imports, from line 3, \
+    `public import App.CoreSpec`"
+
+#guard mentions (renderedIn (.codeInClosure `App.CoreCode) reachedThrough)
+  "Delete line 3, `public import App.CoreSpec`, from Challenge.lean and import the CoreSpec or WorldSpec modules"
+
+#guard reachingImport? reachedThrough `App.CoreCode == some specImport
+
+#guard reachingImport? codeReached `App.CoreCode == none
+
+#guard renderedIn (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«unsafe»])) ownedImpure ==
+  "App/CoreSpec.lean:1: App.CoreSpec.loop uses `unsafe` in App.CoreSpec (CoreSpec), but CoreSpec code must be pure \
+    and total, so that the proofs are about the code that runs, and App.CoreSpec is owned, so no edit to the \
+    editable files fixes it. Remove `unsafe` from App.CoreSpec.loop in App/CoreSpec.lean, and delete owned.lock if \
+    there is one, then run `lake build`."
+
+#guard mentions (renderedIn (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«partial»])) placedImpure)
+  "App/CoreSpec.lean:12: App.CoreSpec.Loop uses `partial` in App.CoreSpec (CoreSpec)"
+
+#guard mentions (renderedIn (.ownedViolation (.impure `App.CoreSpec.initFn .coreSpec [.initializer, .io]))
+  ownedInitializer) "App/CoreSpec.lean:9: App.CoreSpec.initFn runs IO when the program starts"
+
+#guard mentions (renderedIn (.ownedViolation (.axioms `App.CoreSpec.lemma #[``sorryAx])) ownedSorry)
+  "App.CoreSpec.lemma uses `sorry`, but the comparator permits only propext, Classical.choice, and Quot.sound"
+
+#guard mentions (renderedIn (.ownedViolation (.axioms `App.CoreSpec.lemma #[``sorryAx])) ownedSorry)
+  "Replace each `sorry` in App.CoreSpec.lemma with a proof or a definition in App/CoreSpec.lean, and delete owned.lock"
+
+#guard mentions (renderedIn (.ownedViolation (.legacy `App.CoreSpec)) ownedLegacy)
+  "App/CoreSpec.lean:1: App.CoreSpec does not start with `module`"
+
+#guard mentions (renderedIn (.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)) ownedLayering)
+  "App/CoreSpec.lean:3: App.CoreSpec (CoreSpec) imports App.CoreCode (CoreCode), but CoreSpec may import only \
+    CoreSpec modules"
+
+#guard mentions (renderedIn (.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)) ownedLayering)
+  "Delete line 3, `import App.CoreCode`, from App/CoreSpec.lean"
+
+#guard mentions (renderedIn (.specImport `App.CoreSpec codeMetaImport) specImportsCode)
+  "App/CoreSpec.lean:3: App.CoreSpec (CoreSpec) meta-imports App.CoreCode (CoreCode), which is not owned"
+
+#guard mentions (renderedIn (.specImport `App.CoreSpec codeMetaImport) specImportsCode)
+  "Move what App.CoreSpec uses from App.CoreCode into a CoreSpec module and delete line 3, `meta import App.CoreCode`"
+
+#guard mentions (renderedIn (.ownedClaim (claimIn `App.CoreSpec (some `App.CoreSpec))) ownedClaimOutside)
+  "App/CoreSpec.lean:6: WorldClaim App.CoreSpec.Agrees is declared in App.CoreSpec (CoreSpec)"
+
+#guard mentions (renderedIn (.ownedClaim (claimIn `App.CoreSpec (some `App.CoreSpec))) ownedClaimOutside)
+  "Move the `WorldClaim Agrees` command and its doc comment from App/CoreSpec.lean to a WorldSpec module"
+
+#guard mentions (renderedIn (.ownedClaim (claimIn `App.WorldSpec (some `Other))) ownedClaimUnregistered worldLake)
+  "App.WorldSpec adds App.WorldSpec.Agrees to the world claims without the `WorldClaim` command"
+
+#guard mentions (renderedIn (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec) derivedSpec)
+  "`deriving` makes App.CoreSpec.instBEqTree a `partial` definition in App.CoreSpec (CoreSpec)"
+
+#guard samples.all fun sample => match sample.1 with
+  | .ownedViolation _ | .specImport .. | .ownedClaim _ | .derivedPartial .. =>
+    mentions (messageOf sample).render "is owned, so no edit to the editable files fixes it" &&
+      mentions (messageOf sample).render "and delete owned.lock if there is one, then run `lake build`."
+  | _ => true
 
 #guard says (.privateAuxiliary `App.double_even (privateName "proof_1")) "elaborates to the private constant proof_1"
 

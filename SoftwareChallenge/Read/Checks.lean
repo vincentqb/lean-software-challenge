@@ -3,6 +3,7 @@ module
 public meta import Lean
 public meta import SoftwareChallenge.Commands
 public meta import SoftwareChallenge.CoreCode.Facts
+public meta import SoftwareChallenge.CoreCode.Classify
 public meta import SoftwareChallenge.Read.Source
 public meta import SoftwareChallenge.Read.Constants
 public meta import SoftwareChallenge.Read.Inventory
@@ -36,11 +37,13 @@ def catalogEvidence (modules : Array CatalogModule) : MetaM (Array (Evidence × 
 def claimUses (challenge : ChallengeFacts) (evidence : Array (Evidence × CheckFact)) (budget : Nat := matchBudget) :
     MetaM (Array ClaimUse) :=
   challenge.headlines.flatMapM fun headline => do
-    if headline.claims.isEmpty then return #[]
+    let claimed := headline.claimed challenge
+    if claimed.isEmpty then return #[]
     let levels ← mkFreshLevelMVars headline.target.constant.levels.length
     let type := (exprOf headline.target.constant.type).instantiateLevelParams headline.target.constant.levels levels
     let (patterns, _, _) ← forallMetaTelescope (← Telescope.unfolded type)
-    headline.claims.mapM fun (index, claim, statement) => do
+    claimed.mapM fun (index, claim, _) => do
+      let statement := ((headline.telescope[index]?).map (·.conclusion)).getD (toString claim)
       let checks ← match patterns[index]? with
         | some pattern => do
           let (_, _, expected) ← forallMetaTelescope (← Telescope.unfolded (← inferType pattern))

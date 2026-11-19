@@ -2,6 +2,8 @@ module
 
 public import SoftwareChallenge.CoreCode.Facts
 public import SoftwareChallenge.CoreSpec.Statement
+public import SoftwareChallenge.CoreCode.Classify
+public import SoftwareChallenge.CoreCode.Layering
 public import SoftwareChallenge.CoreCode.Match
 public import SoftwareChallenge.CoreCode.Format
 
@@ -38,14 +40,6 @@ def plain : Name → Bool
   | .anonymous => false
   | .str parent component => (parent == .anonymous || plain parent) && plainComponent component
   | .num _ _ => false
-
-def mentioned : Shape → List Name
-  | .const name _ => [name]
-  | .app function argument => mentioned function ++ mentioned argument
-  | .lam type body | .forallE type body => mentioned type ++ mentioned body
-  | .letE type value body => mentioned type ++ mentioned value ++ mentioned body
-  | .proj _ _ value => mentioned value
-  | .bvar _ | .fvar _ | .mvar _ | .sort _ | .natLit _ | .strLit _ => []
 
 def negated? : Shape → Option Shape
   | .app (.const name []) statement => if name = ``Not then some statement else none
@@ -103,7 +97,7 @@ def unreproducible (headline : HeadlineFact) : Bool :=
   headline.target.auxiliaries.any (·.isPrivate)
 
 def mentionsReplaceable (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
-  (mentioned headline.target.constant.type).any challenge.isReplaceable
+  headline.target.constant.type.constants.any challenge.isReplaceable
 
 def killsHeadline (challenge : ChallengeFacts) (headline : HeadlineFact) (kill : Shape) : Bool :=
   killedBy challenge.isReplaceable headline.target.constant.type (challenge.othersOf headline) kill
@@ -121,17 +115,19 @@ def unmarked (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
   challenge.headlines.any (fun other => killsHeadline challenge headline other.target.constant.type) ||
     killsAnother challenge headline
 
-def needsWitness (headline : HeadlineFact) : Bool :=
-  headline.binders.any fun binder => binder.kind != .claim && binder.mentions
+def needsWitness (challenge : ChallengeFacts) (headline : HeadlineFact) : Bool :=
+  (headline.binders challenge).any fun binder => binder.kind != .claim && binder.mentions
 
-def closedHypotheses (headline : HeadlineFact) : List Binder :=
-  headline.binders.filter fun binder => binder.kind == .precondition && binder.refers.isEmpty
+def closedHypothesis (challenge : ChallengeFacts) (headline : HeadlineFact) (index : Nat) (binder : BinderFact) :
+    Bool :=
+  Telescope.kindAt challenge.isClaim headline.telescope index binder == .precondition &&
+    (Telescope.refersAt index binder).isEmpty
 
-def hypothesisText (headline : HeadlineFact) (index : Nat) : String :=
-  (headline.unnamed[index]?).getD s!"the hypothesis numbered {index + 1} that mentions no input"
+def closedHypotheses (challenge : ChallengeFacts) (headline : HeadlineFact) : List BinderFact :=
+  (headline.telescope.zipIdx.filter fun (binder, index) => closedHypothesis challenge headline index binder).map (·.1)
 
 def ownsModule (challenge : ChallengeFacts) (module : Name) : Bool :=
-  challenge.closure.contains module || Role.ofName module == .coreSpec || Role.ofName module == .worldSpec
+  challenge.owns module
 
 def ownedPaths (lake : LakeFacts) (challenge : ChallengeFacts) : Array String :=
   lake.configFiles ++ #[challenge.file] ++ (lake.modules.filter (ownsModule challenge ·.module)).map (·.file)
@@ -180,8 +176,43 @@ def programErrors (lake : LakeFacts) : Array Error :=
 def specRole (module : Name) : Bool :=
   Role.ofName module == .coreSpec || Role.ofName module == .worldSpec
 
+def statementRoots (lake : LakeFacts) (challenge : Name) : Array Name :=
+  #[challenge] ++ ((lake.modules.filter fun source => specRole source.module && source.module != challenge).map
+    (·.module))
+
 def codeRole (module : Name) : Bool :=
   Role.ofName module == .coreCode || Role.ofName module == .worldCode
+
+def ownedInventory (challenge : ChallengeFacts) : Inventory :=
+  challenge.owned.inventory.restrictedTo challenge.owns
+
+def ownedViolationErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
+  (lake.project.violations (ownedInventory challenge)).map .ownedViolation
+
+def specImportErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
+  challenge.owned.inventory.modules.flatMap fun fact =>
+    if specRole fact.name then
+      fact.imports.filterMap fun dependency =>
+        if builds lake dependency.name && !ownsModule challenge dependency.name then
+          some (.specImport fact.name dependency)
+        else none
+    else #[]
+
+def claimDeclared (lake : LakeFacts) (registration : RegistrationFact) : Bool :=
+  registration.home? == some registration.module && lake.project.role? registration.module == some .worldSpec
+
+def ownedClaimErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
+  challenge.owned.registrations.filterMap fun registration =>
+    if ownsModule challenge registration.module && !claimDeclared lake registration then some (.ownedClaim registration)
+    else none
+
+def derivedPartialErrors (challenge : ChallengeFacts) : Array Error :=
+  challenge.owned.derivedPartials.filterMap fun (declaration, module) =>
+    if ownsModule challenge module then some (.derivedPartial declaration module) else none
+
+def ownerErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
+  ownedViolationErrors lake challenge ++ specImportErrors lake challenge ++ ownedClaimErrors lake challenge ++
+    derivedPartialErrors challenge
 
 def importErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
   challenge.runtimeImports.filterMap fun line =>
@@ -246,18 +277,17 @@ def killErrors (challenge : ChallengeFacts) : Array Error :=
 
 def holeErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.holes.filterMap fun hole =>
-    if challenge.headlines.any (fun headline => (mentioned headline.target.constant.type).contains hole.constant.name)
+    if challenge.headlines.any (fun headline => headline.target.constant.type.constants.contains hole.constant.name)
     then none
     else some (.unmentionedHole hole.constant.name)
 
 def hypothesisErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.headlines.flatMap fun headline =>
-    ((closedHypotheses headline).zipIdx.map fun (_, index) =>
-      Error.unnamedHypothesis headline.target.constant.name (hypothesisText headline index)).toArray
+    ((closedHypotheses challenge headline).map (Error.unnamedHypothesis headline.target.constant.name)).toArray
 
 def witnessErrors (challenge : ChallengeFacts) : Array Error :=
   (challenge.headlines.filterMap fun headline =>
-    if needsWitness headline && hasKill challenge headline.target.constant.name &&
+    if needsWitness challenge headline && hasKill challenge headline.target.constant.name &&
         !challenge.witnesses.any (·.headline == headline.target.constant.name) then
       some (.witnessMissing headline.target.constant.name)
     else none) ++
@@ -272,7 +302,7 @@ def terminationErrors (challenge : ChallengeFacts) : Array Error :=
         hasKill challenge termination.headline then #[]
       else #[.terminatesWithoutKill termination.headline termination.definition]) ++
     (if challenge.headlines.all fun headline => headline.target.constant.name != termination.headline ||
-        (mentioned headline.target.constant.type).contains termination.definition then #[]
+        headline.target.constant.type.constants.contains termination.definition then #[]
       else #[.terminatesUnmentioned termination.headline termination.definition])
 
 def unreadErrors (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Array Error :=
@@ -292,7 +322,7 @@ def setupErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
 
 def ownershipErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
   importErrors lake challenge ++ closureErrors lake challenge ++ filledErrors challenge ++ axiomErrors challenge ++
-    privateErrors challenge ++ plainErrors challenge
+    privateErrors challenge ++ plainErrors challenge ++ ownerErrors lake challenge
 
 def meaningErrors (challenge : ChallengeFacts) : Array Error :=
   duplicateErrors challenge ++ mentionErrors challenge ++ unmarkedErrors challenge ++ noKillErrors challenge ++
@@ -334,70 +364,6 @@ def run (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Re
     writes := if found.isEmpty then writesOf lake files challenge else { lock? := none, config? := none }
     killSearch := #[]
     code := if found.isEmpty then 0 else 1 }
-
-theorem mem_mentioned {name : Name} {shape : Shape} : name ∈ mentioned shape ↔ shape.Mentions name := by
-  induction shape with
-  | const constant levels =>
-    simp only [mentioned, List.mem_singleton]
-    constructor
-    · rintro rfl
-      exact .const levels
-    · intro mentions
-      cases mentions
-      rfl
-  | app function argument ihFunction ihArgument =>
-    simp only [mentioned, List.mem_append, ihFunction, ihArgument]
-    constructor
-    · rintro (inFunction | inArgument)
-      · exact .appFunction inFunction
-      · exact .appArgument inArgument
-    · intro mentions
-      cases mentions with
-      | appFunction inFunction => exact .inl inFunction
-      | appArgument inArgument => exact .inr inArgument
-  | lam type body ihType ihBody =>
-    simp only [mentioned, List.mem_append, ihType, ihBody]
-    constructor
-    · rintro (inType | inBody)
-      · exact .lamType inType
-      · exact .lamBody inBody
-    · intro mentions
-      cases mentions with
-      | lamType inType => exact .inl inType
-      | lamBody inBody => exact .inr inBody
-  | forallE type body ihType ihBody =>
-    simp only [mentioned, List.mem_append, ihType, ihBody]
-    constructor
-    · rintro (inType | inBody)
-      · exact .forallEType inType
-      · exact .forallEBody inBody
-    · intro mentions
-      cases mentions with
-      | forallEType inType => exact .inl inType
-      | forallEBody inBody => exact .inr inBody
-  | letE type value body ihType ihValue ihBody =>
-    simp only [mentioned, List.mem_append, ihType, ihValue, ihBody]
-    constructor
-    · rintro ((inType | inValue) | inBody)
-      · exact .letEType inType
-      · exact .letEValue inValue
-      · exact .letEBody inBody
-    · intro mentions
-      cases mentions with
-      | letEType inType => exact .inl (.inl inType)
-      | letEValue inValue => exact .inl (.inr inValue)
-      | letEBody inBody => exact .inr inBody
-  | proj structureName index value ih =>
-    simp only [mentioned, ih]
-    constructor
-    · exact .proj
-    · intro mentions
-      cases mentions with
-      | proj inValue => exact inValue
-  | bvar | fvar | mvar | sort | natLit | strLit =>
-    simp only [mentioned, List.not_mem_nil, false_iff]
-    intro mentions
-    cases mentions
 
 theorem plainCharacter_eq_true {char : Char} : plainCharacter char = true ↔ Name.PlainCharacter char := by
   simp [plainCharacter, Name.PlainCharacter, and_assoc]

@@ -2,6 +2,7 @@ module
 
 public import SoftwareChallenge.CoreCode.Facts
 public import SoftwareChallenge.CoreCode.Graph
+public import SoftwareChallenge.CoreCode.Classify
 
 public section
 
@@ -37,9 +38,10 @@ structure Assumed where
 def distinctStatements (claims : Array (Nat × Name × String)) : Array String :=
   claims.foldl (init := #[]) fun kept (_, _, statement) => if kept.contains statement then kept else kept.push statement
 
-def assumed (headline : HeadlineFact) : Array Assumed :=
-  (distinctStatements headline.claims).map fun statement =>
-    let merged := headline.claims.filter (·.2.2 == statement)
+def assumed (challenge : ChallengeFacts) (headline : HeadlineFact) : Array Assumed :=
+  let claims := headline.claimed challenge
+  (distinctStatements claims).map fun statement =>
+    let merged := claims.filter (·.2.2 == statement)
     { claim := ((merged[0]?).map (·.2.1)).getD .anonymous, statement, binders := merged.map (·.1) }
 
 def premisesOf? (solution : SolutionFacts) (headline : Name) : Option (Array Nat) :=

@@ -85,8 +85,8 @@ run_cmd Elab.Command.liftCoreM do
   check ((uses.find? (·.headline == member `bump_unchecked)).any fun use => use.claim == fixture `Unchecked &&
       use.checks.isEmpty && use.binder == 0) "an unchecked world claim was misread"
   check (uses.all fun use => use.statement == ((challenge.headlines.find? (·.target.constant.name == use.headline)).bind
-      fun headline => (headline.claims.find? (·.1 == use.binder)).map (·.2.2)).getD "")
-    "a claim use does not carry its headline's statement of the claim"
+      fun headline => (headline.telescope[use.binder]?).map (·.conclusion)).getD "")
+    "a claim use does not carry the peeled conclusion of its headline's claim"
   check ((evidence.filter (·.2.claim == fixture `WrongSuccAgrees)).size == 3)
     "the Checks of the catalog were misread"
   let solution ← readSolution lake (← challengeNamed (fixture `Challenge)) .lint

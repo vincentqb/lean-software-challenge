@@ -84,7 +84,8 @@ theorem Test.run_code_ne_zero_iff (facts : TestFacts) :
   simp only [Test.run, ne_eq, Test.code_eq_zero_iff]
 
 private def passingTests : TestFacts :=
-  { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[] }
+  { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[],
+    testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, libraryPlace := ⟨"lakefile.lean", 1⟩ }
 
 private def unknownTest : TestFacts := { passingTests with unknownOwnTests := #["own"] }
 

@@ -3,6 +3,8 @@ module
 public import SoftwareChallenge.CoreCode.Rules.Statement
 import all SoftwareChallenge.CoreCode.Rules.Statement
 import SoftwareChallenge.Solution.Format
+import SoftwareChallenge.Solution.Admits
+import all SoftwareChallenge.CoreCode.Classify
 
 public section
 
@@ -117,7 +119,7 @@ theorem programErrors_eq_empty {lake : LakeFacts} :
 
 theorem ownsModule_eq_true {challenge : ChallengeFacts} {module : Name} :
     ownsModule challenge module = true ↔ challenge.Owns module := by
-  simp [ownsModule, ChallengeFacts.Owns, Role.Owned, or_assoc]
+  simp [ownsModule, ChallengeFacts.owns, ChallengeFacts.Owns, Role.Owned, or_assoc]
 
 theorem mem_ownedPaths {lake : LakeFacts} {challenge : ChallengeFacts} {path : String} :
     path ∈ ownedPaths lake challenge ↔ lake.Owned challenge path := by
@@ -317,7 +319,7 @@ theorem mentionsReplaceable_eq_true {challenge : ChallengeFacts} {headline : Hea
       ∃ name, challenge.isReplaceable name = true ∧ headline.target.constant.type.Mentions name := by
   unfold mentionsReplaceable
   rw [List.any_eq_true]
-  exact exists_congr fun name => by rw [mem_mentioned, and_comm]
+  exact exists_congr fun name => by rw [Shape.mem_constants, and_comm]
 
 theorem target_mem_targets {challenge : ChallengeFacts} {headline : HeadlineFact}
     (member : headline ∈ challenge.headlines) : headline.target ∈ challenge.targets := by
@@ -495,19 +497,32 @@ theorem killed_of_killErrors {challenge : ChallengeFacts} (killEmpty : killError
       · exact absurd judged (by simp [killedIt]; split <;> simp)
       · exact killedBy_eq_true.mp killedIt
 
-theorem needsWitness_eq_true {headline : HeadlineFact} :
-    needsWitness headline = true ↔ ∃ binder ∈ headline.binders, binder.kind ≠ .claim ∧ binder.mentions = true := by
-  simp [needsWitness, List.any_eq_true]
+theorem needsWitness_eq_true {challenge : ChallengeFacts} {headline : HeadlineFact} :
+    needsWitness challenge headline = true ↔
+      ∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index := by
+  unfold needsWitness HeadlineFact.binders
+  rw [List.any_eq_true]
+  constructor
+  · rintro ⟨summarized, member, holds⟩
+    obtain ⟨index, binder, found, rfl⟩ := Telescope.mem_summary.mp member
+    simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, Telescope.binderAt] at holds
+    exact ⟨index, (Telescope.kindAt_ne_claim_iff found).mp holds.1, binder, found,
+      Telescope.mentions_any_iff.mp holds.2⟩
+  · rintro ⟨index, notClaim, binder, found, mentions⟩
+    refine ⟨Telescope.binderAt challenge.isClaim challenge.isReplaceable headline.telescope index binder,
+      Telescope.mem_summary.mpr ⟨index, binder, found, rfl⟩, ?_⟩
+    simp only [Telescope.binderAt, Bool.and_eq_true, bne_iff_ne, ne_eq]
+    exact ⟨(Telescope.kindAt_ne_claim_iff found).mpr notClaim, Telescope.mentions_any_iff.mpr mentions⟩
 
 theorem witnessErrors_empty {challenge : ChallengeFacts}
     (witnessed : ∀ headline ∈ challenge.headlines,
-      (∃ binder ∈ headline.binders, binder.kind ≠ .claim ∧ binder.mentions = true) →
+      (∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index) →
         ∃ witness ∈ challenge.witnesses, witness.headline = headline.target.constant.name)
     (derived : ∀ witness ∈ challenge.witnesses, witness.derived = true) : witnessErrors challenge = #[] := by
   simp only [witnessErrors, Array.append_eq_empty_iff, Array.filterMap_eq_empty_iff]
   constructor
   · intro headline member
-    cases needs : needsWitness headline
+    cases needs : needsWitness challenge headline
     · simp
     · obtain ⟨witness, witnessMember, named⟩ := witnessed headline member (needsWitness_eq_true.mp needs)
       have found : challenge.witnesses.any (·.headline == headline.target.constant.name) = true :=
@@ -520,7 +535,7 @@ theorem witnessed_of_witnessErrors {challenge : ChallengeFacts} (witnessEmpty : 
     (killed : ∀ headline ∈ challenge.headlines,
       ∃ kill ∈ challenge.kills, kill.headline = headline.target.constant.name) :
     (∀ headline ∈ challenge.headlines,
-      (∃ binder ∈ headline.binders, binder.kind ≠ .claim ∧ binder.mentions = true) →
+      (∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index) →
         ∃ witness ∈ challenge.witnesses, witness.headline = headline.target.constant.name) ∧
       ∀ witness ∈ challenge.witnesses, witness.derived = true := by
   simp only [witnessErrors, Array.append_eq_empty_iff, Array.filterMap_eq_empty_iff] at witnessEmpty
@@ -545,18 +560,70 @@ theorem holeErrors_eq_empty {challenge : ChallengeFacts} :
   simp only [holeErrors, Array.filterMap_eq_empty_iff]
   refine forall_congr' fun hole => imp_congr_right fun _ => ?_
   have mentionedBy : challenge.headlines.any (fun headline =>
-      (mentioned headline.target.constant.type).contains hole.constant.name) = true ↔
+      headline.target.constant.type.constants.contains hole.constant.name) = true ↔
       ∃ headline ∈ challenge.headlines, headline.target.constant.type.Mentions hole.constant.name := by
-    simp [mem_mentioned]
+    simp [Shape.mem_constants]
   rw [← mentionedBy]
   cases challenge.headlines.any _ <;> simp
 
 theorem hypothesisErrors_eq_empty {challenge : ChallengeFacts} :
-    hypothesisErrors challenge = #[] ↔ ∀ headline ∈ challenge.headlines, ∀ binder ∈ headline.binders,
-      binder.kind = .precondition → binder.refers ≠ [] := by
+    hypothesisErrors challenge = #[] ↔ ∀ headline ∈ challenge.headlines, ∀ index binder,
+      headline.telescope[index]? = some binder → headline.Precondition challenge.claims index → binder.Open index := by
   simp only [hypothesisErrors, Array.flatMap_eq_empty_iff, listToArray_eq_empty, List.map_eq_nil_iff,
-    List.zipIdx_eq_nil_iff, closedHypotheses, List.filter_eq_nil_iff]
-  simp
+    closedHypotheses, List.filter_eq_nil_iff]
+  refine forall₂_congr fun headline _ => ?_
+  constructor
+  · intro opened index binder found precondition
+    have kept := opened (binder, index) (List.mem_zipIdx_iff_getElem?.mpr found)
+    simp only [closedHypothesis, Bool.and_eq_true, beq_iff_eq, List.isEmpty_iff, not_and] at kept
+    exact Telescope.refersAt_ne_nil_iff.mp (kept ((Telescope.kindAt_eq_precondition_iff found).mpr precondition))
+  · rintro opened ⟨binder, index⟩ member
+    have found := List.mem_zipIdx_iff_getElem?.mp member
+    simp only [closedHypothesis, Bool.and_eq_true, beq_iff_eq, List.isEmpty_iff, not_and]
+    intro precondition
+    exact Telescope.refersAt_ne_nil_iff.mpr
+      (opened index binder found ((Telescope.kindAt_eq_precondition_iff found).mp precondition))
+
+theorem ownedViolationErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts} :
+    ownedViolationErrors lake challenge = #[] ↔
+      lake.project.Admits (challenge.owned.inventory.restrictedTo challenge.owns) := by
+  rw [ownedViolationErrors, Array.map_eq_empty_iff, ownedInventory, Project.violations_eq_empty_iff_admits]
+
+theorem specImportErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts} :
+    specImportErrors lake challenge = #[] ↔ ∀ fact ∈ challenge.owned.inventory.modules,
+      (Role.ofName fact.name).Owned → ∀ dependency ∈ fact.imports, lake.Builds dependency.name →
+        challenge.Owns dependency.name := by
+  simp only [specImportErrors, Array.flatMap_eq_empty_iff]
+  refine forall₂_congr fun fact _ => ?_
+  by_cases spec : specRole fact.name = true
+  · have owned : (Role.ofName fact.name).Owned := specRole_eq_true.mp spec
+    simp only [spec, ite_true, Array.filterMap_eq_empty_iff, owned, true_implies]
+    refine forall₂_congr fun dependency _ => ?_
+    rw [← builds_eq_true, ← ownsModule_eq_true]
+    cases builds lake dependency.name <;> cases ownsModule challenge dependency.name <;> simp
+  · have notOwned : ¬ (Role.ofName fact.name).Owned := fun owned => spec (specRole_eq_true.mpr owned)
+    simp [spec, notOwned]
+
+theorem claimDeclared_eq_true {lake : LakeFacts} {registration : RegistrationFact} :
+    claimDeclared lake registration = true ↔
+      registration.home? = some registration.module ∧ lake.project.role? registration.module = some .worldSpec := by
+  simp [claimDeclared]
+
+theorem ownedClaimErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts} :
+    ownedClaimErrors lake challenge = #[] ↔ ∀ registration ∈ challenge.owned.registrations,
+      challenge.Owns registration.module →
+        registration.home? = some registration.module ∧ lake.project.role? registration.module = some .worldSpec := by
+  simp only [ownedClaimErrors, Array.filterMap_eq_empty_iff]
+  refine forall₂_congr fun registration _ => ?_
+  rw [← ownsModule_eq_true, ← claimDeclared_eq_true]
+  cases ownsModule challenge registration.module <;> cases claimDeclared lake registration <;> simp
+
+theorem derivedPartialErrors_eq_empty {challenge : ChallengeFacts} :
+    derivedPartialErrors challenge = #[] ↔ ∀ derived ∈ challenge.owned.derivedPartials, ¬ challenge.Owns derived.2 := by
+  simp only [derivedPartialErrors, Array.filterMap_eq_empty_iff]
+  refine forall₂_congr fun ⟨declaration, module⟩ _ => ?_
+  rw [← ownsModule_eq_true]
+  cases ownsModule challenge module <;> simp
 
 theorem ite_empty {condition : Bool} {error : Error} :
     (if condition = true then #[] else #[error]) = #[] ↔ condition = true := by
@@ -577,7 +644,7 @@ theorem terminationErrors_eq_empty {challenge : ChallengeFacts} :
   · simp [hasKill_eq_true]
   · rw [Array.all_eq_true']
     refine forall_congr' fun headline => imp_congr_right fun _ => ?_
-    rw [Bool.or_eq_true, bne_iff_ne, List.contains_iff_mem, mem_mentioned]
+    rw [Bool.or_eq_true, bne_iff_ne, List.contains_iff_mem, Shape.mem_constants]
     constructor
     · rintro (different | mentions) same
       · exact absurd same different
@@ -607,11 +674,12 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
   constructor
   · rintro ⟨locking, found⟩
     obtain ⟨digestedOwned, current⟩ := lockingErrors_eq_empty.mp locking
-    simp only [findings, setupErrors, ownershipErrors, meaningErrors, statedErrors, Array.append_eq_empty_iff,
-      and_assoc] at found
+    simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
+      Array.append_eq_empty_iff, and_assoc] at found
     obtain ⟨challengeEmpty, solutionEmpty, targetEmpty, programEmpty, importEmpty, closureEmpty, filledEmpty,
-      axiomEmpty, privateEmpty, plainEmpty, duplicateEmpty, mentionEmpty, unmarkedEmpty, noKillEmpty, killEmpty,
-      witnessEmpty, holeEmpty, terminationEmpty, hypothesisEmpty, auxiliaryEmpty⟩ := found
+      axiomEmpty, privateEmpty, plainEmpty, ownedViolationEmpty, specImportEmpty, ownedClaimEmpty, derivedEmpty,
+      duplicateEmpty, mentionEmpty, unmarkedEmpty, noKillEmpty, killEmpty, witnessEmpty, holeEmpty, terminationEmpty,
+      hypothesisEmpty, auxiliaryEmpty⟩ := found
     have marked := marked_of_unmarkedErrors unmarkedEmpty duplicateEmpty
     have mentions := mentions_of_mentionErrors mentionEmpty duplicateEmpty auxiliaryEmpty unmarkedEmpty
     have killed := killed_of_noKillErrors noKillEmpty duplicateEmpty auxiliaryEmpty mentions marked
@@ -643,19 +711,27 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
       terminatesNamesHole := fun termination member => (terminations termination member).1
       terminatesOnKilledHeadline := fun termination member => (terminations termination member).2.1
       terminatesMentionsHole := fun termination member => (terminations termination member).2.2
+      ownedAdmitted := ownedViolationErrors_eq_empty.mp ownedViolationEmpty
+      specImportsOwned := specImportErrors_eq_empty.mp specImportEmpty
+      ownedClaimsDeclared := ownedClaimErrors_eq_empty.mp ownedClaimEmpty
+      ownedDerivedTotal := derivedPartialErrors_eq_empty.mp derivedEmpty
       ownedDigested := digestedOwned
       lockCurrent := current }
   · intro complete
     refine ⟨?_, ?_⟩
     · exact lockingErrors_eq_empty.mpr ⟨complete.ownedDigested, complete.lockCurrent⟩
-    · simp only [findings, setupErrors, ownershipErrors, meaningErrors, statedErrors, Array.append_eq_empty_iff,
-        and_assoc]
+    · simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
+        Array.append_eq_empty_iff, and_assoc]
       exact ⟨challengeErrors_eq_empty.mpr complete.challengeFound, solutionErrors_eq_empty.mpr complete.oneSolution,
         targetErrors_eq_empty.mpr complete.statementTarget, programErrors_eq_empty.mpr complete.programRooted,
         importErrors_eq_empty.mpr complete.importsOnlySpecs, closureErrors_eq_empty complete.closureHoldsNoCode,
         filledErrors_eq_empty.mpr complete.declaresOnlyTheoremsAndHoles,
         axiomErrors_eq_empty.mpr complete.assumesNoAxiom, privateErrors_eq_empty.mpr complete.targetsPublic,
-        plainErrors_empty complete.namesPlain, duplicateErrors_eq_empty.mpr complete.headlinesDistinct,
+        plainErrors_empty complete.namesPlain, ownedViolationErrors_eq_empty.mpr complete.ownedAdmitted,
+        specImportErrors_eq_empty.mpr complete.specImportsOwned,
+        ownedClaimErrors_eq_empty.mpr complete.ownedClaimsDeclared,
+        derivedPartialErrors_eq_empty.mpr complete.ownedDerivedTotal,
+        duplicateErrors_eq_empty.mpr complete.headlinesDistinct,
         mentionErrors_empty complete.headlinesMentionHoles, unmarkedErrors_empty complete.killsMarked,
         noKillErrors_empty complete.headlinesKilled, killErrors_empty complete.killsNameHeadlines complete.killsReject,
         witnessErrors_empty complete.preconditionsWitnessed complete.witnessesDerived,
@@ -728,6 +804,14 @@ private theorem accepted : Statement.Complete acceptedLake acceptedFiles accepte
   terminatesNamesHole := by simp [acceptedChallenge]
   terminatesOnKilledHeadline := by simp [acceptedChallenge]
   terminatesMentionsHole := by simp [acceptedChallenge]
+  ownedAdmitted := {
+    placed := by simp [acceptedChallenge, Inventory.restrictedTo]
+    modular := by simp [acceptedChallenge, Inventory.restrictedTo]
+    layered := by simp [acceptedChallenge, Inventory.restrictedTo]
+    pure := by simp [acceptedChallenge, Inventory.restrictedTo] }
+  specImportsOwned := by simp [acceptedChallenge]
+  ownedClaimsDeclared := by simp [acceptedChallenge]
+  ownedDerivedTotal := by simp [acceptedChallenge]
   ownedDigested := fun path owned => by
     rcases owned with listed | named | ⟨source, listed, -, filed⟩
     · simp [acceptedLake] at listed

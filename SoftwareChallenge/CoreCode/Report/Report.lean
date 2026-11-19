@@ -75,7 +75,7 @@ private def assumptionsOf (facts : Facts) (headline : HeadlineFact) (short : Nam
   let checksOf := fun (index : Nat) =>
     ((facts.solution.claimUses.find? fun use => use.headline == name && use.binder == index).map fun use =>
       (use.checks.filter (·.2 == .matched)).size).getD 0
-  let groups := Lint.assumed headline
+  let groups := Lint.assumed facts.challenge headline
   groups.map fun group =>
     { label := if (groups.filter (·.claim == group.claim)).size > 1 then group.statement else short group.claim
       checks := ((group.binders[0]?).map checksOf).getD 0

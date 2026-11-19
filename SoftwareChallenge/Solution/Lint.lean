@@ -346,8 +346,9 @@ theorem unusedByProof_iff (solution : SolutionFacts) (proved : Bool) (headline :
     simp only [Option.any_some, Bool.and_eq_true, Array.all_eq_true', Bool.not_eq_true', Bool.eq_false_iff, ne_eq,
       Array.contains_iff_mem, Option.some.injEq, exists_eq_left']
 
-theorem mem_binders_assumed {headline : HeadlineFact} {group : Assumed} (member : group ∈ assumed headline)
-    (index : Nat) : index ∈ group.binders ↔ ∃ claim, (index, claim, group.statement) ∈ headline.claims := by
+theorem mem_binders_assumed {challenge : ChallengeFacts} {headline : HeadlineFact} {group : Assumed}
+    (member : group ∈ assumed challenge headline) (index : Nat) :
+    index ∈ group.binders ↔ ∃ claim, (index, claim, group.statement) ∈ headline.claimed challenge := by
   obtain ⟨statement, -, rfl⟩ := Array.mem_map.mp member
   simp only [Array.mem_map, Array.mem_filter, beq_iff_eq]
   constructor
@@ -390,9 +391,9 @@ theorem mem_distinctStatements (claims : Array (Nat × Name × String)) (stateme
   rw [distinctStatements, ← Array.foldl_toList]
   simpa using mem_foldl_distinct claims.toList #[] statement
 
-theorem assumed_complete {headline : HeadlineFact} {index : Nat} {claim : Name} {statement : String}
-    (listed : (index, claim, statement) ∈ headline.claims) :
-    ∃ group ∈ assumed headline, group.statement = statement ∧ index ∈ group.binders := by
+theorem assumed_complete {challenge : ChallengeFacts} {headline : HeadlineFact} {index : Nat} {claim : Name}
+    {statement : String} (listed : (index, claim, statement) ∈ headline.claimed challenge) :
+    ∃ group ∈ assumed challenge headline, group.statement = statement ∧ index ∈ group.binders := by
   refine ⟨_, Array.mem_map.mpr ⟨statement, (mem_distinctStatements _ _).mpr ⟨_, listed, rfl⟩, rfl⟩, rfl, ?_⟩
   exact Array.mem_map.mpr ⟨(index, claim, statement), Array.mem_filter.mpr ⟨listed, by simp⟩, rfl⟩
 
@@ -418,25 +419,22 @@ theorem undecidedChecks_eq_empty_iff (facts : Facts) : undecidedChecks facts = #
   exact forall₂_congr fun _ _ => filterMap_ite_eq_empty
 
 theorem uncheckedClaims_eq_empty_iff (facts : Facts) : uncheckedClaims facts = #[] ↔
-    ∀ headline ∈ facts.challenge.headlines, ∀ index binder, headline.binders[index]? = some binder →
-      binder.kind = .claim → ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧
-        use.binder = index ∧ ∃ check ∈ use.checks, check.2 = .matched := by
+    ∀ headline ∈ facts.challenge.headlines, ∀ index, headline.Claim facts.challenge.claims index →
+      ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧ use.binder = index ∧
+        ∃ check ∈ use.checks, check.2 = .matched := by
   rw [uncheckedClaims, Array.flatMap_eq_empty_iff]
   apply forall₂_congr
   intro headline _
   rw [Array.filterMap_eq_empty_iff]
   constructor
-  · intro covered index binder found claim
-    have inRange : index < headline.binders.length := (List.getElem?_eq_some_iff.mp found).1
-    have this := covered index (Array.mem_range.mpr inRange)
-    simp only [found, ite_eq_left_iff, reduceCtorEq, imp_false, Classical.not_not] at this
-    exact this claim
-  · intro covered index _
-    split
-    · next binder found =>
-      simp only [ite_eq_left_iff, reduceCtorEq, imp_false, Classical.not_not]
-      exact covered index binder found
-    · rfl
+  · intro covered index claimed
+    obtain ⟨binder, found, -, -, claim, -, concludes⟩ := id claimed
+    have listed := covered _ (HeadlineFact.mem_claimed.mpr ⟨binder, found, claimed, concludes, rfl⟩)
+    simpa only [ite_eq_left_iff, reduceCtorEq, imp_false, Classical.not_not] using listed
+  · rintro covered ⟨index, claim, statement⟩ listed
+    obtain ⟨-, -, claimed, -, -⟩ := HeadlineFact.mem_claimed.mp listed
+    simp only [ite_eq_left_iff, reduceCtorEq, imp_false, Classical.not_not]
+    exact covered index claimed
 
 theorem hiddenDependencies_eq_empty_iff (facts : Facts) : hiddenDependencies facts = #[] ↔
     ∀ package ∈ facts.lake.packages, package.Visible facts.lake.packageDir :=
@@ -475,9 +473,9 @@ theorem pendingOf_eq_empty_iff (facts : Facts) : pendingOf facts = #[] ↔
     (facts.lake.Program → (∃ main, facts.solution.main? = some main) ∧
       ∀ hole ∈ facts.challenge.holes, Relation.TransGen facts.solution.Calls `main hole.constant.name) ∧
     (∀ use ∈ facts.solution.claimUses, ∀ check ∈ use.checks, check.2 ≠ .undecided) ∧
-    (∀ headline ∈ facts.challenge.headlines, ∀ index binder, headline.binders[index]? = some binder →
-      binder.kind = .claim → ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧
-        use.binder = index ∧ ∃ check ∈ use.checks, check.2 = .matched) ∧
+    (∀ headline ∈ facts.challenge.headlines, ∀ index, headline.Claim facts.challenge.claims index →
+      ∃ use ∈ facts.solution.claimUses, use.headline = headline.target.constant.name ∧ use.binder = index ∧
+        ∃ check ∈ use.checks, check.2 = .matched) ∧
     (∀ package ∈ facts.lake.packages, package.Visible facts.lake.packageDir) := by
   simp only [pendingOf, Array.append_eq_empty_iff, unproved_eq_empty_iff, Array.forall_mem_map,
     undecidedChecks_eq_empty_iff, uncheckedClaims_eq_empty_iff, hiddenDependencies_eq_empty_iff, and_assoc]

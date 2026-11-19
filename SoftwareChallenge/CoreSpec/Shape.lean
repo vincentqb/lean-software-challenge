@@ -78,6 +78,33 @@ inductive Mentions (name : Name) : Shape → Prop where
   | proj {structureName : Name} {index : Nat} {value : Shape} :
       Mentions name value → Mentions name (.proj structureName index value)
 
+inductive Refers : Nat → Shape → Prop where
+  | bvar (index : Nat) : Refers index (.bvar index)
+  | appFunction {index : Nat} {function argument : Shape} :
+      Refers index function → Refers index (.app function argument)
+  | appArgument {index : Nat} {function argument : Shape} :
+      Refers index argument → Refers index (.app function argument)
+  | lamType {index : Nat} {type body : Shape} : Refers index type → Refers index (.lam type body)
+  | lamBody {index : Nat} {type body : Shape} : Refers (index + 1) body → Refers index (.lam type body)
+  | forallEType {index : Nat} {type body : Shape} : Refers index type → Refers index (.forallE type body)
+  | forallEBody {index : Nat} {type body : Shape} : Refers (index + 1) body → Refers index (.forallE type body)
+  | letEType {index : Nat} {type value body : Shape} : Refers index type → Refers index (.letE type value body)
+  | letEValue {index : Nat} {type value body : Shape} : Refers index value → Refers index (.letE type value body)
+  | letEBody {index : Nat} {type value body : Shape} : Refers (index + 1) body → Refers index (.letE type value body)
+  | proj {index : Nat} {structureName : Name} {field : Nat} {value : Shape} :
+      Refers index value → Refers index (.proj structureName field value)
+
+def conclusion : Shape → Shape
+  | .forallE _ body => body.conclusion
+  | shape => shape
+
+def appHead : Shape → Shape
+  | .app applied _ => applied.appHead
+  | shape => shape
+
+def Concludes (shape : Shape) (claim : Name) : Prop :=
+  ∃ levels, shape.conclusion.appHead = .const claim levels
+
 def KilledBy (headline : Shape) (replaceable : Name → Bool) (others : List Shape) (kill : Shape) : Prop :=
   ∃ σ : Witnesses, (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧ headline.subst replaceable σ ≠ headline ∧
     (kill = (headline.subst replaceable σ).negation ∨

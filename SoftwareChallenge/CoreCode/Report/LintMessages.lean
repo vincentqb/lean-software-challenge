@@ -10,6 +10,51 @@ namespace SoftwareChallenge
 
 open Lean
 
+def standardAxiomList : String := "propext, Classical.choice, and Quot.sound"
+
+def Role.allowedImports : Role → String
+  | .coreSpec => "only CoreSpec modules and modules outside the package"
+  | .worldSpec => "only CoreSpec and WorldSpec modules and modules outside the package"
+  | .coreCode => "only CoreSpec and CoreCode modules and modules outside the package"
+  | .worldCode => "any module except tooling"
+  | .tooling => "any module"
+
+def Role.importPurpose : Role → String
+  | .coreSpec => "the statements rest only on pure definitions"
+  | .worldSpec => "claims about the world rest only on the statements' definitions"
+  | .coreCode => "pure code never reaches foreign code or effects"
+  | .worldCode => "the program never runs tooling"
+  | .tooling => "nothing constrains it"
+
+def Role.purity : Role → String
+  | .coreSpec | .coreCode => "must be pure and total, so that the proofs are about the code that runs"
+  | .worldSpec => "may declare foreign code only as `@[extern] opaque`, so that the kernel never unfolds it"
+  | .worldCode => "may do IO but not use `unsafe`, `@[extern]`, or `@[implemented_by]`, so that the code that \
+      runs is the code proved"
+  | .tooling => "may do anything"
+
+def Reason.offence : Reason → String
+  | .«unsafe» => "`unsafe`"
+  | .«partial» => "`partial`"
+  | .extern => "`@[extern]`"
+  | .implementedBy => "`@[implemented_by]`"
+  | .initializer => "an initializer"
+  | .io => "IO"
+  | .debug => "a dbg builtin"
+  | .unfoldableExtern => "`@[extern]` with a body the kernel unfolds"
+
+def Reason.cure (reason : Reason) (name : Name) : String :=
+  match reason with
+  | .«unsafe» => s!"remove `unsafe` from {name}"
+  | .«partial» => s!"remove `partial` from {name} and recurse structurally or with `termination_by`"
+  | .extern => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, as \
+      `@[extern] opaque`"
+  | .implementedBy => s!"remove `@[implemented_by]` from {name}"
+  | .initializer => s!"move the initializer of {name} to a WorldCode module"
+  | .io => s!"move {name} to a WorldCode module"
+  | .debug => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
+  | .unfoldableExtern => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
+
 namespace Lint
 
 def matchBudget : Nat := 200000
@@ -65,8 +110,18 @@ private def placeIn? (facts : Facts) (module name : Name) : Option DeclarationPl
     let file := fileOf facts module
     facts.solution.places.find? fun found => found.name == name && found.place.file == file
 
+def parentOf? (parents : Array (Name × Name)) (name : Name) : Option Name :=
+  (parents.find? (·.1 == name)).map (·.2)
+
+def settled (parents : Array (Name × Name)) (name : Name) : Name :=
+  (List.range name.getNumParts).foldl (fun current _ => (parentOf? parents current).getD current) name
+
+def anchorIn (parents : Array (Name × Name)) (placed : Name → Bool) (name : Name) : Name :=
+  let written := settled parents (ownerOf (settled parents name))
+  ((written :: prefixes written ++ [ownerOf name, name]).find? placed).getD name
+
 def anchorOf (facts : Facts) (module name : Name) : Name :=
-  ((name :: ownerOf name :: prefixes name).find? fun candidate => (placeIn? facts module candidate).isSome).getD name
+  anchorIn facts.solution.parents (fun candidate => (placeIn? facts module candidate).isSome) name
 
 def declarationPlace (facts : Facts) (module name : Name) : Place :=
   match placeIn? facts module (anchorOf facts module name) with
@@ -167,50 +222,6 @@ private def renamedInto (role : Role) (module : Name) : Name :=
   | root :: rest@(_ :: _) => (root :: Name.mkSimple (toString role) :: rest).foldl (· ++ ·) .anonymous
   | _ => module ++ Name.mkSimple (toString role)
 
-private def standardList : String := "propext, Classical.choice, and Quot.sound"
-
-private def allowedImports : Role → String
-  | .coreSpec => "only CoreSpec modules and modules outside the package"
-  | .worldSpec => "only CoreSpec and WorldSpec modules and modules outside the package"
-  | .coreCode => "only CoreSpec and CoreCode modules and modules outside the package"
-  | .worldCode => "any module except tooling"
-  | .tooling => "any module"
-
-private def importPurpose : Role → String
-  | .coreSpec => "the statements rest only on pure definitions"
-  | .worldSpec => "claims about the world rest only on the statements' definitions"
-  | .coreCode => "pure code never reaches foreign code or effects"
-  | .worldCode => "the program never runs tooling"
-  | .tooling => "nothing constrains it"
-
-private def purity : Role → String
-  | .coreSpec | .coreCode => "must be pure and total, so that the proofs are about the code that runs"
-  | .worldSpec => "may declare foreign code only as `@[extern] opaque`, so that the kernel never unfolds it"
-  | .worldCode => "may do IO but not use `unsafe`, `@[extern]`, or `@[implemented_by]`, so that the code that \
-      runs is the code proved"
-  | .tooling => "may do anything"
-
-private def offence : Reason → String
-  | .«unsafe» => "`unsafe`"
-  | .«partial» => "`partial`"
-  | .extern => "`@[extern]`"
-  | .implementedBy => "`@[implemented_by]`"
-  | .initializer => "an initializer"
-  | .io => "IO"
-  | .debug => "a dbg builtin"
-  | .unfoldableExtern => "`@[extern]` with a body the kernel unfolds"
-
-private def cure (name : Name) : Reason → String
-  | .«unsafe» => s!"remove `unsafe` from {name}"
-  | .«partial» => s!"remove `partial` from {name} and recurse structurally or with `termination_by`"
-  | .extern => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, as \
-      `@[extern] opaque`"
-  | .implementedBy => s!"remove `@[implemented_by]` from {name}"
-  | .initializer => s!"move the initializer of {name} to a WorldCode module"
-  | .io => s!"move {name} to a WorldCode module"
-  | .debug => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
-  | .unfoldableExtern => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
-
 private def kindOf : ConstantKind → String
   | .assumed => "an axiom"
   | .defined .safe => "a def"
@@ -301,11 +312,12 @@ private def faultOf (axiomName culprit : Name) (nativePlace file : String) : Fau
       let replacement := if tactic == `native_decide then "`decide`" else "a proof the kernel checks, such as `decide`"
       let fix := s!"Replace `{tactic}` at {nativePlace} with {replacement}"
       { what := s!"{culprit} is proved with `{tactic}`, which asserts the evaluated result as an axiom"
-        why := s!"but the comparator permits only {standardList}, so the proof is not checked", fix, ownerFix := fix }
+        why := s!"but the comparator permits only {standardAxiomList}, so the proof is not checked", fix
+        ownerFix := fix }
     | none =>
       let shown := privateToUserName axiomName
       { what := s!"{culprit} depends on axiom {shown}"
-        why := s!"but the comparator permits only {standardList}, so its proof is not checked"
+        why := s!"but the comparator permits only {standardAxiomList}, so its proof is not checked"
         fix := s!"Prove {culprit} without {shown}", ownerFix := s!"Prove {culprit} without {shown} in {file}" }
 
 private def axiomWhose (axiomName : Name) : String :=
@@ -323,7 +335,7 @@ private def blameMessage (facts : Facts) (blame : AxiomBlame) : Message :=
   if blame.axiomName == blame.declaration then
     withOwner owner?
       { place, what := s!"`axiom {shown}` asserts {shown} without proof"
-        why := s!"but the comparator permits only {standardList}"
+        why := s!"but the comparator permits only {standardAxiomList}"
         fix := s!"Delete `axiom {shown}` and prove what uses it", next := .lint }
       s!"Delete `axiom {shown}` from {file}, and state it as a headline of {facts.challenge.file} or as a WorldClaim \
         in a WorldSpec module"
@@ -364,7 +376,7 @@ private def forbiddenImportMessage (facts : Facts) (module dependency : Name) (r
   let message : Message :=
     { place := ⟨file, line⟩
       what := s!"{module} ({role}) {if comptime then "meta-imports" else "imports"} {located facts dependency}"
-      why := s!"but {role} may import {allowedImports role}, so that {importPurpose role}"
+      why := s!"but {role} may import {role.allowedImports}, so that {role.importPurpose}"
       fix := s!"Delete line {line}, `{text}`, from {file}", next := .lint }
   match ownedModule? facts module with
   | some owner => withOwner (some owner) message message.fix
@@ -390,17 +402,17 @@ private def impureMessage (facts : Facts) (declaration : Name) (role : Role) (re
       | some found => if found.firstLine.isEmpty then s!"initialize {shown}" else found.firstLine
       | none => s!"initialize {shown}"
     let others := reasons.filter fun reason => reason != .initializer && reason != .io
-    let also := if others.isEmpty then "" else s!", and {" and ".intercalate (others.map (cure shown))}"
+    let also := if others.isEmpty then "" else s!", and {" and ".intercalate (others.map (·.cure shown))}"
     withOwner owner?
       { place, what := s!"`{quoted}` runs IO when the program starts, in {site}"
-        why := s!"but {role} code {purity role}"
+        why := s!"but {role} code {role.purity}"
         fix := s!"Move it to a WorldCode module{also}", next := .lint }
       s!"Move it from {file} to a WorldCode module{also}"
   else
-    let fix := (" and ".intercalate (reasons.map (cure shown))).capitalize
+    let fix := (" and ".intercalate (reasons.map (·.cure shown))).capitalize
     withOwner owner?
-      { place, what := s!"{shown} uses {" and ".intercalate (reasons.map offence)} in {site}"
-        why := s!"but {role} code {purity role}", fix, next := .lint }
+      { place, what := s!"{shown} uses {" and ".intercalate (reasons.map Reason.offence)} in {site}"
+        why := s!"but {role} code {role.purity}", fix, next := .lint }
       s!"{fix} in {file}"
 
 private def violationMessage (facts : Facts) : Violation → Message
@@ -470,8 +482,9 @@ def Error.message (facts : Facts) : Error → Message
     let line := max 1 dependency.line
     let role := Role.ofName module
     { place := ⟨file, line⟩, what := s!"{module} ({role}) meta-imports {located facts dependency.name}"
-      why := s!"but {role} may import {allowedImports role}, with `meta import` too, so that the statement rests only on \
-        owned files: a solution may edit {dependency.name}, and with it the statement, while owned.lock stays the same"
+      why := s!"but {role} may import {role.allowedImports}, with `meta import` too, so that the statement rests only \
+        on owned files: a solution may edit {dependency.name}, and with it the statement, while owned.lock stays the \
+        same"
       fix := s!"Move what {module} uses from {dependency.name} into a CoreSpec module and delete line {line}, \
         `{importText facts module dependency.name true}`, from {file}; then delete owned.lock and run `lake build`"
       next := .lint }
@@ -687,11 +700,13 @@ def Error.message (facts : Facts) : Error → Message
         .olean.private exists"
       next := .lint }
 
+private def claimBinder? (facts : Facts) (use : ClaimUse) : Option BinderFact :=
+  (facts.challenge.headlines.find? (·.target.constant.name == use.headline)).bind fun headline =>
+    headline.telescope[use.binder]?
+
 private def claimShown (facts : Facts) (use : ClaimUse) : String :=
-  let written := (facts.challenge.headlines.find? (·.target.constant.name == use.headline)).bind fun headline =>
-    (headline.claims.find? (·.1 == use.binder)).map (·.2.2)
-  match written with
-  | some text => if text.isEmpty then use.statement else text
+  match claimBinder? facts use with
+  | some binder => if binder.shown.isEmpty then use.statement else binder.shown
   | none => use.statement
 
 def Pending.message (facts : Facts) : Pending → Message
@@ -709,7 +724,7 @@ def Pending.message (facts : Facts) : Pending → Message
       { place := foundPlace facts module name, what := s!"{what} is proved in {module} with an axiom the comparator \
           does not permit"
         why := "so its proof is not checked"
-        fix := s!"Prove {name} with only {standardList}", next := .lint }
+        fix := s!"Prove {name} with only {standardAxiomList}", next := .lint }
     | .absent =>
       if hole then
         { place := here, what := s!"hole {name} is not implemented yet", why := purposeOf facts name
@@ -793,8 +808,9 @@ def Pending.message (facts : Facts) : Pending → Message
   | .uncheckedClaim use =>
     let use := if use.statement.isEmpty then { use with statement := toString use.claim } else use
     let shown := claimShown facts use
-    let chosen := if shown.startsWith "∀" then ", with a value of your choice in place of each variable it quantifies"
-      else ""
+    let variables := ((claimBinder? facts use).map (·.variables)).getD #[]
+    let chosen := if variables.isEmpty then ""
+      else s!", with a value of your choice in place of {" and ".intercalate variables.toList}"
     { place := hereOf facts use.headline, what := s!"{use.headline} assumes the world claim {shown}"
       why := "which no Check tests against the real foreign code"
       fix := s!"Add `Check {use.statement} := do …`, or `Check {use.statement} : <an instance it implies>`, to \

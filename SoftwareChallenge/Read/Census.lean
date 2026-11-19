@@ -23,6 +23,20 @@ def challengeMisses (env : Environment) (challenge : ChallengeFacts) : Array Nam
     data.constNames.filter (!recorded.contains ·)
   | none => #[]
 
+def closureUnlisted (lake : LakeFacts) (challenge : ChallengeFacts) : IO (Array Name) :=
+  challenge.closure.filterM fun module => do
+    if (packageModules lake).contains module then return false
+    (oleanOf lake module).pathExists
+
+def requireClosureCensus (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) : IO Unit := do
+  let unlisted ← closureUnlisted lake challenge
+  unless unlisted.isEmpty do
+    throw <| .userError ("\n".intercalate (unlisted.map fun module =>
+      s!"{sourcePath module}:1: {challenge.module} imports {module}, which the package builds, but lake.json does \
+        not list it among the package's modules, so the step cannot tell which role it has or record it as owned; \
+        no edit to the package fixes this. Make the facet in SoftwareChallenge's lakefile.lean list every module of \
+        the challenge's import closure that the package builds, then run `{next.command}`.").toList)
+
 def catalogMisses (imported : Imported) (modules : Array Name) (solution : SolutionFacts) : Array (Name × Name) :=
   let recorded : Std.HashSet (Name × Name) :=
     Std.HashSet.ofArray (solution.inventory.declarations.map fun fact => (fact.module, fact.name))
