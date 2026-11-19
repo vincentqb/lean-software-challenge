@@ -49,9 +49,9 @@ run_cmd Elab.Command.liftCoreM do
   let broken := (← IO.currentDir) / ".lake" / "build" / "readTests" / "lake.json"
   IO.FS.createDirAll (broken.parent.getD ".")
   IO.FS.writeFile broken "{\"packageDir\": 1}"
-  let refused ← refusal (discard (loadLake broken))
-  check (refused.any fun message => contains message "is not the JSON object of Lake facts" &&
-      contains message s!"Delete {broken} and run `lake build`")
+  let refused ← refusal (discard (loadLake broken .lint))
+  check (refused.any fun message => contains message s!"{broken}:1: it is not the JSON object of Lake facts" &&
+      contains message s!"Delete {broken} and run `lake build`, then run `lake lint`.")
     s!"an unreadable lake.json was not refused with its fix: {refused}"
 
 end

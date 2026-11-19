@@ -74,7 +74,7 @@ def headlineFact (replaceable : Name → Bool) (holes foreign : Array Name) (tar
   let used := info.type.getUsedConstants
   let replaced := if used.any holes.contains then used.filter holes.contains else used.filter foreign.contains
   let killTemplate? ← if replaced.isEmpty then pure none else some <$> killTemplate info.type replaced
-  let witness? ← try (← Telescope.witnessType replaceable info.type).mapM shown catch _ => pure none
+  let witness? ← (← Telescope.witnessType replaceable info.type).mapM shown
   forallTelescope (← Telescope.unfolded info.type) fun locals body => do
     let summary ← Telescope.summarize replaceable locals
     let mut claims := #[]
@@ -95,11 +95,12 @@ def emptyChallenge (module : Name) (file : String) : ChallengeFacts :=
   { module, file, runtimeImports := #[], metaImports := #[], closure := #[], headlines := #[], kills := #[],
     witnesses := #[], holes := #[], filled := #[], axioms := #[], terminating := #[], replaceable := #[] }
 
-def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environment) : IO ChallengeFacts := do
+def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environment) (next : Next) :
+    IO ChallengeFacts := do
   let some (index, data) := moduleData? env challenge.module
-    | throw <| .userError s!"{challenge.file}: {challenge.module} did not load from its compiled module, so its \
-        statements cannot be read. Run `lake build`, then run the step again."
-  let source ← readSource lake challenge.file
+    | throw <| .userError s!"{challenge.file}:1: {challenge.module} did not load from its compiled module, so its \
+        statements cannot be read. Run `lake build {challenge.module}`, then run `{command next}`."
+  let source ← readSource lake challenge.file next
   let imports := placedImports challenge.module data (← importLines challenge.module challenge.file source)
   let rangesOf := fun (name : Name) => rangesIn env index name
   let placeOf := fun (name : Name) =>
@@ -159,8 +160,12 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environmen
           { target := ← targetOf placed (writtenOf placed) false, headline := headline.info.name, derived := false }
       else unless isKill name do
         let target ← targetOf placed (writtenOf placed) false
-        headlines := headlines.push (← headlineFact replaceable.contains (holes.map (·.info.name)) foreign target
-          placed.info)
+        let read ← try headlineFact replaceable.contains (holes.map (·.info.name)) foreign target placed.info
+          catch failure => throwError "{target.place.file}:{target.place.line}: the step could not read headline \
+            {name} ({failure.toMessageData}), so it cannot tell which claims, preconditions and witness it states; \
+            no edit to the package fixes this. Fix SoftwareChallenge/Read so that it reads the headline, then run \
+            `{command next}`."
+        headlines := headlines.push read
     let holeTargets ← holes.mapM fun placed => targetOf placed (writtenOf placed) false
     return {
       module := challenge.module

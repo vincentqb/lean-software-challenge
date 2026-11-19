@@ -35,7 +35,7 @@ run_cmd Elab.Command.liftCoreM do
   let inputs := #["lakefile.lean", "Challenge.lean", "dir with space/Spec \"quoted\".lean", "Gone.lean", lockFile,
     comparatorFile]
   let lake := lakeIn dir inputs
-  let files ← fileFacts lake
+  let files ← fileFacts lake .build
   check (files.lock == .unreadable lockProblem) s!"owned.lock in the old line format did not read as unreadable"
   check (files.comparator == .decoded config) "comparator.json as `lake build` writes it did not decode"
   check (files.digests.map (·.path) == #["lakefile.lean", "Challenge.lean", "dir with space/Spec \"quoted\".lean"])
@@ -45,22 +45,25 @@ run_cmd Elab.Command.liftCoreM do
     "a digest is not the decimal hash of the file's text"
   let entries : Array Lock.Entry := #[⟨"lakefile.lean", "1"⟩, ⟨"dir with space/Spec \"quoted\".lean", "2"⟩]
   IO.FS.writeFile (dir / "owned.lock") (Lock.render entries)
-  check ((← fileFacts lake).lock == .decoded entries) "owned.lock as `lake build` records it did not decode"
+  check ((← fileFacts lake .build).lock == .decoded entries) "owned.lock as `lake build` records it did not decode"
   IO.FS.removeFile (dir / "owned.lock")
   IO.FS.writeFile (dir / "comparator.json") "{}"
-  let missing ← fileFacts lake
+  let missing ← fileFacts lake .build
   check (missing.lock == .missing && missing.comparator == .unreadable comparatorProblem)
     "a missing owned.lock or an unreadable comparator.json was misread"
-  let outside ← refusal (discard (readInput lake "Secret.lean"))
-  check (outside.any (contains · "lake.json does not list it among the inputs"))
+  let outside ← refusal (discard (readInput lake "Secret.lean" .lint))
+  check (outside.any fun message => contains message "Secret.lean:1: lake.json does not list it among the inputs" &&
+      contains message "no edit to the package fixes this" && contains message "SoftwareChallenge's lakefile.lean" &&
+      contains message "then run `lake lint`.")
     s!"a path outside the inputs was read: {outside}"
-  let unlisted ← refusal (discard (fileFacts (lakeIn dir #["lakefile.lean"])))
-  check (unlisted.any (contains · s!"{lockFile}: lake.json does not list it"))
+  let unlisted ← refusal (discard (fileFacts (lakeIn dir #["lakefile.lean"]) .build))
+  check (unlisted.any (contains · s!"{lockFile}:1: lake.json does not list it"))
     s!"owned.lock was read though the inputs do not list it: {unlisted}"
-  let unnamed ← refusal (discard (readSource lake "Secret.lean"))
-  check (unnamed.any (contains · "names it neither as an input nor as a module's file"))
+  let unnamed ← refusal (discard (readSource lake "Secret.lean" .test))
+  check (unnamed.any fun message => contains message "names it neither as an input nor as a module's file" &&
+      contains message "no edit to the package fixes this" && contains message "then run `lake test`.")
     s!"a source that lake.json does not name was read: {unnamed}"
-  check ((← readSource lake "App/CoreCode.lean") == "") "a module file that does not exist did not read as empty"
+  check ((← readSource lake "App/CoreCode.lean" .build) == "") "a module file that does not exist did not read as empty"
 
 run_cmd Elab.Command.liftCoreM do
   let file := "SoftwareChallengeTests/Fixtures/Challenge.lean"

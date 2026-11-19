@@ -23,8 +23,9 @@ def facts (inventory : Inventory) (name : Name) (module : Name := fixture `Rejec
 
 run_cmd Elab.Command.liftCoreM do
   let lake ← lakeOf catalogNames
-  let env ← catalogEnv lake .anonymous
-  let modules ← catalogModules lake catalogNames env
+  let imported ← catalogEnv lake .anonymous .lint
+  let env := imported.env
+  let modules ← catalogModules lake catalogNames imported .lint
   let read ← runIn env (inventoryFacts modules #[fixture `Fixpoint.countdown])
   let inventory := read.inventory
   check (inventory.modules.map (·.name) == catalogNames) "the inventory did not list every catalog module in order"
@@ -95,7 +96,7 @@ run_cmd Elab.Command.liftCoreM do
 run_cmd Elab.Command.liftCoreM do
   let lake ← lakeOf catalogNames
   let challenge ← challengeNamed (fixture `Challenge)
-  let solution ← readSolution lake challenge
+  let solution ← readSolution lake challenge .lint
   let callsOf := fun (name : Name) => ((solution.calls.find? (·.1 == name)).map (·.2)).getD #[]
   let reached := fun (name : Name) => Graph.closure (Graph.ofEdges solution.calls) #[name]
   check ((callsOf (fixture `identity)).any (privateToUserName · == fixture `helper) &&

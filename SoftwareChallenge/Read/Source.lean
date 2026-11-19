@@ -1,6 +1,7 @@
 module
 
 public meta import Lean
+public meta import SoftwareChallenge.CoreCode.Report.Message
 
 public section
 meta section
@@ -8,6 +9,17 @@ meta section
 open Lean
 
 namespace SoftwareChallenge.Read
+
+def command : Next → String
+  | .build => "lake build"
+  | .lint => "lake lint"
+  | .test => "lake test"
+  | .comparator => "lake comparator"
+  | .replay => "lake script run software_challenge/replay"
+  | .grade commit => s!"lake exe grade {commit}"
+
+def sourcePath (module : Name) : String :=
+  "/".intercalate (module.components.map toString) ++ ".lean"
 
 def oneLine (text : String) : String :=
   " ".intercalate ((text.splitOn "\n").map (·.trimAscii.toString) |>.filter (!·.isEmpty))

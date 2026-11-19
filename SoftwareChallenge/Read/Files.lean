@@ -26,18 +26,18 @@ private def readIfPresent (file : System.FilePath) : IO (Option String) := do
   unless ← file.pathExists do return none
   return some (← IO.FS.readFile file)
 
-def readInput (lake : LakeFacts) (path : String) : IO (Option String) := do
+def readInput (lake : LakeFacts) (path : String) (next : Next) : IO (Option String) := do
   unless lake.inputs.contains path do
-    throw <| .userError s!"{path}: lake.json does not list it among the inputs, so the step may not read it, and \
-      its result would not be traced. List {path} in the inputs that the facet in lakefile.lean writes to lake.json, \
-      then run `lake build`."
+    throw <| .userError s!"{path}:1: lake.json does not list it among the inputs, so the step may not read it, and \
+      its result would not be traced; no edit to the package fixes this. List {path} in the inputs that the facet in \
+      SoftwareChallenge's lakefile.lean writes to lake.json, then run `{command next}`."
   readIfPresent (pathIn lake path)
 
-def readSource (lake : LakeFacts) (path : String) : IO String := do
+def readSource (lake : LakeFacts) (path : String) (next : Next) : IO String := do
   unless named lake path do
-    throw <| .userError s!"{path}: lake.json names it neither as an input nor as a module's file, so the step may \
-      not read it. Name it in the modules or inputs that the facet in lakefile.lean writes to lake.json, then run \
-      `lake build`."
+    throw <| .userError s!"{path}:1: lake.json names it neither as an input nor as a module's file, so the step may \
+      not read it; no edit to the package fixes this. Name it in the modules or inputs that the facet in \
+      SoftwareChallenge's lakefile.lean writes to lake.json, then run `{command next}`."
   return (← readIfPresent (pathIn lake path)).getD ""
 
 def digestOf (text : String) : String := toString (hash text)
@@ -56,13 +56,13 @@ def comparatorProblem : String :=
   s!"{comparatorFile} is not the JSON object of challenge_module, solution_module, theorem_names, \
     definition_names and permitted_axioms that `lake build` writes"
 
-def fileFacts (lake : LakeFacts) : IO FileFacts := do
+def fileFacts (lake : LakeFacts) (next : Next) : IO FileFacts := do
   let digested := lake.inputs.filter fun path => path != lockFile && path != comparatorFile
   return {
-    lock := decode (← readInput lake lockFile) Lock.parse lockProblem
-    comparator := decode (← readInput lake comparatorFile) Config.parse comparatorProblem
+    lock := decode (← readInput lake lockFile next) Lock.parse lockProblem
+    comparator := decode (← readInput lake comparatorFile next) Config.parse comparatorProblem
     digests := ← digested.filterMapM fun path => do
-      return (← readInput lake path).map fun text => { path, digest := digestOf text } }
+      return (← readInput lake path next).map fun text => { path, digest := digestOf text } }
 
 def importLines (module : Name) (file source : String) : IO (Array ImportLine) := do
   let context := Parser.mkInputContext source file

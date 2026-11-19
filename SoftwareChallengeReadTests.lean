@@ -2,6 +2,7 @@ module
 
 import SoftwareChallengeReadTests.Lake
 import SoftwareChallengeReadTests.Files
+import SoftwareChallengeReadTests.Environment
 import SoftwareChallengeReadTests.Inventory
 import SoftwareChallengeReadTests.Challenge
 import SoftwareChallengeReadTests.Solution

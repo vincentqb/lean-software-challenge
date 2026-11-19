@@ -21,24 +21,24 @@ def challengeOf? (lake : LakeFacts) : Option SourceFact :=
   | #[candidate] => some candidate
   | _ => none
 
-def readChallenge (lake : LakeFacts) : IO ChallengeFacts := do
+def readChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do
   let some candidate := challengeOf? lake | return emptyChallenge .anonymous ""
-  let env ← challengeEnv lake candidate.module
-  let challenge ← challengeFacts lake candidate env
-  requireChallengeCensus env challenge
+  let env ← challengeEnv lake candidate.module next
+  let challenge ← challengeFacts lake candidate env next
+  requireChallengeCensus env challenge next
   return challenge
 
-def readSolution (lake : LakeFacts) (challenge : ChallengeFacts) : IO SolutionFacts := do
-  let env ← catalogEnv lake challenge.module
-  let solution ← solutionFacts lake challenge env
-  requireCatalogCensus env lake (catalog lake challenge.module) solution
+def readSolution (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) : IO SolutionFacts := do
+  let imported ← catalogEnv lake challenge.module next
+  let solution ← solutionFacts lake challenge imported next
+  requireCatalogCensus imported lake (catalog lake challenge.module) solution next
   return solution
 
-def readStatement (lake : LakeFacts) : IO (FileFacts × ChallengeFacts) :=
-  return (← fileFacts lake, ← readChallenge lake)
+def readStatement (lake : LakeFacts) (next : Next) : IO (FileFacts × ChallengeFacts) :=
+  return (← fileFacts lake next, ← readChallenge lake next)
 
-def readFacts (lake : LakeFacts) : IO Facts := do
-  let challenge ← readChallenge lake
-  return { lake, files := ← fileFacts lake, challenge, solution := ← readSolution lake challenge }
+def readFacts (lake : LakeFacts) (next : Next) : IO Facts := do
+  let challenge ← readChallenge lake next
+  return { lake, files := ← fileFacts lake next, challenge, solution := ← readSolution lake challenge next }
 
 end SoftwareChallenge.Read

@@ -77,8 +77,10 @@ def foundFact (env : Environment) (modules : Array CatalogModule) (name : Name) 
   return some { constant := constantFact info, module, place, compiled := !isNoncomputable env name, rendered,
                 renderedExplicit }
 
-def solutionFacts (lake : LakeFacts) (challenge : ChallengeFacts) (env : Environment) : IO SolutionFacts := do
-  let modules ← catalogModules lake (catalog lake challenge.module) env
+def solutionFacts (lake : LakeFacts) (challenge : ChallengeFacts) (imported : Imported) (next : Next) :
+    IO SolutionFacts := do
+  let env := imported.env
+  let modules ← catalogModules lake (catalog lake challenge.module) imported next
   let linted ← modules.filterM (serverReadable lake)
   let names := modules.map (·.name)
   let solution? := match names.filter namedSolution with

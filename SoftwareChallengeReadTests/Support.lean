@@ -23,7 +23,7 @@ def lakeOf (modules : Array Name) (challenge? : Option Name := none) (inputs : A
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs }
 
 def challengeNamed (module : Name) : IO ChallengeFacts := do
-  readChallenge (← lakeOf #[] (some module))
+  readChallenge (← lakeOf #[] (some module)) .lint
 
 def headlineNamed? (challenge : ChallengeFacts) (name : Name) : Option HeadlineFact :=
   challenge.headlines.find? (·.target.constant.name == name)

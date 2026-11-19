@@ -5,6 +5,7 @@ public meta import SoftwareChallenge.CoreCode.Facts
 public meta import SoftwareChallenge.CoreCode.Graph
 public meta import SoftwareChallenge.Read.Source
 public meta import SoftwareChallenge.Read.Files
+public meta import SoftwareChallenge.Read.Environment
 
 public section
 meta section
@@ -21,16 +22,14 @@ structure CatalogModule where
   source : String
   written : Array ImportLine
 
-def sourcePath (module : Name) : String :=
-  "/".intercalate (module.components.map toString) ++ ".lean"
-
-def catalogModules (lake : LakeFacts) (catalog : Array Name) (env : Environment) : IO (Array CatalogModule) :=
+def catalogModules (lake : LakeFacts) (catalog : Array Name) (imported : Imported) (next : Next) :
+    IO (Array CatalogModule) :=
   catalog.mapM fun name => do
-    let file := ((lake.modules.find? (·.module == name)).map (·.file)).getD (sourcePath name)
-    let some (index, data) := moduleData? env name
+    let file := fileOf lake name
+    let some (index, data) := imported.compiled? name
       | throw <| .userError s!"{file}:1: lake.json lists {name}, but its compiled module did not load, so the step \
-          cannot read it. Run `lake build`, then run the step again."
-    let source ← if named lake file then readSource lake file else pure ""
+          cannot read it. Run `lake build {name}`, then run `{command next}`."
+    let source ← if named lake file then readSource lake file next else pure ""
     return { name, index, data, file, source, written := ← importLines name file source }
 
 def CatalogModule.imports (module : CatalogModule) : Array ImportLine :=

@@ -23,8 +23,8 @@ def targetNamed (challenge : ChallengeFacts) (name : Name) : IO TargetFact :=
 run_cmd Elab.Command.liftCoreM do
   let modules := #[`CoreSpec, `WorldSpec, `Standing.Solution, `Standing.Outside].map fixture
   let lake ← lakeOf modules (some (fixture `Standing.Challenge))
-  let challenge ← readChallenge lake
-  let solution ← readSolution lake challenge
+  let challenge ← readChallenge lake .lint
+  let solution ← readSolution lake challenge .lint
   check (solution.solution? == some (standing `Solution)) "the Solution module was not found"
   check (solution.solutionClosure.contains (standing `Solution) &&
       solution.solutionClosure.contains (fixture `WorldSpec) &&
@@ -64,9 +64,10 @@ run_cmd Elab.Command.liftCoreM do
 run_cmd Elab.Command.liftCoreM do
   let modules := #[`CoreSpec, `WorldSpec, `CoreCode, `WorldCode, `Sibling, `Program].map fixture
   let lake ← lakeOf modules (some (fixture `ClaimChallenge))
-  let challenge ← readChallenge lake
-  let env ← catalogEnv lake challenge.module
-  let catalogModules ← catalogModules lake (catalog lake challenge.module) env
+  let challenge ← readChallenge lake .lint
+  let imported ← catalogEnv lake challenge.module .lint
+  let env := imported.env
+  let catalogModules ← catalogModules lake (catalog lake challenge.module) imported .lint
   let evidence ← runIn env (catalogEvidence catalogModules)
   let uses ← runIn env (claimUses challenge evidence (budget := 2000))
   let member := fun (name : Name) => fixture (`ClaimChallenge ++ name)
@@ -88,7 +89,7 @@ run_cmd Elab.Command.liftCoreM do
     "a claim use does not carry its headline's statement of the claim"
   check ((evidence.filter (·.2.claim == fixture `WrongSuccAgrees)).size == 3)
     "the Checks of the catalog were misread"
-  let solution ← readSolution lake (← challengeNamed (fixture `Challenge))
+  let solution ← readSolution lake (← challengeNamed (fixture `Challenge)) .lint
   check (solution.main? == some (fixture `Program, ⟨"SoftwareChallengeTests/Fixtures/Program.lean", 7⟩))
     s!"main was misread: {repr solution.main?}"
   check (solution.checks.any fun check => check.claim == fixture `SuccAt && check.statement ==
@@ -101,11 +102,11 @@ run_cmd Elab.Command.liftCoreM do
   check (marked == (true, true)) "a statement's metadata was not dropped from its shape"
   let withoutIdentity := { solution.inventory with
     declarations := solution.inventory.declarations.filter (·.name != fixture `identity) }
-  check (catalogMisses env (catalog lake challenge.module) { solution with inventory := withoutIdentity } ==
+  check (catalogMisses imported (catalog lake challenge.module) { solution with inventory := withoutIdentity } ==
       #[(fixture `CoreCode, fixture `identity)]) "the census missed a declaration the facts drop"
   let withoutSibling := { solution.inventory with
     modules := solution.inventory.modules.filter (·.name != fixture `Sibling) }
-  check ((catalogMisses env (catalog lake challenge.module) { solution with inventory := withoutSibling }).contains
+  check ((catalogMisses imported (catalog lake challenge.module) { solution with inventory := withoutSibling }).contains
       (fixture `Sibling, .anonymous)) "the census missed a module the facts drop"
 
 end

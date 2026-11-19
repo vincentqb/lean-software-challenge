@@ -158,13 +158,14 @@ run_cmd Elab.Command.liftCoreM do
   check (#[(`Color, 21), (`triple, 25), (`Color._sizeOf_inst, 21), (`Color.rec, 0)].all fun (name, line) =>
       challenge.filled.any fun (found, place) => found == member name && place.line == line)
     "a declaration of the challenge was not placed at its own line, or a generated one at its owner's"
-  let env ← challengeEnv (← lakeOf #[] (some (fixture `StrayChallenge))) (fixture `StrayChallenge)
+  let env ← challengeEnv (← lakeOf #[] (some (fixture `StrayChallenge))) (fixture `StrayChallenge) .build
   check (challengeMisses env challenge).isEmpty "the census found a constant of the challenge the facts miss"
   let dropped := { challenge with filled := challenge.filled.filter (·.1 != member `Color.rec) }
   check (challengeMisses env dropped == #[member `Color.rec]) "the census missed a constant the facts drop"
-  let refused ← refusal (requireChallengeCensus env dropped)
+  let refused ← refusal (requireChallengeCensus env dropped .build)
   check (refused.any fun message => contains message "SoftwareChallengeTests/Fixtures/StrayChallenge.lean:1:" &&
-      contains message "Color.rec" && contains message "no edit to the package fixes this")
+      contains message "Color.rec" && contains message "no edit to the package fixes this" &&
+      contains message "then run `lake build`.")
     s!"the census did not refuse facts that miss a constant: {refused}"
 
 run_cmd Elab.Command.liftCoreM do
@@ -196,7 +197,7 @@ run_cmd Elab.Command.liftCoreM do
         IO.FS.writeBinFile (shadow.withExtension extension) (← IO.FS.readBinFile (other.withExtension extension))
     searchPathRef.set (dependency :: saved)
     check ((← findOLean challenge) == shadow) "the dependency's challenge does not come first on the search path"
-    let read ← readChallenge lake
+    let read ← readChallenge lake .lint
     check (read.holes.map (·.constant.name) == #[challenge ++ `double])
       s!"the reader read a dependency's {challenge}, not the root package's: holes {read.holes.map (·.constant.name)}"
   finally
