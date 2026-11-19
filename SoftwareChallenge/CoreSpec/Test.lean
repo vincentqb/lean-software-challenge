@@ -10,24 +10,24 @@ namespace Test
 
 inductive Failure where
   | checkFailed (outcome : CheckOutcome)
-  | counterexample (headline : Lean.Name) (inputs : String)
+  | checkNotRun (check : CheckFact)
   | ownTest (run : OwnTestRun)
+  | ownTestNotRun (test : OwnTestFact)
   | unknownOwnTest (name : String) (place : Place)
   deriving BEq, Repr, Inhabited
 
 structure Result where
   failures : Array Failure
   timings : Array CheckOutcome
-  sampled : Nat
-  notSampled : Array SampleOutcome
   code : UInt32
   deriving BEq, Repr, Inhabited
 
 end Test
 
 structure Test.Complete (facts : TestFacts) : Prop where
+  checksRun : ∀ check ∈ facts.declaredChecks, ∃ outcome ∈ facts.checks, outcome.check = check
   checksPass : ∀ outcome ∈ facts.checks, outcome.error? = none
-  samplesHold : ∀ sample ∈ facts.samples, ∀ headline inputs, sample ≠ .counterexample headline inputs
+  ownTestsRun : ∀ test ∈ facts.declaredOwnTests, ∃ run ∈ facts.ownTests, run.test = test
   ownTestsPass : ∀ run ∈ facts.ownTests, run.code = 0
   ownTestsDeclared : facts.unknownOwnTests = #[]
 

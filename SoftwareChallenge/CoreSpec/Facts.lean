@@ -40,6 +40,7 @@ structure OwnTestFact where
 structure LakeFacts where
   packageDir : String
   repository? : Option String
+  configFiles : Array String
   modules : Array SourceFact
   challengeCandidates : Array SourceFact
   exeRoots : Array Name
@@ -222,6 +223,7 @@ structure SolutionFacts where
   checks : Array CheckFact
   registrations : Array RegistrationFact
   lints : Array LintFact
+  linted : Array Name
   sorries : Array Place
   fixpoints : Array Name
   main? : Option (Name × Place)
@@ -234,20 +236,15 @@ structure CheckOutcome where
   error? : Option String
   deriving BEq, Repr, Inhabited
 
-inductive SampleOutcome where
-  | held (headline : Name) (count : Nat)
-  | counterexample (headline : Name) (inputs : String)
-  | notSampled (headline : Name) (reason : String)
-  deriving BEq, Repr, Inhabited
-
 structure OwnTestRun where
   test : OwnTestFact
   code : UInt32
   deriving BEq, Repr, Inhabited
 
 structure TestFacts where
+  declaredChecks : Array CheckFact
   checks : Array CheckOutcome
-  samples : Array SampleOutcome
+  declaredOwnTests : Array OwnTestFact
   ownTests : Array OwnTestRun
   unknownOwnTests : Array String
   deriving BEq, Repr, Inhabited
@@ -272,6 +269,19 @@ def LakeFacts.Builds (lake : LakeFacts) (module : Name) : Prop :=
 
 def LakeFacts.project (lake : LakeFacts) : Project :=
   { modules := lake.modules.map fun source => (source.module, Role.ofName source.module) }
+
+def LakeFacts.Program (lake : LakeFacts) : Prop :=
+  ∃ root ∈ lake.exeRoots, Role.ofName root = .worldCode
+
+def ChallengeFacts.Owns (challenge : ChallengeFacts) (module : Name) : Prop :=
+  module ∈ challenge.closure ∨ (Role.ofName module).Owned
+
+def LakeFacts.Owned (lake : LakeFacts) (challenge : ChallengeFacts) (path : String) : Prop :=
+  path ∈ lake.configFiles ∨ path = challenge.file ∨
+    ∃ source ∈ lake.modules, challenge.Owns source.module ∧ source.file = path
+
+def FileFacts.Digested (files : FileFacts) (path : String) : Prop :=
+  ∃ entry ∈ files.digests, entry.path = path
 
 def FileFacts.LockCurrent (files : FileFacts) : Prop :=
   ∃ locked, files.lock = .decoded locked ∧ ∀ path, Lock.digestOf locked path = Lock.digestOf files.digests path

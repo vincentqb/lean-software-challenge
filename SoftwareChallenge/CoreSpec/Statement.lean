@@ -11,6 +11,7 @@ open Lean
 inductive OwnedFile where
   | lakefile | manifest | toolchain | challenge
   | specModule (module : Name)
+  | closureModule (module : Name)
   deriving BEq, Repr, Inhabited
 
 namespace Statement
@@ -43,6 +44,8 @@ inductive Error where
   | solutionModule (found : Array Name)
   | importsChallenge (importing : ImportLine)
   | noStatementTarget
+  | exeRootsOutsideWorldCode (roots : Array Name)
+  | ownedUnread (path : String)
   | lock (violation : Lock.Violation) (owned? : Option OwnedFile)
   | lockUnreadable (problem : String)
   deriving BEq, Repr, Inhabited
@@ -72,6 +75,8 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
   challengeFound : ∃ candidate, lake.challengeCandidates = #[candidate] ∧ candidate.module = challenge.module
   oneSolution : lake.OneSolution
   statementTarget : `statement ∈ lake.defaultTargets
+  programRooted : lake.exeRoots ≠ #[] → (∃ source ∈ lake.modules, Role.ofName source.module = .worldCode) →
+    lake.Program
   importsOnlySpecs : ∀ line ∈ challenge.runtimeImports, lake.Builds line.fact.name →
     Role.ofName line.fact.name = .coreSpec ∨ Role.ofName line.fact.name = .worldSpec
   closureHoldsNoCode : ∀ module ∈ challenge.closure, lake.Builds module →
@@ -110,6 +115,7 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
       ∃ kill ∈ challenge.kills, kill.headline = termination.headline
   terminatesMentionsHole : ∀ termination ∈ challenge.terminating, ∀ headline ∈ challenge.headlines,
     headline.target.constant.name = termination.headline → headline.target.constant.type.Mentions termination.definition
+  ownedDigested : ∀ path, lake.Owned challenge path → files.Digested path
   lockCurrent : files.lock = .missing ∨ files.LockCurrent
 
 end SoftwareChallenge

@@ -23,6 +23,9 @@ instance : ToString Role where
 def Role.Inner (role : Role) : Prop :=
   role = .coreSpec ∨ role = .worldSpec ∨ role = .coreCode
 
+def Role.Owned (role : Role) : Prop :=
+  role = .coreSpec ∨ role = .worldSpec
+
 def Role.MayImport : Role → Role → Prop
   | .coreSpec, target => target = .coreSpec
   | .worldSpec, target => target = .coreSpec ∨ target = .worldSpec

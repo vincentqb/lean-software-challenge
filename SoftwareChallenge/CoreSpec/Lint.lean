@@ -22,6 +22,9 @@ inductive Standing where
 namespace Lint
 
 inductive Error where
+  | unaudited (module : Name)
+  | unlinted (module : Name)
+  | metaImportsEditable (module : Name) (dependency : ImportFact)
   | violation (violation : Violation)
   | axiomUse (blame : AxiomBlame)
   | holeOutsideCode (hole module : Name)
@@ -34,6 +37,7 @@ inductive Error where
   | claimOutsideWorldSpec (claim module : Name)
   | unregisteredClaim (registration : RegistrationFact)
   | lintWarning (lint : LintFact)
+  | ownedUnread (path : String)
   | lock (violation : Lock.Violation) (owned? : Option OwnedFile)
   | lockMissing
   | lockUnreadable (problem : String)
@@ -80,9 +84,6 @@ def SolutionFacts.Holds (solution : SolutionFacts) (target : TargetFact) : Prop 
 def SolutionFacts.Calls (solution : SolutionFacts) (caller callee : Name) : Prop :=
   ∃ entry ∈ solution.calls, entry.1 = caller ∧ callee ∈ entry.2
 
-def LakeFacts.Program (lake : LakeFacts) : Prop :=
-  ∃ root ∈ lake.exeRoots, Role.ofName root = .worldCode
-
 def Path.Within (path directory : String) : Prop :=
   (directory.splitOn "/").IsPrefix (path.splitOn "/")
 
@@ -93,9 +94,16 @@ def PackageFact.Visible (package : PackageFact) (packageDir : String) : Prop :=
     ∀ hidden ∈ sandboxHidden, ¬ Path.Within package.configured hidden ∧ ¬ Path.Within package.real hidden
 
 structure Lint.Clean (facts : Facts) : Prop where
+  modulesAudited : ∀ source ∈ facts.lake.modules, source.module ≠ facts.challenge.module →
+    ∃ fact ∈ facts.solution.inventory.modules, fact.name = source.module
+  exeRootsAudited : ∀ root ∈ facts.lake.exeRoots, ∃ fact ∈ facts.solution.inventory.modules, fact.name = root
+  lintersCover : ∀ fact ∈ facts.solution.inventory.modules, fact.name ∈ facts.solution.linted
   lintersPass : facts.solution.lints = #[]
   noSorry : facts.solution.sorries = #[]
   admitted : facts.lake.project.Admits facts.solution.inventory
+  specMetaImportsOwned : ∀ fact ∈ facts.solution.inventory.modules, (Role.ofName fact.name).Owned →
+    ∀ dependency ∈ fact.imports, dependency.comptime = true → facts.lake.Builds dependency.name →
+      facts.challenge.Owns dependency.name
   declaredOnce : ∀ fact ∈ facts.solution.inventory.declarations, ∀ other ∈ facts.solution.inventory.declarations,
     fact.name = other.name → fact.module = other.module
   holesInCode : ∀ hole ∈ facts.challenge.holes, ∀ found ∈ facts.solution.found,
@@ -115,6 +123,7 @@ structure Lint.Clean (facts : Facts) : Prop where
   proofsReadable : ∀ headline ∈ facts.challenge.headlines, ∀ found ∈ facts.solution.found,
     found.constant.name = headline.target.constant.name → found.constant.kind = .proved →
       found.constant.value? ≠ none
+  ownedDigested : ∀ path, facts.lake.Owned facts.challenge path → facts.files.Digested path
   lockCurrent : facts.files.LockCurrent
   comparatorCurrent : ∃ config, facts.files.comparator = .decoded config ∧
     ∃ solution ∈ facts.lake.modules, Name.NamedSolution solution.module ∧

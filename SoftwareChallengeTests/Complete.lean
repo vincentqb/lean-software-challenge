@@ -1,0 +1,242 @@
+module
+
+import SoftwareChallenge.CoreSpec.Lint
+import SoftwareChallenge.CoreSpec.Test
+meta import SoftwareChallenge.CoreSpec.Role
+
+namespace SoftwareChallengeTests.Complete
+
+open Lean SoftwareChallenge
+
+def completeLake : LakeFacts :=
+  { packageDir := "/work", repository? := none, configFiles := #["lakefile.lean"],
+    modules := #[⟨`App.Solution, "App/Solution.lean"⟩], challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩],
+    exeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "",
+    testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
+
+def completeChallenge : ChallengeFacts :=
+  { module := `Challenge, file := "Challenge.lean", runtimeImports := #[], metaImports := #[], closure := #[],
+    headlines := #[], kills := #[], witnesses := #[], holes := #[], filled := #[], axioms := #[], terminating := #[],
+    replaceable := #[] }
+
+def digested : Array Lock.Entry :=
+  #[⟨"lakefile.lean", "1"⟩, ⟨"Challenge.lean", "2"⟩, ⟨"App/Solution.lean", "3"⟩]
+
+def completeFiles : FileFacts :=
+  { lock := .decoded digested, digests := digested,
+    comparator := .decoded
+      { challenge := `Challenge, solution := `App.Solution, theorems := #[], definitions := #[],
+        axioms := standardAxioms } }
+
+def solutionModule : ModuleFact :=
+  { name := `App.Solution, file := "App/Solution.lean", usesModuleSystem := true, imports := #[] }
+
+def completeSolution : SolutionFacts :=
+  { solution? := some `App.Solution, inventory := ⟨#[solutionModule], #[]⟩, blames := #[], imports := #[],
+    calls := #[], proofUses := #[], meanings := #[], found := #[], solutionClosure := #[], importsSolution := #[],
+    premiseUses := #[], claimUses := #[], checks := #[], registrations := #[], lints := #[],
+    linted := #[`App.Solution], sorries := #[], fixpoints := #[], main? := none, places := #[] }
+
+def completeFacts : Facts :=
+  { lake := completeLake, files := completeFiles, challenge := completeChallenge, solution := completeSolution }
+
+def completeTests : TestFacts :=
+  { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[] }
+
+theorem completeOwnedDigested (path : String) (owned : completeLake.Owned completeChallenge path) :
+    completeFiles.Digested path := by
+  rcases owned with listed | named | ⟨source, listed, -, filed⟩
+  · simp [completeLake] at listed
+    exact ⟨⟨"lakefile.lean", "1"⟩, by simp [completeFiles, digested], listed.symm⟩
+  · exact ⟨⟨"Challenge.lean", "2"⟩, by simp [completeFiles, digested], named.symm⟩
+  · simp [completeLake] at listed
+    subst listed
+    exact ⟨⟨"App/Solution.lean", "3"⟩, by simp [completeFiles, digested], filed⟩
+
+theorem completeOneSolution : completeLake.OneSolution :=
+  ⟨⟨`App.Solution, "App/Solution.lean"⟩, by simp [completeLake], rfl, fun other member _ => by
+    simp [completeLake] at member; simp [member]⟩
+
+theorem statementComplete : Statement.Complete completeLake completeFiles completeChallenge where
+  challengeFound := ⟨⟨`Challenge, "Challenge.lean"⟩, rfl, rfl⟩
+  oneSolution := completeOneSolution
+  statementTarget := by simp [completeLake]
+  programRooted := fun nonempty => absurd rfl nonempty
+  importsOnlySpecs := by simp [completeChallenge]
+  closureHoldsNoCode := by simp [completeChallenge]
+  declaresOnlyTheoremsAndHoles := rfl
+  assumesNoAxiom := rfl
+  targetsPublic := by simp [completeChallenge, ChallengeFacts.targets, ChallengeFacts.theorems]
+  namesPlain := by simp [completeChallenge, ChallengeFacts.targets, ChallengeFacts.theorems]
+  auxiliariesPublic := by simp [completeChallenge, ChallengeFacts.targets, ChallengeFacts.theorems]
+  headlinesMentionHoles := by simp [completeChallenge]
+  headlinesKilled := by simp [completeChallenge]
+  killsNameHeadlines := by simp [completeChallenge]
+  killsReject := by simp [completeChallenge]
+  killsMarked := by simp [completeChallenge]
+  headlinesDistinct := by simp [completeChallenge]
+  holesMentioned := by simp [completeChallenge]
+  hypothesesClaimed := by simp [completeChallenge]
+  preconditionsWitnessed := by simp [completeChallenge]
+  witnessesDerived := by simp [completeChallenge]
+  terminatesNamesHole := by simp [completeChallenge]
+  terminatesOnKilledHeadline := by simp [completeChallenge]
+  terminatesMentionsHole := by simp [completeChallenge]
+  ownedDigested := completeOwnedDigested
+  lockCurrent := .inr ⟨digested, rfl, fun _ => rfl⟩
+
+theorem lintComplete : Lint.Complete completeFacts where
+  modulesAudited := fun source member _ => by
+    simp [completeFacts, completeLake] at member
+    subst member
+    exact ⟨solutionModule, by simp [completeFacts, completeSolution], rfl⟩
+  exeRootsAudited := by simp [completeFacts, completeLake]
+  lintersCover := by simp [completeFacts, completeSolution, solutionModule]
+  lintersPass := rfl
+  noSorry := rfl
+  admitted := {
+    placed := fun fact member => by
+      simp [completeFacts, completeSolution] at member
+      subst member
+      exact ⟨_, by simp [Project.role?, LakeFacts.project, completeFacts, completeLake, solutionModule]; rfl⟩
+    modular := by simp [completeFacts, completeSolution, solutionModule]
+    layered := by simp [completeFacts, completeSolution, solutionModule]
+    pure := by simp [completeFacts, completeSolution] }
+  specMetaImportsOwned := by simp [completeFacts, completeSolution, solutionModule]
+  declaredOnce := by simp [completeFacts, completeSolution]
+  holesInCode := by simp [completeFacts, completeChallenge]
+  holesCompiled := by simp [completeFacts, completeChallenge]
+  mainInWorldCode := fun _ main found => by simp [completeFacts, completeSolution] at found
+  fixpointsDeclared := by simp [completeFacts, completeChallenge]
+  fixpointsTerminate := by simp [completeFacts, completeChallenge]
+  claimsDeclared := by simp [completeFacts, completeSolution]
+  proofsReadable := by simp [completeFacts, completeChallenge]
+  ownedDigested := completeOwnedDigested
+  lockCurrent := ⟨digested, rfl, fun _ => rfl⟩
+  comparatorCurrent := ⟨_, rfl, ⟨`App.Solution, "App/Solution.lean"⟩, by simp [completeFacts, completeLake], rfl,
+    by simp [Config.Matches, completeFacts, completeChallenge, ChallengeFacts.theorems]⟩
+  oneSolution := completeOneSolution
+  statementTarget := by simp [completeFacts, completeLake]
+  challengeUnimported := by simp [completeFacts, completeSolution]
+  builtinLintOff := rfl
+  headlinesProved := by simp [completeFacts, completeChallenge]
+  holesDefined := by simp [completeFacts, completeChallenge]
+  killsProved := by simp [completeFacts, completeChallenge]
+  witnessesProved := by simp [completeFacts, completeChallenge]
+  mainReachesHoles := fun ⟨root, member, _⟩ => by simp [completeFacts, completeLake] at member
+  claimsChecked := by simp [completeFacts, completeChallenge]
+  checksDecided := by simp [completeFacts, completeSolution]
+  dependenciesVisible := by simp [completeFacts, completeLake]
+
+theorem testsComplete : Test.Complete completeTests where
+  checksRun := by simp [completeTests]
+  checksPass := by simp [completeTests]
+  ownTestsRun := by simp [completeTests]
+  ownTestsPass := by simp [completeTests]
+  ownTestsDeclared := rfl
+
+def unauditedModule : Facts :=
+  { completeFacts with
+    lake := { completeLake with modules := completeLake.modules.push ⟨`App.Extra, "App/Extra.lean"⟩ } }
+
+theorem unauditedModule_unclean : ¬ Lint.Clean unauditedModule := fun clean => by
+  obtain ⟨fact, member, named⟩ := clean.modulesAudited ⟨`App.Extra, "App/Extra.lean"⟩
+    (by simp [unauditedModule, completeLake]) (by simp [unauditedModule, completeFacts, completeChallenge])
+  simp [unauditedModule, completeFacts, completeSolution] at member
+  subst member
+  simp [solutionModule] at named
+
+def unauditedExeRoot : Facts := { completeFacts with lake := { completeLake with exeRoots := #[`Main] } }
+
+theorem unauditedExeRoot_unclean : ¬ Lint.Clean unauditedExeRoot := fun clean => by
+  obtain ⟨fact, member, named⟩ := clean.exeRootsAudited `Main (by simp [unauditedExeRoot])
+  simp [unauditedExeRoot, completeFacts, completeSolution] at member
+  subst member
+  simp [solutionModule] at named
+
+def unlinted : Facts := { completeFacts with solution := { completeSolution with linted := #[] } }
+
+theorem unlinted_unclean : ¬ Lint.Clean unlinted := fun clean => by
+  have covered := clean.lintersCover solutionModule (by simp [unlinted, completeSolution])
+  simp [unlinted] at covered
+
+def tacticLake : LakeFacts :=
+  { completeLake with modules := completeLake.modules.push ⟨`App.Tactic, "App/Tactic.lean"⟩ }
+
+def tacticChallenge : ChallengeFacts := { completeChallenge with closure := #[`App.Tactic] }
+
+theorem tacticOwned : tacticLake.Owned tacticChallenge "App/Tactic.lean" :=
+  Or.inr (Or.inr ⟨⟨`App.Tactic, "App/Tactic.lean"⟩, by simp [tacticLake, completeLake],
+    Or.inl (by simp [tacticChallenge]), rfl⟩)
+
+theorem tacticUndigested : ¬ completeFiles.Digested "App/Tactic.lean" := fun ⟨entry, member, named⟩ => by
+  simp [completeFiles, digested] at member
+  rcases member with rfl | rfl | rfl <;> simp at named
+
+theorem closureUndigested_incomplete : ¬ Statement.Complete tacticLake completeFiles tacticChallenge :=
+  fun complete => tacticUndigested (complete.ownedDigested _ tacticOwned)
+
+def closureUndigested : Facts := { completeFacts with lake := tacticLake, challenge := tacticChallenge }
+
+theorem closureUndigested_unclean : ¬ Lint.Clean closureUndigested :=
+  fun clean => tacticUndigested (clean.ownedDigested _ tacticOwned)
+
+def specModule : ModuleFact :=
+  { name := `App.CoreSpec.Defs, file := "App/CoreSpec/Defs.lean", usesModuleSystem := true,
+    imports := #[{ name := `App.CoreCode.Impl, comptime := true, line := 3 }] }
+
+def metaImportsCode : Facts :=
+  { completeFacts with
+    lake := { completeLake with
+      modules := completeLake.modules ++ #[⟨`App.CoreSpec.Defs, "App/CoreSpec/Defs.lean"⟩,
+        ⟨`App.CoreCode.Impl, "App/CoreCode/Impl.lean"⟩] }
+    solution := { completeSolution with inventory := ⟨#[solutionModule, specModule], #[]⟩ } }
+
+#guard Role.ofName `App.CoreSpec.Defs == .coreSpec
+#guard Role.ofName `App.CoreCode.Impl == .coreCode
+
+theorem metaImportsCode_unclean (spec : (Role.ofName `App.CoreSpec.Defs).Owned)
+    (code : Role.ofName `App.CoreCode.Impl = .coreCode) : ¬ Lint.Clean metaImportsCode := fun clean => by
+  have owns := clean.specMetaImportsOwned specModule (by simp [metaImportsCode, completeSolution]) spec
+    { name := `App.CoreCode.Impl, comptime := true, line := 3 } (by simp [specModule]) rfl
+    ⟨⟨`App.CoreCode.Impl, "App/CoreCode/Impl.lean"⟩, by simp [metaImportsCode, completeLake], rfl⟩
+  rcases owns with closed | owned
+  · simp [metaImportsCode, completeFacts, completeChallenge] at closed
+  · rw [code] at owned
+    simp [Role.Owned] at owned
+
+def toolingExeLake : LakeFacts :=
+  { completeLake with modules := completeLake.modules.push ⟨`App.WorldCode, "App/WorldCode.lean"⟩,
+                      exeRoots := #[`Main] }
+
+#guard Role.ofName `App.WorldCode == .worldCode
+#guard Role.ofName `Main == .tooling
+
+theorem toolingExe_incomplete (world : Role.ofName `App.WorldCode = .worldCode)
+    (tooling : Role.ofName `Main = .tooling) : ¬ Statement.Complete toolingExeLake completeFiles completeChallenge :=
+  fun complete => by
+    obtain ⟨root, member, rooted⟩ := complete.programRooted (by simp [toolingExeLake])
+      ⟨⟨`App.WorldCode, "App/WorldCode.lean"⟩, by simp [toolingExeLake, completeLake], world⟩
+    simp [toolingExeLake] at member
+    subst member
+    rw [tooling] at rooted
+    cases rooted
+
+def declaredCheck : CheckFact :=
+  { claim := `App.WorldSpec.Agrees, statement := "Agrees 1", place := ⟨"App/WorldCode.lean", 9⟩ }
+
+def checkNotRun : TestFacts := { completeTests with declaredChecks := #[declaredCheck] }
+
+theorem checkNotRun_incomplete : ¬ Test.Complete checkNotRun := fun complete => by
+  obtain ⟨outcome, member, -⟩ := complete.checksRun declaredCheck (by simp [checkNotRun])
+  simp [checkNotRun, completeTests] at member
+
+def declaredOwnTest : OwnTestFact := { name := "own", kind := .script, place := ⟨"lakefile.lean", 7⟩ }
+
+def ownTestNotRun : TestFacts := { completeTests with declaredOwnTests := #[declaredOwnTest] }
+
+theorem ownTestNotRun_incomplete : ¬ Test.Complete ownTestNotRun := fun complete => by
+  obtain ⟨run, member, -⟩ := complete.ownTestsRun declaredOwnTest (by simp [ownTestNotRun])
+  simp [ownTestNotRun, completeTests] at member
+
+end SoftwareChallengeTests.Complete

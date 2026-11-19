@@ -32,6 +32,8 @@ Errors; and each step exits nonzero exactly when it reports an error, a pending 
 
 Not claimed:
 - that the reader's facts match Lean, Lake, or the files;
+- that the reader classifies each binder as README does: as a claim, a precondition, or an input, and by whether
+  it mentions a hole or a foreign function;
 - that a message's fix works;
 - that each message names an item of README's list that the facts miss;
 - that lint exits 2, rather than another code, when only pending items remain;
@@ -408,16 +410,14 @@ theorem Test.run_code_eq_zero_iff (facts : TestFacts) : (Test.run facts).code = 
 
 @[kills Test.run_code_eq_zero_iff] theorem Test.run_code_eq_zero_iff_rejects_accepting :
     ¬ ∀ (facts : TestFacts),
-      ((fun (_ : TestFacts) =>
-        ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 0 } : Test.Result))
-          facts).code = 0 ↔ Test.Complete facts := by
+      ((fun (_ : TestFacts) => ({ failures := #[], timings := #[], code := 0 } : Test.Result)) facts).code = 0 ↔
+        Test.Complete facts := by
   sorry
 
 @[kills Test.run_code_eq_zero_iff] theorem Test.run_code_eq_zero_iff_rejects_refusing :
     ¬ ∀ (facts : TestFacts),
-      ((fun (_ : TestFacts) =>
-        ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 1 } : Test.Result))
-          facts).code = 0 ↔ Test.Complete facts := by
+      ((fun (_ : TestFacts) => ({ failures := #[], timings := #[], code := 1 } : Test.Result)) facts).code = 0 ↔
+        Test.Complete facts := by
   sorry
 
 theorem Test.run_code_ne_zero_iff (facts : TestFacts) :
@@ -427,21 +427,18 @@ theorem Test.run_code_ne_zero_iff (facts : TestFacts) :
 @[kills Test.run_code_ne_zero_iff] theorem Test.run_code_ne_zero_iff_rejects_accepting :
     ¬ ∀ (facts : TestFacts),
       ((fun (_ : TestFacts) =>
-        ({ failures := #[.counterexample .anonymous ""], timings := #[], sampled := 0, notSampled := #[],
-           code := 0 } : Test.Result)) facts).code ≠ 0 ↔
+        ({ failures := #[.unknownOwnTest "own" ⟨"lakefile.lean", 1⟩], timings := #[], code := 0 } :
+          Test.Result)) facts).code ≠ 0 ↔
         ((fun (_ : TestFacts) =>
-          ({ failures := #[.counterexample .anonymous ""], timings := #[], sampled := 0, notSampled := #[],
-             code := 0 } : Test.Result)) facts).failures ≠ #[] := by
+          ({ failures := #[.unknownOwnTest "own" ⟨"lakefile.lean", 1⟩], timings := #[], code := 0 } :
+            Test.Result)) facts).failures ≠ #[] := by
   sorry
 
 @[kills Test.run_code_ne_zero_iff] theorem Test.run_code_ne_zero_iff_rejects_refusing :
     ¬ ∀ (facts : TestFacts),
-      ((fun (_ : TestFacts) =>
-        ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 1 } : Test.Result))
-          facts).code ≠ 0 ↔
+      ((fun (_ : TestFacts) => ({ failures := #[], timings := #[], code := 1 } : Test.Result)) facts).code ≠ 0 ↔
         ((fun (_ : TestFacts) =>
-          ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 1 } : Test.Result))
-            facts).failures ≠ #[] := by
+          ({ failures := #[], timings := #[], code := 1 } : Test.Result)) facts).failures ≠ #[] := by
   sorry
 
 end SoftwareChallenge
