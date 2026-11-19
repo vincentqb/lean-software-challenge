@@ -53,6 +53,23 @@ theorem double_zero_fin (n : Nat) [NeZero n] (h : double (0 : Fin n).val = 0) : 
 @[witness double_zero_fin] theorem double_zero_fin_applies :
     ∃ (n : Nat) (_ : NeZero n), double (0 : Fin n).val = 0 := sorry
 
+theorem double_fin (i : Fin (double 1)) : i.val < double 1 := sorry
+
+theorem double_positive_one (_h : 0 < double 1) : double 1 ≠ 0 := sorry
+
+theorem double_kept (n : Nat) (h : double n = 0) (_x : PLift (h = h)) (_hk : n < 2) : n < 3 := sorry
+
+@[witness double_kept] theorem double_kept_applies :
+    ∃ (n : Nat) (h : double n = 0) (_ : PLift (h = h)), n < 2 := sorry
+
+@[witness double_kept] theorem double_kept_applies_lossy : ∃ n, n < 2 := sorry
+
+theorem double_kept_plain (n : Nat) (h : n = 0) (_x : PLift (h = h)) (_hk : double n < 2) : n < 3 := sorry
+
+@[witness double_kept_plain] theorem double_kept_plain_applies : ∃ (n : Nat) (_ : n = 0), double n < 2 := sorry
+
+@[witness double_kept_plain] theorem double_kept_plain_applies_lossy : ∃ n, double n < 2 := sorry
+
 theorem succ_law : SuccLaw := sorry
 
 @[witness double] theorem double_applies : ∃ n : Nat, 0 < n := sorry

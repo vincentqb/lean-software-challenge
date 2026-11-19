@@ -102,9 +102,10 @@ theorem applies_sound_witness :
 theorem applies_sound_rejects_accepting :
     ¬ ∀ {premises : List Shape} {inputs : List (Universe × Shape)} {preconditions : List Shape} {witness : Shape},
       (fun _ _ _ _ => true) premises inputs preconditions witness = true →
-        preconditions ≠ [] ∧ witness = premises.foldr .forallE (Shape.existential inputs (Shape.conjunction preconditions)) := by
+        (preconditions ≠ [] ∨ inputs ≠ []) ∧
+          witness = premises.foldr .forallE (Shape.existential inputs (Shape.conjunction preconditions)) := by
   intro sound
-  exact (sound (premises := []) (inputs := []) (preconditions := []) (witness := .natLit 0) rfl).1 rfl
+  exact (sound (premises := []) (inputs := []) (preconditions := []) (witness := .natLit 0) rfl).1.elim (· rfl) (· rfl)
 
 meta section
 

@@ -25,18 +25,23 @@ implementation is then close to a correct one, and it is public.
 
 A hypothesis assumes a world claim when its conclusion, after any `∀` and `→`, applies one, as
 `∀ t, t ∈ trials → C t` assumes `C`; the Checks of `C` count for it. A headline's preconditions are
-its hypotheses that assume no world claim. When one mentions a hole or a foreign function, no kill
-shows that some input meets it, so state a witness that one does: `∃` the inputs the preconditions
-use, in headline order, of the conjunction of the preconditions, with the holes kept, marked
-`@[witness headline]`. If the headline assumes world claims that mention no input, the witness
-assumes them first. The audit reads a headline with the `Prop`-valued definitions of CoreSpec and
-WorldSpec unfolded, except world claims, so the hypotheses and inputs of such a definition are the
-headline's.
+its hypotheses that mention an input and assume no world claim, but a hypothesis a later binder's
+type mentions is an input. When a precondition, or the type of an input, mentions a hole or a
+foreign function, no kill shows that some input meets it, so state a witness that one does: `∃` the
+inputs that are hypotheses, that the preconditions use, or whose type mentions one, with the inputs
+their types use, in headline order, of the conjunction of the preconditions (`True` when there is
+none), with the holes kept, marked `@[witness headline]`. If the headline assumes world claims
+that mention no input, the witness assumes them first. The audit reads a headline, and each of its
+hypotheses, with the `Prop`-valued definitions of CoreSpec and WorldSpec unfolded, except world
+claims, so the hypotheses and inputs of such a definition are the headline's, and a hypothesis such
+a definition makes a world claim assumes that claim.
 
 Once exactly one module is named `Solution`, `lake build` records a hash of each of these files but
 `Solution.lean`, and of every other module whose role is CoreSpec or WorldSpec, in `owned.lock` when
 there is none. After that, `lake build` and `lake lint` fail if one of them changes. To record a new
-statement, delete `owned.lock` and run `lake build`.
+statement, delete `owned.lock` and run `lake build`. CoreSpec and WorldSpec modules import, with
+`meta import` too, only modules the table below permits, so the hash covers what the statement rests
+on; a file an owned module reads, as with `include_str`, is yours to keep owned.
 
 ## What agents write
 
@@ -51,8 +56,8 @@ Agents write everything else:
 Holes are defined in CoreCode or WorldCode. Once the statements exist, the code and the proofs
 can progress independently, headline by headline. A headline that is not proved yet stays out of
 `Solution.lean`: `lake build` and `lake test` pass, `lake lint` exits 2 and lists it under Pending,
-and `lake comparator` and `lake exe grade` refuse until it is proved. A `sorry` anywhere fails
-`lake lint`.
+and `lake comparator` and `lake exe grade` refuse until it is proved. A `sorry` in any declaration
+fails `lake lint`.
 
 ## What you get
 
@@ -61,25 +66,29 @@ builds.
 
 When `lake build` passes, the code compiles, exactly one module is named `Solution`, and the
 statement is well formed: every headline has
-a kill, every precondition that mentions a hole or a foreign function has a witness, no two
-headlines state the same up to binder names, every hole is mentioned, and every hypothesis of a
-headline that mentions no input is a world claim. No owned file differs from `owned.lock`. It
-writes `comparator.json` from `Challenge.lean`.
+a kill, every precondition and input type that mentions a hole or a foreign function has a witness,
+no two headlines state the same up to binder names, every hole is mentioned, every hypothesis of a
+headline that mentions no input is a world claim, no declaration of `Challenge.lean` is `private`,
+and it declares no `axiom`. CoreSpec and WorldSpec import only what they may, and no `deriving`
+clause in those `Challenge.lean` imports makes a `partial` instance. No owned file differs from
+`owned.lock`. It writes `comparator.json` from `Challenge.lean`.
 
-When `lake lint` exits 0, Lean's linters pass, and:
+When `lake lint` exits 0, Lean's linters pass, as each module sets them, on every module the default
+targets build, and:
 
 - Every headline, kill, and witness is proved in `Solution` or a module it imports, with the
   statement `Challenge.lean` gives it, up to binder names and binder kinds, as `lake comparator`
-  compares them. Each hole is a `def` of the type `Challenge.lean` gives it.
+  compares them. Each hole is a computable `def` of the type `Challenge.lean` gives it.
 - The proofs are about the code that runs. CoreSpec and CoreCode are pure and total, except a
-  `partial_fixpoint` hole whose `@[terminates]` headline states where it returns; foreign code
-  enters only through WorldSpec, CoreCode never calls it, and in a program `main` reaches every
-  hole.
+  `partial_fixpoint` hole whose `@[terminates]` headline states where it returns, as any
+  `partial_fixpoint` hole needs, and the `partial` instances `deriving` makes for nested or mutual
+  types; foreign code enters only through WorldSpec, CoreCode never calls it, and in a program
+  `main` reaches every hole.
 - Every headline rejects a wrong implementation: each kill is proved.
 - Every headline can apply: some input meets its preconditions. Its kill shows this for
   preconditions that mention no hole or foreign function, and its proved witness for the others.
-- Every world claim a headline assumes has a `Check`, and every module uses only the standard
-  axioms.
+- Every world claim a headline assumes has a `Check`, and every module the default targets build
+  uses only the standard axioms, also where it declares a theorem another module declares too.
 - No owned file differs from `owned.lock`, and `comparator.json` matches `Challenge.lean`.
 
 When `lake test` exits 0, every `Check` passed against the real foreign code, and so did the
@@ -104,12 +113,9 @@ could be, or whether a `Check` exercises its claim. You judge those; the report 
 fold_preserves_meaning
 fold_idempotent  (not yet proved)
 fold_normalizes  (kill not yet proved)
-fold_two_plus_three  (one instance)
 output_correct  assumes AddAgrees (2 checks, unused by the proof)
-Proved: 4 of 5 headlines, 4 of 5 kills
-Independent: 1 of 5 headlines
-Unclaimed: 2 of 6 definitions main runs
-  main run
+Proved: 3 of 4 headlines, 3 of 4 kills
+Independent: 1 of 4 headlines
 Pending: 2
   Challenge.lean:34: ConstantFolding.fold_idempotent is not proved yet, so the solution does not ...
   ...
@@ -121,15 +127,10 @@ Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean
   prove the headline, one of its kills, or one of its witnesses yet.
 - `(stated differently)`: the solution states the headline otherwise than `Challenge.lean`.
 - `(outside Solution's imports)`: a module that `Solution` does not import proves it.
-- `(one instance)`: the headline quantifies over no input, so it states one case.
-- `(bundles k laws)`: the headline is a conjunction, an `↔`, or a `Prop` structure of `k` laws;
-  stating each as its own headline gives each its own kill and witness.
 - `unused by the proof`: the proof does not use this world claim, so the headline holds
   without it; only you can drop it.
 - `Independent`: how many headlines have a proved kill showing that the others do not imply
   them.
-- `Unclaimed`: how many of the CoreCode and WorldCode definitions `main` runs no hole reaches, so
-  no headline speaks about them; the next line names them. A library has no `main` and no line.
 - `h terminates via t`: the `@[terminates h]` headline `t` states on which inputs the
   `partial_fixpoint` hole `h` returns.
 - `Pending`: what is not done yet, each with its fix; all but a hidden dependency are the
@@ -180,11 +181,13 @@ which is meant for Lean's own repository. Commit `lean-toolchain` and `lake-mani
 `software_challenge` by git, or from a directory outside `/home`, `/root`, `/run`, `/tmp` and `/var`:
 the comparator's sandbox hides those, so `lake lint` reports such a dependency as pending, which only
 a new statement resolves. `lakefile.lean` is owned: after editing it, delete
-`owned.lock` and run `lake build`.
+`owned.lock` and run `lake build`. No two modules may declare the same name, and one module at most
+defines `main`: with `precompileModules` the link fails, and the audit loads every module together,
+where Lean keeps only the first of two theorems of the same name and statement.
 
 A module's role is the first component of its name that is `CoreSpec`, `WorldSpec`, `CoreCode`,
 or `WorldCode`; any other module is tooling. Modules outside the package are trusted, and every
-module uses only the standard axioms.
+module the default targets build uses only the standard axioms.
 
 | Role | May contain | May import |
 |---|---|---|

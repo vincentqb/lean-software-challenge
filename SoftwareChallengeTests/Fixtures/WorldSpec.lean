@@ -37,4 +37,6 @@ WorldClaim VanishesOnlyAtZero (f : Nat → Nat) := ∀ n, f n = 0 → n = 0
 
 def SuccLaw : Prop := SuccAgrees nativeSucc → ∀ n, nativeSucc n = n + 1
 
+@[expose] def SuccHidden : Prop := SuccAgrees nativeSucc
+
 end SoftwareChallengeTests.Fixtures

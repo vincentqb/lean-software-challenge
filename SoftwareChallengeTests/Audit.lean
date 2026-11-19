@@ -11,6 +11,8 @@ import all SoftwareChallengeTests.Fixtures.Statements
 import SoftwareChallengeTests.Fixtures.Challenge
 import SoftwareChallengeTests.Fixtures.AuxiliaryChallenge
 import SoftwareChallengeTests.Fixtures.WitnessChallenge
+import all SoftwareChallengeTests.Fixtures.Twin
+import all SoftwareChallengeTests.Fixtures.Draft
 meta import SoftwareChallenge.Audit
 meta import SoftwareChallenge
 
@@ -90,6 +92,13 @@ private def expectedConfig : String := "{
     layout.admits .coreCode { name := `A.WorldSpec, comptime := true } &&
     layout.admits .coreCode { name := `Lean.Data.Name, comptime := false } &&
     layout.role? `A.CoreCode.B == some .coreCode && layout.role? `Lean.Data.Name == none
+
+#guard
+  let layout := Project.ofPackage #[`A.CoreSpec, `A.Helpers, `A.WorldSpec] false
+  !layout.admits .coreSpec { name := `A.Helpers, comptime := true } &&
+    !layout.admits .worldSpec { name := `A.Helpers, comptime := true } &&
+    layout.admits .coreSpec { name := `Lean.Data.Name, comptime := true } &&
+    layout.admits .worldSpec { name := `A.CoreSpec, comptime := true }
 
 run_cmd Elab.Command.liftCoreM do
   let accepted ← Audit.collect valid
@@ -210,6 +219,52 @@ run_cmd Elab.Command.liftCoreM do
     throwError "An import line was misread: {← Audit.importLines "SoftwareChallengeTests/Fixtures/Challenge.lean"}"
   if registered.any (contains · "SuccAgrees") then
     throwError "A claim declared in a WorldSpec module was rejected: {registered}"
+  unless isNoncomputable env (fixture `lostHole) do throwError "A noncomputable definition was not found"
+  expect (Audit.sound project {
+      holes := #[(fixture `lostHole, some (fixture `CoreCode))]
+      noncomputableHoles := #[fixture `lostHole] })
+    "hole SoftwareChallengeTests.Fixtures.lostHole is `noncomputable`"
+    "Define SoftwareChallengeTests.Fixtures.lostHole without `noncomputable`"
+  let fixpointHole : Audit.Facts := { holes := #[(countdown, some (fixture `Fixpoint))], fixpoints := #[countdown] }
+  expect (Audit.sound (reassign (fixture `Fixpoint) .worldCode) fixpointHole) "countdown is defined with \
+    `partial_fixpoint`" "without `partial_fixpoint`"
+  let terminated : Audit.Termination := {
+    definition := countdown, headline := countdownTerminates, fixpoint := true, mentioned := true }
+  if (Audit.sound (reassign (fixture `Fixpoint) .worldCode) { fixpointHole with terminations := #[terminated] }).any
+      (contains · "is defined with `partial_fixpoint`") then
+    throwError "A partial_fixpoint hole with a termination headline was rejected"
+  let twins ← Audit.collect #[fixture `Twin, fixture `Draft]
+  let twinIn := fun (module : Name) => twins.declarations.find? fun fact =>
+    fact.name == fixture `twin_law && fact.moduleName == fixture module
+  unless (twinIn `Draft).any (·.axioms.contains ``sorryAx) && (twinIn `Twin).any (·.axioms.isEmpty) do
+    throwError "A sorry in a theorem another module also declares was not found"
+  unless (← Audit.blamesOf twins).any fun blame => blame.declaration == fixture `twin_law && blame.axiomName == ``sorryAx do
+    throwError "A sorry in a theorem another module also declares was not blamed"
+  unless Audit.duplicatesIn env #[fixture `Twin, fixture `Draft] == #[(fixture `twin_law, fixture `Twin, fixture `Draft)] do
+    throwError "A theorem two modules declare was not found: {Audit.duplicatesIn env #[fixture `Twin, fixture `Draft]}"
+  expect (Audit.sound project {
+      duplicates := #[(fixture `twin_law, fixture `Twin, fixture `Draft)]
+      files := #[(fixture `Draft, "Draft.lean"), (fixture `Twin, "Twin.lean")] })
+    "SoftwareChallengeTests.Fixtures.twin_law is declared in both" "Rename or delete SoftwareChallengeTests.Fixtures.twin_law \
+      in Draft.lean"
+  let program := Project.ofPackage #[`A.Main, `A.WorldCode] true
+  expect (Audit.sound program {
+      entry := some (some `A.Main, #[]), roots := #[`A.Main], files := #[(`A.Main, "A/Main.lean")] })
+    "main is defined in A.Main (tooling), the root of the package's lean_exe"
+    "set that lean_exe's `root` to a WorldCode module, such as A.WorldCode.Main"
+  expect (Audit.pending { entry := some (none, #[]), roots := #[`A.Tool], files := #[(`A.WorldCode, "A/WorldCode.lean")] })
+    "A.Tool is the root of the package's lean_exe, but no default target builds it" "mark that lean_exe `@[default_target]`"
+  let specErrors := Audit.owned (Project.ofPackage #[`A.CoreSpec, `A.Notation] false) {
+    files := #[(`A.CoreSpec, "A/CoreSpec.lean")]
+    imports := #[(`A.CoreSpec, #[(`A.Notation, 3, "meta import A.Notation")])]
+    specImports := #[(`A.CoreSpec, #[{ name := `A.Notation, comptime := true },
+      { name := `Lean.Data.Name, comptime := true }])] }
+  expect specErrors "A/CoreSpec.lean:3: A.CoreSpec (CoreSpec) meta-imports A.Notation (tooling)"
+    "delete line 3, `meta import A.Notation`, from A/CoreSpec.lean; then delete owned.lock and run `lake build`"
+  if specErrors.any (contains · "Lean.Data.Name") then throwError "A meta import from outside the package was rejected"
+  unless (← Audit.headerImports "SoftwareChallengeTests/Fixtures/WorldSpec.lean").any
+      fun found => found.name == `SoftwareChallenge && found.comptime do
+    throwError "A meta import was misread"
 
 run_cmd Elab.Command.liftCoreM do
   let challenge := fixture `Challenge
@@ -259,21 +314,12 @@ run_cmd Elab.Command.liftTermElabM do
   unless !unproved.proved && unproved.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
     throwError "A headline the solution does not prove was not read from its Challenge statement"
   unless world.proved do throwError "A headline the solution proves was reported unproved"
-  let single ← analysed evidence (fixture `identity_three)
   let unnamed ← analysed evidence (fixture `uses_unnamed)
-  unless single.oneInstance && unnamed.oneInstance && !world.oneInstance && !precondition.oneInstance do
-    throwError "A headline was misread as quantifying over inputs, or as not"
-  unless (Audit.describe toString single).endsWith "  (one instance)" &&
-      !contains (Audit.describe toString world) "one instance" do
-    throwError "The report misstated one instance: {Audit.describe toString single}"
-  let bundles ← [(`bundled_three, 3), (`bundled_iff, 2), (`bundled_structure, 2), (`bundled_hidden, 2),
-      (`not_bundled_exists, 1), (`identity_fixed, 1)].mapM fun (name, expected) => do
-    return (name, expected, (← analysed evidence (fixture name)).laws)
-  for (name, expected, found) in bundles do
-    unless found == expected do throwError "{name} bundles {found} laws, expected {expected}"
-  unless (Audit.describe toString (← analysed evidence (fixture `bundled_three))).endsWith
-      "  (bundles 3 laws)" && !contains (Audit.describe toString world) "bundles" do
-    throwError "The report misstated bundled laws"
+  let hidden ← analysed evidence (fixture `hidden_succ)
+  unless hidden.assumptions.map (·.claim) == #[fixture `SuccAgrees] && hidden.unnamed.isEmpty &&
+      hidden.assumptions.map (·.checks) == world.assumptions.map (·.checks) do
+    throwError "A world claim a WorldSpec definition wraps in a hypothesis was not read: \
+      {hidden.assumptions.map (·.claim)} {hidden.unnamed}"
   let ignored ← analysed evidence (fixture `successor_positive)
   let correct ← analysed evidence (fixture `successor_correct)
   unless ignored.assumptions.map (·.unused) == #[true] && correct.assumptions.map (·.unused) == #[false] &&
@@ -446,6 +492,16 @@ run_cmd Elab.Command.liftTermElabM do
       contains error "double_even_rejects_identity is marked" then
     throwError "A marked kill was rejected: {misread}"
   expect (Audit.stated markedFacts) "triple" "which is not a hole of"
+  let ownership := Audit.owned project markedFacts
+  unless marked.axioms == #[member `double_axiom] && marked.privates.map (privateToUserName ·.1) == #[member `double_two] do
+    throwError "An axiom or a private declaration of the challenge was misread: {marked.axioms} {marked.privates.map (·.1)}"
+  expect ownership "SoftwareChallengeTests.Fixtures.Challenge.double_two is `private`" "Remove `private`"
+  expect ownership "`axiom SoftwareChallengeTests.Fixtures.Challenge.double_axiom` asserts" "Delete \
+    `axiom SoftwareChallengeTests.Fixtures.Challenge.double_axiom`"
+  expect ownership "`deriving` makes SoftwareChallengeTests.Fixtures.instBEqForest.beq a `partial` definition in \
+    SoftwareChallengeTests.Fixtures.CoreSpec (CoreSpec)" "then delete owned.lock and run `lake build`"
+  if ownership.any (contains · "instBEqRose") then
+    throwError "A derived partial instance in an editable module was reported to the owner: {ownership}"
   expect (Audit.owned project markedFacts) "defines SoftwareChallengeTests.Fixtures.Challenge.triple with a body"
     "Make SoftwareChallengeTests.Fixtures.Challenge.triple a hole with `:= sorry`"
   unless (Audit.solutionOf #[`A.CoreCode, `A.Solution]).toOption == some `A.Solution do
@@ -463,10 +519,12 @@ run_cmd Elab.Command.liftTermElabM do
   unless read.headlines == #[member `double_halves, member `double_positive, member `double_between,
       member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero,
       member `double_negative_vanishes, member `double_nonnegative_vanishes, member `double_vanishes_only_at_zero,
-      member `double_zero_fin, member `succ_law] do
+      member `double_zero_fin, member `double_fin, member `double_positive_one, member `double_kept,
+      member `double_kept_plain, member `succ_law] do
     throwError "A witness was read as a headline: {read.headlines}"
   unless read.misshapenWitnesses.map (·.1) == #[member `double_positive_applies_unused,
-      member `double_positive_applies_replaced, member `double_zero_applies, member `double_applies] do
+      member `double_positive_applies_replaced, member `double_zero_applies, member `double_kept_applies_lossy,
+      member `double_kept_plain_applies_lossy, member `double_applies] do
     throwError "A witness was misjudged: {read.misshapenWitnesses}"
   let errors := Audit.meaningful { challenge := read }
   expect errors "a precondition of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves mentions \
@@ -475,6 +533,16 @@ run_cmd Elab.Command.liftTermElabM do
       ∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4 := by sorry`"
   for witness in ["double_positive_applies_unused", "double_positive_applies_replaced"] do
     expect errors witness "but it is not `∃ n, 0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double n`"
+  expect errors "the type of an input of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_fin mentions \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double" "theorem double_fin_applies : ∃ i, True := by sorry"
+  if errors.any (contains · "double_positive_one_applies") then
+    throwError "A hypothesis about a hole that mentions no input was told to get a witness: {errors}"
+  let hypotheses := Audit.stated { challenge := read }
+  expect hypotheses "double_positive_one assumes `0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double 1`, which \
+    is about hole SoftwareChallengeTests.Fixtures.WitnessChallenge.double" "Remove the hypothesis, or state it as its \
+    own headline"
+  if hypotheses.any (contains · "which is not a WorldClaim") then
+    throwError "A hypothesis about a hole was told to become a WorldClaim: {hypotheses}"
   expect errors "double_zero_applies" "has no precondition to meet"
   expect errors "double_applies" "is not a headline of Challenge.lean"
   expect errors "a precondition of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_negative_vanishes \
@@ -505,11 +573,7 @@ run_cmd Elab.Command.liftTermElabM do
   if read.preconditioned.any (·.headline == member `double_vanishes_only_at_zero) then
     throwError "A world claim a headline concludes was unfolded into preconditions"
   let evidence := allEvidence (← getEnv)
-  let law ← analysed evidence (member `double_negative_vanishes)
   let succLaw ← analysed evidence (member `succ_law)
-  let claimed ← analysed evidence (member `double_vanishes_only_at_zero)
-  unless !law.oneInstance && !succLaw.oneInstance && claimed.oneInstance do
-    throwError "A headline stated as a specification definition was misread as one instance, or as not"
   unless succLaw.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
     throwError "A world claim a specification definition assumes was not read: {succLaw.assumptions.map (·.claim)}"
   let line : Audit.Headline := { name := `h, assumptions := #[], unnamed := #[] }
@@ -524,19 +588,6 @@ run_cmd Elab.Command.liftTermElabM do
   unless heavy.assumptions.map (·.checks) == #[0] do throwError "A Check that cannot be matched counted"
   expect (Audit.pending { headlines := #[heavy] }) "SoftwareChallengeTests.Fixtures.WorldCode:52: this Check cannot \
     be matched against Fixtures.SuccAt (Fixtures.leafSum 30 1)" "budget"
-
-run_cmd Elab.Command.liftTermElabM do
-  let env ← getEnv
-  let moduleOf := fun (name : Name) => (env.getModuleIdxFor? name).map (env.header.modules[·.toNat]!.module)
-  let running := fun name => (moduleOf name).any valid.contains
-  let program := { project with executable := true }
-  let entry := fixture `loopIdentity
-  let glue ← Audit.unclaimed program moduleOf running #[fixture `identity] entry
-  unless glue == some (3, #[entry]) do throwError "Glue main runs was miscounted: {glue}"
-  let covered ← Audit.unclaimed program moduleOf running #[entry] entry
-  unless covered == some (3, #[]) do throwError "Code reached from a hole was counted unclaimed: {covered}"
-  if (← Audit.unclaimed project moduleOf running #[] entry).isSome then
-    throwError "A library without a lean_exe was reported unclaimed code"
 
 private def renamed (info : ConstantInfo) (name : Name) : ConstantInfo :=
   match info with

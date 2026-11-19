@@ -41,4 +41,8 @@ theorem double_one (n : Nat) : double n ≠ 1 := sorry
 
 theorem double_one_rejects_one : ¬ ∀ n : Nat, (fun _ => 1) n ≠ 1 := sorry
 
+private theorem double_two : double 2 = 4 := sorry
+
+axiom double_axiom : double 1 = 2
+
 end SoftwareChallengeTests.Fixtures.Challenge

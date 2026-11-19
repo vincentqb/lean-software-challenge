@@ -78,7 +78,7 @@ def Role.permits : Role → Role → Bool
   | .coreSpec, target => target == .coreSpec
 
 def Project.admits (project : Project) (source : Role) (dependency : ImportFact) : Bool :=
-  dependency.comptime || match project.role? dependency.name with
+  (dependency.comptime && !(source == .coreSpec || source == .worldSpec)) || match project.role? dependency.name with
     | some target => source.permits target
     | none => true
 
@@ -127,7 +127,7 @@ private theorem import_step {project : Project} {inventory : Inventory}
   | some role =>
     simp only [owner, Bool.and_eq_true, Array.all_eq_true'] at admitted
     have permitted := admitted.2 dependency imported
-    simp only [Project.admits, runtime, Bool.false_or, found] at permitted
+    simp only [Project.admits, runtime, Bool.false_and, Bool.false_or, found] at permitted
     exact permits_inner permitted (inner role owner)
 
 theorem layering_sound (project : Project) (inventory : Inventory)
@@ -399,7 +399,7 @@ def applicability (premises : List Shape) (inputs : List (Universe × Shape)) (p
 
 def applies (premises : List Shape) (inputs : List (Universe × Shape)) (preconditions : List Shape)
     (witness : Shape) : Bool :=
-  !preconditions.isEmpty &&
+  !(preconditions.isEmpty && inputs.isEmpty) &&
     ((applicability premises inputs preconditions).witnesses? (fun _ => false) witness).isSome
 
 private theorem subst_unreplaceable (σ : Witnesses) (statement : Shape) :
@@ -408,12 +408,14 @@ private theorem subst_unreplaceable (σ : Witnesses) (statement : Shape) :
 
 theorem applies_sound {premises : List Shape} {inputs : List (Universe × Shape)} {preconditions : List Shape}
     {witness : Shape} (accepted : applies premises inputs preconditions witness = true) :
-    preconditions ≠ [] ∧ witness = premises.foldr .forallE (existential inputs (conjunction preconditions)) := by
-  simp only [applies, Bool.and_eq_true, Bool.not_eq_true', List.isEmpty_eq_false_iff] at accepted
+    (preconditions ≠ [] ∨ inputs ≠ []) ∧
+      witness = premises.foldr .forallE (existential inputs (conjunction preconditions)) := by
+  simp only [applies, Bool.and_eq_true, Bool.not_eq_true'] at accepted
   obtain ⟨nonempty, found⟩ := accepted
   obtain ⟨σ, found⟩ := Option.isSome_iff_exists.mp found
   obtain ⟨_, instantiates⟩ := witnesses?_sound found
-  exact ⟨nonempty, by rw [← instantiates, subst_unreplaceable]; rfl⟩
+  refine ⟨?_, by rw [← instantiates, subst_unreplaceable]; rfl⟩
+  cases preconditions <;> cases inputs <;> simp_all
 
 end Shape
 

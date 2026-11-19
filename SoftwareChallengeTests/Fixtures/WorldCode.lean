@@ -61,6 +61,10 @@ theorem unchecked_everywhere (h : ∀ n, UncheckedAt n) : wrongSucc 0 = 0 := h 0
 
 theorem unchecked_on_positives (h : ∀ n, n > 0 → UncheckedAt n) : wrongSucc 1 = 1 := h 1 (by decide)
 
+theorem hidden_succ (agrees : SuccHidden) : nativeSucc 0 = 0 + 1 := by
+  unfold SuccHidden at agrees
+  exact agrees 0
+
 theorem bounded_under_claim (n : Nat) (_h : ∀ m, m > 0 → SuccAt m) (small : n < 5) : n < 6 := by omega
 
 end SoftwareChallengeTests.Fixtures

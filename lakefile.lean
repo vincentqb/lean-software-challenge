@@ -160,6 +160,7 @@ package_facet softwareChallenge pkg : Unit := do
   for mod in catalog do
     job := job.mix (← mod.leanArts.fetch)
   job.mapM fun _ => do
+    IO.FS.writeFile (pkg.buildDir / "softwareChallenge.built") ""
     addFileTraces pkg ["lakefile.lean", "lake-manifest.json", "lean-toolchain", "owned.lock", "comparator.json"]
     addPureTrace (" ".intercalate flags.toList) "flags"
     let report := pkg.buildDir / "softwareChallenge.txt"
@@ -179,9 +180,15 @@ def pendingCount (report : String) : Nat :=
   ((report.splitOn "\n").findSome? fun line => (line.dropPrefix? "Pending: ").bind (·.toString.toNat?)).getD 0
 
 def auditSolution (pkg : Package) : ScriptM UInt32 := do
+  let built := pkg.buildDir / "softwareChallenge.built"
+  if ← built.pathExists then IO.FS.removeFile built
   try
     discard <| runBuild (pkg.fetchFacetJob `softwareChallenge)
   catch _ =>
+    unless ← built.pathExists do
+      IO.eprintln "lake lint could not build the package's modules, as printed above, so the audit did not run. Fix \
+        each error above; when the linker reports a `multiple definition`, two modules define the same name, or two \
+        executables define `main`, so rename one of them. Then run `lake lint`."
     return 1
   return if pendingCount (← IO.FS.readFile (pkg.buildDir / "softwareChallenge.txt")) == 0 then 0 else 2
 
@@ -502,6 +509,10 @@ def mutants : List Mutant := [
       ("ConstantFolding" / "CoreSpec.lean", replacing "@[expose] def Expr.isLit : Expr → Bool"
         "@[expose] def Expr.isLiteral : Expr → Bool"),
       ("ConstantFolding" / "CoreSpec.lean", replacing "!(a.isLit && b.isLit)" "!(a.isLiteral && b.isLiteral)")] },
+  { name := "owner-meta-imports-tooling", exits := { build := 1, lint := 1, grade := 3 }, owner := [
+      ("ConstantFolding" / "Notation.lean", appending "module\n\npublic section\n\ndef ConstantFolding.notationLevel : Nat := 1\n"),
+      ("ConstantFolding" / "CoreSpec.lean", replacing "module\n\npublic section\n"
+        "module\n\nmeta import ConstantFolding.Notation\n\npublic section\n")] },
   { name := "owner-adds-failing-test", exits := { test := 2, grade := 1 }, owner := [
       ("lakefile.lean", replacing "  testDriver := \"software_challenge/test_challenge\"\n"
         "  testDriver := \"software_challenge/test_challenge\"\n  testDriverArgs := #[\"own_test\"]\n"),
@@ -882,6 +893,16 @@ script test_sandbox do
         reported: lake lint exited {unreached.exitCode}, expected 1 with an error naming Consumer/Proofs.lean:7, \
         as the log below shows. Restore `warned` in SoftwareChallenge/Audit.lean, then run `lake test`.\n\
         {unreachedText}"
+      return 1
+    let brokenFile := consumer / "Consumer" / "Broken.lean"
+    IO.FS.writeFile brokenFile "module\n\npublic section\n\ndef broken : Nat := \"text\"\n"
+    let broken ← runIn consumer lake #["lint"]
+    let brokenText := broken.stdout ++ broken.stderr
+    IO.FS.removeFile brokenFile
+    unless broken.exitCode == 1 && brokenText.contains "lake lint could not build the package's modules" do
+      IO.eprintln s!"lake lint on a package with a module that does not compile exited {broken.exitCode}, expected 1 \
+        saying that it could not build the package's modules, as the log below shows. Restore that message in \
+        auditSolution in lakefile.lean, then run `lake test`.\n{brokenText}"
       return 1
     IO.FS.writeFile config ((← IO.FS.readFile config).replace "  lintDriver :=" "  builtinLint := true\n  lintDriver :=")
     let twice ← runIn consumer lake #["lint"]

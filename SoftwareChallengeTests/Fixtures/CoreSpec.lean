@@ -17,10 +17,8 @@ def NegativeVanishes (f : Nat → Nat) : Prop := ∀ n, f n < 0 → f n = 0
 
 def NonnegativeVanishes (f : Nat → Nat) : Prop := ∀ n, 0 ≤ f n → f n = 0
 
-structure TwoLaws : Prop where
-  first : 1 = 1
-  second : 2 = 2
-
-@[expose] def BothHold : Prop := 1 = 1 ∧ 2 = 2
+inductive Forest where
+  | grove (trees : List Forest)
+  deriving BEq
 
 end SoftwareChallengeTests.Fixtures
