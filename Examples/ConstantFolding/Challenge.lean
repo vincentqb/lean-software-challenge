@@ -61,10 +61,6 @@ theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
     ¬ ∀ (n m : Nat), (fun (_ : Expr) => Expr.lit 0) (.lit n) = .lit m → m = n := by
   sorry
 
-@[witness fold_keeps_literal] theorem fold_keeps_literal_applies :
-    ∃ (n m : Nat), fold (.lit n) = .lit m := by
-  sorry
-
 @[kills output_correct] theorem output_correct_rejects_suffix :
     ¬ (AddAgrees Nat.add → ∀ e : Expr,
       (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e)) := by

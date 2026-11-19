@@ -457,33 +457,74 @@ run_cmd Elab.Command.liftTermElabM do
   let generated := Audit.comparatorConfig `A.Solution marked
   unless generated == expectedConfig do throwError "Generated comparator.json:\n{generated}"
 
+open SoftwareChallengeTests.Fixtures SoftwareChallengeTests.Fixtures.WitnessChallenge in
 run_cmd Elab.Command.liftTermElabM do
   let member := fun (name : Name) => fixture (`WitnessChallenge ++ name)
   let read ← Audit.readChallenge project (fixture `WitnessChallenge) (← findOLean (fixture `WitnessChallenge))
+    (← IO.FS.readFile "SoftwareChallengeTests/Fixtures/WitnessChallenge.lean")
   unless read.headlines == #[member `double_halves, member `double_positive, member `double_between,
       member `double_lengths, member `succ_hits_one, member `double_small, member `double_zero,
       member `double_negative_vanishes, member `double_nonnegative_vanishes, member `double_vanishes_only_at_zero,
-      member `succ_law] do
-    throwError "A witness was read as a headline: {read.headlines}"
-  unless read.misshapenWitnesses.map (·.1) == #[member `double_positive_applies_unused,
-      member `double_positive_applies_replaced, member `double_zero_applies, member `double_applies] do
-    throwError "A witness was misjudged: {read.misshapenWitnesses}"
+      member `double_zero_fin, member `double_first, member `double_fin, member `double_under_claim, member `double_at,
+      member `double_odd, member `succ_law] do
+    throwError "A kill or a witness was read as a headline: {read.headlines}"
+  let derived := [
+    (`double_halves, ← `(∃ n, double n = 4)),
+    (`double_positive, ← `(∃ n, 0 < double n)),
+    (`double_between, ← `(∃ m n, double m < double n ∧ double n < 10)),
+    (`double_lengths, ← `(∃ (α : Type) (xs : List α), xs.length = double 1)),
+    (`succ_hits_one, ← `(SuccAgrees nativeSucc → ∃ n : Nat, nativeSucc n = 1)),
+    (`double_negative_vanishes, ← `(∃ n, double n < 0)),
+    (`double_zero_fin, ← `(∃ (n : Nat) (_ : NeZero n), double (0 : Fin n).val = 0)),
+    (`double_first, ← `(∃ (n : Nat) (h : 0 < double n), (⟨0, h⟩ : Fin (double n)).val = 0)),
+    (`double_fin, ← `(∃ _ : Fin (double 2), True)),
+    (`double_under_claim, ← `((∀ m, m > 0 → SuccAt m) → ∃ n, double n < 5)),
+    (`double_at, ← `(∃ n, double n = 1))]
+  unless read.witnesses == ((derived.map fun (headline, _) => (witnessName (member headline), member headline)).toArray.push
+      (member `double_odd_applies, member `double_odd)) do
+    throwError "The witnesses were misread: {read.witnesses}"
+  for (headline, stated) in derived do
+    let witness := witnessName (member headline)
+    let elaborated ← Elab.Term.elabType stated
+    Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expected ← instantiateMVars elaborated
+    unless (← getConstInfo witness).type == expected do
+      throwError "{witness} states {(← getConstInfo witness).type}, not {expected}"
+    unless read.lineOf witness == read.lineOf (read.killsOf (member headline))[0]! do
+      throwError "{witness} is not placed at the kill that derives it"
+    unless read.writtenOf witness == s!"{headline}_applies" &&
+        read.namespaceOf witness == `SoftwareChallengeTests.Fixtures.WitnessChallenge do
+      throwError "{witness} is written as {read.writtenOf witness} in {read.namespaceOf witness}"
+  for name in [`double_small, `double_zero, `double_vanishes_only_at_zero, `double_nonnegative_vanishes, `double,
+      `succ_law] do
+    if (← getEnv).contains (witnessName (member name)) then
+      throwError "{witnessName (member name)} was derived, though {name} needs none or its kill cannot unfold it"
+  unless read.predeclared == #[(member `double_odd_applies, member `double_odd)] && read.misshapenWitnesses.isEmpty do
+    throwError "A stated or a derived witness was misjudged: {read.predeclared} {read.misshapenWitnesses}"
+  for (name, binders) in [(`double_fin, [{ kind := .input, mentions := true, refers := [] }]),
+      (`double_first, [{ kind := .input, mentions := false, refers := [] }, { kind := .input, mentions := true, refers := [0] },
+        { kind := .precondition, mentions := true, refers := [0, 1] }]),
+      (`double_zero_fin, [{ kind := .input, mentions := false, refers := [] }, { kind := .input, mentions := false, refers := [0] },
+        { kind := .precondition, mentions := true, refers := [0, 1] }]),
+      (`double_under_claim, [{ kind := .input, mentions := false, refers := [] }, { kind := .claim, mentions := false, refers := [] },
+        { kind := .precondition, mentions := true, refers := [0] }])] do
+    let found ← Telescope.summaries (· == member `double) (← getConstInfo (member name)).type
+    unless found == binders do throwError "The binders of {name} were summarized as {repr found}"
+
+run_cmd Elab.Command.liftTermElabM do
+  let member := fun (name : Name) => fixture (`WitnessChallenge ++ name)
+  let read ← Audit.readChallenge project (fixture `WitnessChallenge) (← findOLean (fixture `WitnessChallenge))
   let errors := Audit.meaningful { challenge := read }
-  expect errors "a precondition of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves mentions \
-      SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
-    "Add `@[witness SoftwareChallengeTests.Fixtures.WitnessChallenge.double_halves] theorem double_halves_applies : \
-      ∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4 := by sorry`"
-  for witness in ["double_positive_applies_unused", "double_positive_applies_replaced"] do
-    expect errors witness "but it is not `∃ n, 0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double n`"
-  expect errors "double_zero_applies" "has no precondition to meet"
-  expect errors "double_applies" "is not a headline of Challenge.lean"
-  expect errors "a precondition of SoftwareChallengeTests.Fixtures.WitnessChallenge.double_negative_vanishes \
-      mentions SoftwareChallengeTests.Fixtures.WitnessChallenge.double"
-    "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 0 := by sorry`"
-  if errors.any fun error => ["double_small", "double_positive", "double_between", "double_lengths",
-      "succ_hits_one", "double_nonnegative_vanishes", "double_vanishes_only_at_zero", "succ_law"].any fun headline =>
-        contains error s!"a precondition of {member headline.toName} mentions" then
-    throwError "A headline with a witness, or with preconditions the solution cannot change, was rejected: {errors}"
+  expect errors "double_nonnegative_vanishes has a precondition or input that mentions \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double, but its kills derived no \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double_nonnegative_vanishes_applies"
+    "Mark each `Prop` definition in the statement of \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double_nonnegative_vanishes `@[expose]`"
+  expect errors "double_odd_applies is stated in Challenge.lean, but `@[kills"
+    "Delete theorem SoftwareChallengeTests.Fixtures.WitnessChallenge.double_odd_applies from Challenge.lean"
+  if errors.any fun error => contains error "derived no" && !contains error "double_nonnegative_vanishes" ||
+      contains error "double_odd_applies has no kill" then
+    throwError "A headline whose kill derived its witness, or a stated witness, was misjudged: {errors}"
   unless contains (Audit.comparatorConfig `A.Solution read) (toString (member `double_positive_applies)) do
     throwError "A witness is missing from comparator.json"
   let pick := fixture `pick
@@ -491,16 +532,19 @@ run_cmd Elab.Command.liftTermElabM do
       (← getConstInfo (fixture `pick_one_zero)).type
     | throwError "The precondition of a vacuous headline was not read"
   let refuted := Shape.ofExpr (← getConstInfo (fixture `pick_one_zero_has_no_witness)).type
-  unless vacuous.mentions == some pick &&
-      refuted == (Shape.applicability vacuous.premises vacuous.inputs vacuous.preconditions).negation do
+  unless vacuous.mentions == some pick && refuted == (Shape.ofExpr vacuous.statement).negation do
     throwError "The witness a vacuous headline needs is not the one its solution refutes"
-  expect (Audit.meaningful { challenge := { theorems := #[fixture `pick_one_zero], preconditioned := #[vacuous] } })
-    "a precondition of SoftwareChallengeTests.Fixtures.pick_one_zero mentions SoftwareChallengeTests.Fixtures.pick"
-    "`@[witness SoftwareChallengeTests.Fixtures.pick_one_zero] theorem pick_one_zero_applies"
+  let unkilled : Audit.Challenge := { theorems := #[fixture `pick_one_zero], preconditioned := #[vacuous] }
+  if (Audit.meaningful { challenge := unkilled }).any (contains · "derived no") then
+    throwError "A headline with no kill was told that its kills derived no witness"
+  let killed : Audit.Challenge := { unkilled with kills := #[(`k, fixture `pick_one_zero)] }
+  expect (Audit.meaningful { challenge := { killed with theorems := killed.theorems.push `k } })
+    "pick_one_zero has a precondition or input that mentions SoftwareChallengeTests.Fixtures.pick, but its kills \
+      derived no SoftwareChallengeTests.Fixtures.pick_one_zero_applies" "could hold vacuously"
   let some negative := read.preconditioned.find? (·.headline == member `double_negative_vanishes)
     | throwError "The precondition a specification definition hides was not read"
   unless Shape.ofExpr (← getConstInfo ``double_negative_vanishes_has_no_witness).type ==
-      (Shape.applicability negative.premises negative.inputs negative.preconditions).negation do
+      (Shape.ofExpr negative.statement).negation do
     throwError "The witness a hidden vacuous precondition needs is not the one its refutation rules out"
   if read.preconditioned.any (·.headline == member `double_vanishes_only_at_zero) then
     throwError "A world claim a headline concludes was unfolded into preconditions"
