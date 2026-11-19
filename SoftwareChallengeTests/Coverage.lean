@@ -72,6 +72,12 @@ def statementRejecting : List (LakeFacts × FileFacts × ChallengeFacts) := [
   (baseLake, { baseFiles with digests := changedDigests }, baseChallenge),
   (baseLake, { baseFiles with lock := .unreadable "expected an object" }, baseChallenge)]
 
+def setupRejecting : List LakeFacts :=
+  [{ baseLake with lintDriver := "" }, { baseLake with builtinLint := some ⟨"lakefile.lean", 4⟩ }]
+
+def reportedSetup (lake : LakeFacts) : List Statement.Setup :=
+  (Statement.run lake baseFiles baseChallenge).setup.toList
+
 def reportedByTheStep : List Statement.Error := [.challengeFails "Challenge.lean", .importsChallenge default]
 
 def impureStatement : List Statement.Error :=
@@ -118,6 +124,10 @@ run_cmd do
     "facts value in statementRejecting that Statement.run rejects with it, nor is it in reportedByTheStep"
 
 run_cmd do
+  covered ``SoftwareChallenge.Statement.Setup ((setupRejecting.flatMap reportedSetup).map (·.ctorIdx))
+    "facts value in setupRejecting that Statement.run reports as a setup problem with it"
+
+run_cmd do
   covered ``SoftwareChallenge.Test.Failure ([Rules.Test.failing, Rules.Test.notRun, Rules.Test.movedCheck,
       Rules.Test.ownFails, Rules.Test.ownNotRun, Rules.Test.unknown, Rules.Test.nativeMissing].flatMap fun facts =>
         (SoftwareChallenge.Test.run facts).failures.toList.map (·.ctorIdx))
@@ -142,6 +152,10 @@ run_cmd do
 run_cmd do
   covered ``SoftwareChallenge.Statement.Error (Rules.StatementMessages.samples.map (·.1.ctorIdx))
     "message sample in Rules.StatementMessages.samples"
+
+run_cmd do
+  covered ``SoftwareChallenge.Statement.Setup (Rules.StatementMessages.setupSamples.map (·.ctorIdx))
+    "message sample in Rules.StatementMessages.setupSamples"
 
 run_cmd do
   covered ``SoftwareChallenge.Test.Failure (Rules.Test.samples.toList.map (·.ctorIdx))

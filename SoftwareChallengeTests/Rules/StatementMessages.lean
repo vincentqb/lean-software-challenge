@@ -139,6 +139,8 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec, derivedSpec, baseLake),
    (.codeInClosure `App.CoreCode, reachedThrough, baseLake)]
 
+def setupSamples : List Setup := [.lintDriver "", .lintDriver "other/lint", .builtinLint ⟨"lakefile.lean", 4⟩]
+
 def messageOf (sample : Error × ChallengeFacts × LakeFacts) : Message :=
   sample.1.message sample.2.2 baseFiles sample.2.1
 
@@ -169,6 +171,8 @@ end
 #guard (List.range 35).all fun index => samples.any (tag ·.1 == index)
 
 #guard samples.all (conventional ∘ messageOf)
+
+#guard setupSamples.all fun setup => conventional (setup.message baseLake)
 
 #guard (samples.map (messageOf · |>.place.line)).all (· > 0)
 
