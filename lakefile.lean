@@ -33,8 +33,12 @@ lean_lib «SoftwareChallengeFixtures» where
   precompileModules := true
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
+lean_lib «SoftwareChallengeReadFixtures» where
+  roots := #[]
+  globs := #[.submodules `SoftwareChallengeReadTests.Fixtures]
+
 lean_lib «SoftwareChallengeReadTests» where
-  needs := #[`@/SoftwareChallengeFixtures:leanArts]
+  needs := #[`@/SoftwareChallengeFixtures:leanArts, `@/SoftwareChallengeReadFixtures:leanArts]
 
 lean_exe «grade» where
   root := `SoftwareChallenge.Steps.Grade
@@ -62,6 +66,11 @@ def ownTest (pkg : Package) (name : String) : IO (Option Json) := do
     let place ← placeIn pkg fun line => line.startsWith keyword &&
       ((line.drop keyword.length).toString.splitOn " ").head?.any ([name, s!"«{name}»"].contains ·)
     return Json.mkObj [("name", name), ("kind", kind), ("place", place)]
+
+def overriddenPackages (file : System.FilePath) : IO (Array String) := do
+  unless ← file.pathExists do return #[]
+  let entries := ((Json.parse (← IO.FS.readFile file)).bind (·.getObjValAs? (Array Json) "packages")).toOption.getD #[]
+  return entries.filterMap fun entry => (entry.getObjValAs? String "name").toOption
 
 structure Prepared where
   text : String
@@ -95,10 +104,11 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
   let tops := catalog.filter fun mod => !imports.any (·.2.any (·.name == mod.name))
   let exeRoots := pkg.leanExes.map (·.config.root)
   let dir ← IO.FS.realPath pkg.dir
+  let overridden ← overriddenPackages (← getWorkspace).packageOverridesFile
   let packages ← ((← getWorkspace).packages.filter (!·.isRoot)).mapM fun dep => do
     return Json.mkObj [("name", toJson dep.baseName), ("configured", (lexical (dir / dep.relDir)).toString),
-      ("real", (← IO.FS.realPath dep.dir).toString), ("scope", dep.scope),
-      ("manifestFile", dep.relManifestFile.toString), ("configFile", dep.relConfigFile.toString)]
+      ("real", (← IO.FS.realPath dep.dir).toString), ("overridden", toJson (overridden.contains dep.baseName.toString)),
+      ("scope", dep.scope), ("manifestFile", dep.relManifestFile.toString), ("configFile", dep.relConfigFile.toString)]
   let fields := [("packageDir", toJson dir.toString), ("configFiles", toJson configs),
     ("modules", toJson (catalog.map source)),
     ("challengeCandidates", toJson (roots.filterMap (pkg.findModule? · |>.map source))),

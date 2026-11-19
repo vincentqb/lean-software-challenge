@@ -180,6 +180,10 @@ def statementRoots (lake : LakeFacts) (challenge : Name) : Array Name :=
   #[challenge] ++ ((lake.modules.filter fun source => specRole source.module && source.module != challenge).map
     (·.module))
 
+def ownedRoots (lake : LakeFacts) (challenge : ChallengeFacts) : Array Name :=
+  (lake.modules.filter fun source => source.module != challenge.module && ownsModule challenge source.module).map
+    (·.module)
+
 def codeRole (module : Name) : Bool :=
   Role.ofName module == .coreCode || Role.ofName module == .worldCode
 
@@ -358,12 +362,24 @@ def writesOf (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts)
       | _ => none
     config? := (solution? lake).map (configOf challenge) }
 
+def lintDriverSetup (lake : LakeFacts) : Array Setup :=
+  if lake.lintDriver = auditLintDriver then #[] else #[.lintDriver lake.lintDriver]
+
+def builtinLintSetup (lake : LakeFacts) : Array Setup :=
+  match lake.builtinLint with
+  | some place => #[.builtinLint place]
+  | none => #[]
+
+def setupOf (lake : LakeFacts) : Array Setup :=
+  lintDriverSetup lake ++ builtinLintSetup lake
+
 def run (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Result :=
+  let setup := setupOf lake
   let found := errors lake files challenge
-  { errors := found
-    writes := if found.isEmpty then writesOf lake files challenge else { lock? := none, config? := none }
-    killSearch := #[]
-    code := if found.isEmpty then 0 else 1 }
+  let clean := setup.isEmpty && found.isEmpty
+  { setup, errors := found
+    writes := if clean then writesOf lake files challenge else { lock? := none, config? := none }
+    code := if clean then 0 else 1 }
 
 theorem plainCharacter_eq_true {char : Char} : plainCharacter char = true ↔ Name.PlainCharacter char := by
   simp [plainCharacter, Name.PlainCharacter, and_assoc]

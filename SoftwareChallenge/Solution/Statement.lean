@@ -668,11 +668,18 @@ theorem errors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : Chal
     · simp [found, locked, isEmpty_eq_false locked]
   · simp [found, isEmpty_eq_false found, findings, setupErrors]
 
-theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
-    errors lake files challenge = #[] ↔ Complete lake files challenge := by
-  rw [errors_eq_empty]
+theorem setupOf_eq_empty {lake : LakeFacts} :
+    setupOf lake = #[] ↔ lake.lintDriver = auditLintDriver ∧ lake.builtinLint = none := by
+  unfold setupOf lintDriverSetup builtinLintSetup
+  by_cases driven : lake.lintDriver = auditLintDriver
+  · cases linted : lake.builtinLint <;> simp [driven]
+  · cases linted : lake.builtinLint <;> simp [driven]
+
+theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
+    setupOf lake = #[] ∧ errors lake files challenge = #[] ↔ Complete lake files challenge := by
+  rw [setupOf_eq_empty, errors_eq_empty]
   constructor
-  · rintro ⟨locking, found⟩
+  · rintro ⟨⟨driven, unlinted⟩, locking, found⟩
     obtain ⟨digestedOwned, current⟩ := lockingErrors_eq_empty.mp locking
     simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
       Array.append_eq_empty_iff, and_assoc] at found
@@ -716,9 +723,11 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
       ownedClaimsDeclared := ownedClaimErrors_eq_empty.mp ownedClaimEmpty
       ownedDerivedTotal := derivedPartialErrors_eq_empty.mp derivedEmpty
       ownedDigested := digestedOwned
-      lockCurrent := current }
+      lockCurrent := current
+      lintDriven := driven
+      builtinLintOff := unlinted }
   · intro complete
-    refine ⟨?_, ?_⟩
+    refine ⟨⟨complete.lintDriven, complete.builtinLintOff⟩, ?_, ?_⟩
     · exact lockingErrors_eq_empty.mpr ⟨complete.ownedDigested, complete.lockCurrent⟩
     · simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
         Array.append_eq_empty_iff, and_assoc]
@@ -743,11 +752,17 @@ theorem errors_eq_empty_iff_complete {lake : LakeFacts} {files : FileFacts} {cha
         auxiliaryErrors_eq_empty.mpr complete.auxiliariesPublic⟩
 
 theorem run_code_eq_zero {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
-    (run lake files challenge).code = 0 ↔ errors lake files challenge = #[] := by
+    (run lake files challenge).code = 0 ↔ setupOf lake = #[] ∧ errors lake files challenge = #[] := by
   unfold run
-  by_cases empty : errors lake files challenge = #[]
-  · simp [empty]
-  · simp [isEmpty_eq_false empty, empty]
+  by_cases unset : setupOf lake = #[]
+  · by_cases empty : errors lake files challenge = #[]
+    · simp [unset, empty]
+    · simp [unset, isEmpty_eq_false empty, empty]
+  · simp [isEmpty_eq_false unset, unset]
+
+theorem run_setup {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
+    (run lake files challenge).setup = setupOf lake := by
+  simp [run]
 
 theorem run_errors {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
     (run lake files challenge).errors = errors lake files challenge := by
@@ -757,11 +772,13 @@ end Statement
 
 theorem Statement.run_code_eq_zero_iff (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) :
     (Statement.run lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
-  rw [Statement.run_code_eq_zero, Statement.errors_eq_empty_iff_complete]
+  rw [Statement.run_code_eq_zero, Statement.clean_iff_complete]
 
 theorem Statement.run_code_ne_zero_iff (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) :
-    (Statement.run lake files challenge).code ≠ 0 ↔ (Statement.run lake files challenge).errors ≠ #[] := by
-  rw [ne_eq, ne_eq, Statement.run_code_eq_zero, Statement.run_errors]
+    (Statement.run lake files challenge).code ≠ 0 ↔
+      (Statement.run lake files challenge).setup ≠ #[] ∨ (Statement.run lake files challenge).errors ≠ #[] := by
+  rw [ne_eq, Statement.run_code_eq_zero, Statement.run_setup, Statement.run_errors]
+  exact Classical.not_and_iff_not_or_not
 
 private def acceptedLake : LakeFacts :=
   { packageDir := "", repository? := none, configFiles := #[], modules := #[⟨`Solution, "Solution.lean"⟩],
@@ -820,11 +837,13 @@ private theorem accepted : Statement.Complete acceptedLake acceptedFiles accepte
       subst listed
       exact ⟨⟨"Solution.lean", "1"⟩, by simp [acceptedFiles], filed⟩
   lockCurrent := .inl rfl
+  lintDriven := rfl
+  builtinLintOff := rfl
 
 theorem Statement.run_code_eq_zero_iff_rejects_accepting :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 0 } :
+        ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 0 } :
           Statement.Result)) lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
   intro holds
   have complete := (holds { acceptedLake with defaultTargets := #[] } acceptedFiles acceptedChallenge).mp rfl
@@ -833,7 +852,7 @@ theorem Statement.run_code_eq_zero_iff_rejects_accepting :
 theorem Statement.run_code_eq_zero_iff_rejects_refusing :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+        ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
           Statement.Result)) lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
   intro holds
   have refused := (holds acceptedLake acceptedFiles acceptedChallenge).mpr accepted
@@ -842,10 +861,13 @@ theorem Statement.run_code_eq_zero_iff_rejects_refusing :
 theorem Statement.run_code_ne_zero_iff_rejects_accepting :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[.noStatementTarget], writes := { lock? := none, config? := none }, killSearch := #[],
+        ({ setup := #[], errors := #[.noStatementTarget], writes := { lock? := none, config? := none },
            code := 0 } : Statement.Result)) lake files challenge).code ≠ 0 ↔
         ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-          ({ errors := #[.noStatementTarget], writes := { lock? := none, config? := none }, killSearch := #[],
+          ({ setup := #[], errors := #[.noStatementTarget], writes := { lock? := none, config? := none },
+             code := 0 } : Statement.Result)) lake files challenge).setup ≠ #[] ∨
+        ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+          ({ setup := #[], errors := #[.noStatementTarget], writes := { lock? := none, config? := none },
              code := 0 } : Statement.Result)) lake files challenge).errors ≠ #[] := by
   intro holds
   have refused := (holds default default default).mpr (by simp)
@@ -854,10 +876,13 @@ theorem Statement.run_code_ne_zero_iff_rejects_accepting :
 theorem Statement.run_code_ne_zero_iff_rejects_refusing :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+        ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
           Statement.Result)) lake files challenge).code ≠ 0 ↔
         ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-          ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+          ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
+            Statement.Result)) lake files challenge).setup ≠ #[] ∨
+        ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+          ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
             Statement.Result)) lake files challenge).errors ≠ #[] := by
   intro holds
   have refused := (holds default default default).mp (by simp)

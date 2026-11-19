@@ -328,6 +328,21 @@ def ownedViolationMessage (lake : LakeFacts) (challenge : ChallengeFacts) : Viol
   | .axioms declaration found => ownedAxiomMessage lake challenge declaration found
   | .impure declaration role reasons => ownedImpureMessage lake challenge declaration role reasons
 
+def Setup.message (lake : LakeFacts) : Setup → Message
+  | .lintDriver found =>
+    { place := atLine (lakefile lake) 1
+      what := if found.isEmpty then s!"the package block of {lakefile lake} does not set `lintDriver`"
+        else s!"the package block of {lakefile lake} sets `lintDriver := \"{found}\"`"
+      why := "so `lake lint` does not run the audit, and a `sorry` or an unproved headline goes unreported"
+      fix := s!"Set `lintDriver := \"{auditLintDriver}\"` in the package block of {lakefile lake}, and {relock}"
+      next := .build }
+  | .builtinLint place =>
+    { place := atLine place.file place.line
+      what := s!"the package block of {lakefile lake} sets `builtinLint := true`"
+      why := s!"but `lake lint` already runs Lean's linters through {auditLintDriver}, so they would run twice"
+      fix := s!"Remove that line from {lakefile lake}, and {relock}"
+      next := .build }
+
 def claimWritten (claim : Name) : String :=
   match claim with
   | .str _ last => last

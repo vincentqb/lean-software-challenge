@@ -149,7 +149,6 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (imported : Impor
   let accounted := fun (info : ConstantInfo) =>
     targetNames.contains info.name || info.isAxiom || !isWritten info.name && auxiliaryNames.contains info.name
   let writtenOf := fun (placed : Placed) => textAt source placed.ranges.selectionRange
-  let owned ← ownedFacts lake challenge.module imported next
   runIn env do
     let targetOf := fun (placed : Placed) (writtenName : String) (derived : Bool) => do
       let (rendered, renderedExplicit) ← render placed.info.type
@@ -208,7 +207,6 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (imported : Impor
       replaceable
       imports := (env.header.moduleNames.zip env.header.moduleData).map fun (module, data) =>
         (module, data.imports.map (·.module))
-      claims := claimsExt.getState env
-      owned }
+      claims := claimsExt.getState env }
 
 end SoftwareChallenge.Read

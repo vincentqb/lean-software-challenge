@@ -1,6 +1,7 @@
 module
 
 meta import SoftwareChallengeReadTests.Support
+meta import SoftwareChallenge.Steps.Replay
 
 namespace SoftwareChallengeReadTests.Challenge
 
@@ -96,6 +97,12 @@ run_cmd Elab.Command.liftCoreM do
   check (challenge.witnesses.all fun witness => witness.target.enclosingNamespace == fixture `WitnessChallenge &&
       (witness.target.signature.isEmpty == witness.derived))
     "a witness's namespace or signature was misread"
+  let source ← IO.FS.readFile challenge.file
+  let replayed := challenge.witnesses.map fun witness =>
+    (witness.target.constant.name, SoftwareChallenge.Steps.Replay.lineOf source witness.target.constant.name,
+      witness.target.place.line)
+  check (replayed.all fun (_, shown, line) => shown == some s!" (Challenge.lean:{line})")
+    s!"replay places a witness elsewhere than lint does: {replayed}"
   check (challenge.kills.any fun kill => kill.headline == member `double && kill.target.constant.name ==
       member `double_rejects_nothing) "a kill of a hole, which is not a headline, was not read"
   for (name, binders) in [(`double_fin, [binder .input false true []]),

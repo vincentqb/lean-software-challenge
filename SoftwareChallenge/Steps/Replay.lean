@@ -13,13 +13,28 @@ namespace SoftwareChallenge.Steps.Replay
 
 def again : String := "then run `lake script run software_challenge/replay`"
 
+def names (token short : String) : Bool :=
+  token == short || token.endsWith ("." ++ short)
+
+def tokensOf (line : String) : List String :=
+  (line.splitOn " ").filter (!·.isEmpty)
+
+def killed (line : String) : Option String :=
+  match (tokensOf line).dropWhile (· != "@[kills") with
+  | _ :: written :: _ => (((written.splitOn "]").headD "").splitOn ",").head?
+  | _ => none
+
 def lineOf (challenge : String) (name : Name) : Option String :=
   let short := match name with
     | .str _ last => last
     | _ => toString name
-  ((challenge.splitOn "\n").zipIdx.findSome? fun (line, index) =>
-    if ((line.splitOn " ").filter (!·.isEmpty)).contains short && line.contains "theorem " then some (index + 1)
-    else none).map fun line => s!" (Challenge.lean:{line})"
+  let lines := (challenge.splitOn "\n").zipIdx
+  let declared := lines.findSome? fun (line, index) =>
+    if (tokensOf line).any (names · short) && line.contains "theorem " then some (index + 1) else none
+  let derivedFrom := if short.endsWith "_applies" then some (short.dropEnd "_applies".length).toString else none
+  let firstKill := derivedFrom.bind fun headline => lines.findSome? fun (line, index) =>
+    if (killed line).any (names · headline) then some (index + 1) else none
+  ((declared.orElse fun _ => firstKill).map fun line => s!" (Challenge.lean:{line})")
 
 def explain (solution : Name) (place : String) (name : Name) (output : IO.Process.Output) : String :=
   let shown := s!"{output.stdout}{output.stderr}"

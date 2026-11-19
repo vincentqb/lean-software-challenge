@@ -52,23 +52,40 @@ def stageWord : Stage → String
   | .test => "test"
   | .comparator => "comparator"
 
+def stageCommand : Stage → String
+  | .lock => "git rev-parse"
+  | .statement => "lake build :softwareChallengeStatement"
+  | .owned => "git diff"
+  | .dependencies => "lake build :softwareChallengeStatement"
+  | .worktree => "git worktree add"
+  | .build => "lake build"
+  | .lint => "lake lint"
+  | .test => "lake test"
+  | .comparator => "lake comparator"
+
+def Context.stageDir (context : Context) : Stage → String
+  | .build | .lint | .test | .comparator => s!"a checkout of {context.candidate}"
+  | _ => toString context.base
+
 def guarded {α : Type} (context : Context) (stage : Stage) (action : Judge α) : Judge α :=
   ExceptT.mk do
     try action.run
     catch error => return .error { stage, verdict := .cannotJudge, detail := s!"cannot judge: grade's \
-      {stageWord stage} stage failed with `{error}`, so grade cannot tell whether {context.candidate} is right. Fix \
-      what it reports, {context.again}." }
+      {stageWord stage} stage failed with `{error}`, so grade cannot tell whether {context.candidate} is right. Run \
+      `{stageCommand stage}` in {context.stageDir stage} to see the cause, fix it there, {context.again}." }
 
 structure Dependency where
   name : Name
   real : String
+  overridden : Bool
   override : Json
 
 def Dependency.parse (entry : Json) : Except String Dependency := do
   let name ← entry.getObjValAs? String "name"
   let real ← entry.getObjValAs? String "real"
   let field := fun (key fallback : String) => (entry.getObjValAs? String key).toOption.getD fallback
-  return { name := name.toName, real, override := Json.mkObj [("type", "path"), ("scope", field "scope" ""),
+  return { name := name.toName, real, overridden := (entry.getObjValAs? Bool "overridden").toOption.getD false
+           override := Json.mkObj [("type", "path"), ("scope", field "scope" ""),
     ("name", name), ("manifestFile", field "manifestFile" "lake-manifest.json"), ("inherited", false),
     ("dir", real), ("copy", false), ("configFile", field "configFile" "lakefile.lean")] }
 
@@ -167,6 +184,9 @@ def dependenciesStage (context : Context) (facts : BaseFacts) : Judge Unit := do
     let fix := if Sandbox.within dependency.real base.toString then
         s!"Clone the repository of {context.base} into a directory outside those, run `lake build` in the clone, \
           then run `lake exe grade {context.candidate}` there"
+      else if dependency.overridden then
+        s!"In {context.base / ".lake" / "package-overrides.json"}, set the `dir` of {dependency.name} to a directory \
+          outside those, or delete its entry, run `lake build`, {context.again}"
       else s!"In lakefile.lean, require {dependency.name} from git or from a directory outside those, delete \
         owned.lock, run `lake build`, and commit, {context.again}"
     s!"cannot judge: the comparator's sandbox hides package {dependency.name} at {dependency.real}, because it \
@@ -191,14 +211,15 @@ def stepStage (context : Context) (checkout : System.FilePath) (stage : Stage) (
   if code == 0 then return
   let file := stepFile checkout s!"{status}.status"
   let judged ← if ← file.pathExists then pure (← IO.FS.readFile file).trimAscii.toString.toNat? else pure none
+  let fails := s!"refused: `lake {step}` fails on {candidate}, as printed above. Fix each problem it reports in \
+    {candidate} as it says, {context.again}."
   match judged with
-  | some 2 => stop stage .refuse s!"refused: {candidate} is not complete: `lake {step}` lists pending items above. \
-      Finish them in {candidate}, {context.again}."
   | some 3 | none => stop stage .cannotJudge s!"cannot judge: `lake {step}` exited {code} in {checkout} before \
-      judging, as printed above, so grade cannot tell whether {candidate} is right. Fix the cause it reports, \
-      {context.again}."
-  | some _ => stop stage .refuse s!"refused: `lake {step}` fails on {candidate}, as printed above. Fix what it \
-      reports in {candidate}, {context.again}."
+      judging, as printed above, so grade cannot tell whether {candidate} is right. Run `lake {step}` in a checkout of \
+      {candidate} to see the cause, fix it there, {context.again}."
+  | some 2 => if stage == .lint then stop stage .refuse s!"refused: {candidate} is not complete: `lake {step}` lists \
+      pending items above. Finish them in {candidate}, {context.again}." else stop stage .refuse fails
+  | some _ => stop stage .refuse fails
 
 def comparatorStage (context : Context) (checkout : System.FilePath) (config : Config) : Judge Unit := do
   let candidate := context.candidate
@@ -217,9 +238,10 @@ def comparatorStage (context : Context) (checkout : System.FilePath) (config : C
       printed above. {Comparator.remedy config.solution rejection} in {candidate}; `lake script run \
       software_challenge/replay` in a checkout of it names the theorem, {context.again}."
   | none =>
-    stop .comparator .cannotJudge s!"cannot judge: `lake comparator` exited {out.exitCode} without a verdict, as \
-      printed above, so grade cannot tell whether {candidate} is right. Fix the cause it reports, such as `bwrap` \
-      permissions or a build failure in its sandbox, {context.again}."
+    stop .comparator .cannotJudge s!"cannot judge: `lake comparator` exited {out.exitCode} without a verdict \
+      ({Comparator.failure out}), as printed above, so grade cannot tell whether {candidate} is right. Run `lake \
+      comparator` in a checkout of {candidate} to see the cause, such as `bwrap` permissions or a build failure in \
+      its sandbox, fix it there, {context.again}."
 
 def judge (context : Context) (passed : IO.Ref (Array Observation)) : Judge Unit := do
   let accept := fun (stage : Stage) (detail : String) =>
@@ -280,8 +302,9 @@ def main : List String → IO UInt32
   | [candidate] => do
     try SoftwareChallenge.Steps.Grade.grade candidate
     catch error =>
-      IO.eprintln s!"cannot judge: grade stopped on `{error}`, so it cannot tell whether {candidate} is right. Fix \
-        what it reports, then run `lake exe grade {candidate}`."
+      IO.eprintln s!"cannot judge: grade stopped on `{error}` while it set up or removed its checkout of {candidate}, \
+        so it cannot tell whether {candidate} is right. Make `git` and `lake` run in this directory, then run `lake \
+        exe grade {candidate}`."
       return 3
   | _ => do
     IO.eprintln "usage: lake exe grade <commit> judges the candidate commit against this checkout's statement, \

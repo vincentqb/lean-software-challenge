@@ -33,10 +33,7 @@ def challengeOf (lake : LakeFacts) (compiled : List String) : IO ChallengeFacts 
   let (some candidate, [dir]) := (Read.challengeOf? lake, compiled) | return Read.emptyChallenge .anonymous ""
   searchPathRef.modify (System.FilePath.mk dir :: ·)
   let imported ← Read.challengeEnv { lake with challengeCandidates := #[] } candidate.module .build
-  let challenge ← Read.challengeFacts lake candidate imported .build
-  Read.requireChallengeCensus imported.env challenge .build
-  Read.requireClosureCensus lake challenge .build
-  return challenge
+  Read.listedChallenge lake candidate imported .build
 
 def written (lake : LakeFacts) (file : String) (text : String) : IO Bool := do
   if (← Read.readInput lake file .build) == some text then return false
@@ -65,11 +62,11 @@ def run (lakeFile : System.FilePath) (args : List String) : IO UInt32 := do
   let files ← Read.fileFacts lake .build
   let challenge ← challengeOf lake args
   let result := SoftwareChallenge.Statement.run lake files challenge
-  if result.errors.isEmpty then
+  if result.code == 0 then
     for line in ← perform lake result.writes do IO.println line
   else
-    IO.println (errorListing (result.errors.map fun error => Report.item (error.message lake files challenge))
-      "The statement check" .build)
+    IO.println (errorListing (result.setup.map (fun setup => Report.item (setup.message lake)) ++
+      result.errors.map fun error => Report.item (error.message lake files challenge)) "The statement check" .build)
   return result.code
 
 def importers (lakeFile : System.FilePath) : IO UInt32 := do

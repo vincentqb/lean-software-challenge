@@ -25,6 +25,7 @@ structure PackageFact where
   name : Name
   configured : String
   real : String
+  overridden : Bool := false
   deriving BEq, Repr, Inhabited
 
 inductive OwnTestKind where
@@ -37,6 +38,8 @@ structure OwnTestFact where
   place : Place
   deriving BEq, Repr, Inhabited
 
+def auditLintDriver : String := "software_challenge/lint_challenge"
+
 structure LakeFacts where
   packageDir : String
   repository? : Option String
@@ -47,6 +50,7 @@ structure LakeFacts where
   packages : Array PackageFact
   defaultTargets : Array Name
   builtinLint : Option Place
+  lintDriver : String := auditLintDriver
   testDriver : String
   testDriverArgs : Array String
   testDriverArgsPlace : Place

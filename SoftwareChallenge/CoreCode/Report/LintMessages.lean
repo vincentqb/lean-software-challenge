@@ -234,6 +234,8 @@ private def kindOf : ConstantKind → String
   | .constructor => "a constructor"
   | .recursor => "a recursor"
 
+def overridesFile : String := ".lake/package-overrides.json"
+
 def ownedFile? (facts : Facts) (path : String) : Option OwnedFile :=
   if path.endsWith "lakefile.lean" || path.endsWith "lakefile.toml" then some .lakefile
   else if path.endsWith "lake-manifest.json" then some .manifest
@@ -821,13 +823,20 @@ def Pending.message (facts : Facts) : Pending → Message
     let hides := fun (path : String) => sandboxHidden.any fun hidden =>
       (hidden.splitOn "/").isPrefixOf (path.splitOn "/")
     let dir := if hides dependency.configured then dependency.configured else dependency.real
-    { place := ⟨lakefile, 1⟩, what := s!"the comparator's sandbox hides package {dependency.name} at {dir}"
-      why := "because it mounts empty directories over /home, /root, /run, /tmp, and /var, so `lake comparator` \
-        cannot build the solution"
-      fix := s!"{lakefile} and lake-manifest.json are owned, so the fix records a new statement: in {lakefile}, \
-        require {dependency.name} from git, so that it lives in .lake/packages, or from a directory outside those, \
-        run `lake update {dependency.name}`, delete owned.lock, and run `lake build` to record them"
-      next := .lint }
+    let what := s!"the comparator's sandbox hides package {dependency.name} at {dir}"
+    let why := "because it mounts empty directories over /home, /root, /run, /tmp, and /var, so `lake comparator` \
+      cannot build the solution"
+    if dependency.overridden then
+      { place := ⟨overridesFile, 1⟩, what, why
+        fix := s!"In {overridesFile}, which overrides where lakefile.lean and lake-manifest.json locate \
+          {dependency.name}, set its `dir` to a directory outside those, or delete its entry"
+        next := .lint }
+    else
+      { place := ⟨lakefile, 1⟩, what, why
+        fix := s!"{lakefile} and lake-manifest.json are owned, so the fix records a new statement: in {lakefile}, \
+          require {dependency.name} from git, so that it lives in .lake/packages, or from a directory outside those, \
+          run `lake update {dependency.name}`, delete owned.lock, and run `lake build` to record them"
+        next := .lint }
 
 end Lint
 

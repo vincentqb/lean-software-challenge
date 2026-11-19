@@ -15,22 +15,6 @@ public section
 /-!
 # Lean Software Challenge, judged by itself
 
-An inventory the audit accepts keeps CoreSpec, WorldSpec, and CoreCode from reaching WorldCode or
-tooling at runtime. It also keeps every declaration within its role's table and the standard
-axioms, and the audit accepts every inventory whose modules and declarations meet that table. A
-kill is accepted exactly when it negates the headline under a closed replacement of the holes. An
-independence kill is accepted exactly when it also restates every other headline under that
-replacement. Two statements have one shape exactly when they differ only in binder names, binder
-kinds, metadata, and let versus have. Closure is reachability along the edges. owned.lock reads
-back what was written, and so does comparator.json when its names are plain. The lock check passes
-exactly when every path has the same digest in owned.lock as on disk. Grade accepts exactly when
-every stage, in order, accepted; otherwise it gives the verdict of the first stage that did not.
-The statement, lint, and test steps each exit 0 exactly when their facts meet the conditions
-CoreSpec states for that step in Statement.Complete, Lint.Complete, and Test.Complete, over every
-module, declaration, binder shape, and constant occurrence the facts hold; lint exits other than 1
-exactly when the facts meet Lint.Clean; and each step exits nonzero exactly when it reports an
-error, a pending item, or a failure.
-
 Not claimed:
 - that the reader's facts, binder shapes included, match Lean, Lake, or the files;
 - that a message's fix works;
@@ -283,38 +267,45 @@ theorem Statement.run_code_eq_zero_iff (lake : LakeFacts) (files : FileFacts) (c
 @[kills Statement.run_code_eq_zero_iff] theorem Statement.run_code_eq_zero_iff_rejects_accepting :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 0 } :
+        ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 0 } :
           Statement.Result)) lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
   sorry
 
 @[kills Statement.run_code_eq_zero_iff] theorem Statement.run_code_eq_zero_iff_rejects_refusing :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+        ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
           Statement.Result)) lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
   sorry
 
 theorem Statement.run_code_ne_zero_iff (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) :
-    (Statement.run lake files challenge).code ≠ 0 ↔ (Statement.run lake files challenge).errors ≠ #[] := by
+    (Statement.run lake files challenge).code ≠ 0 ↔
+      (Statement.run lake files challenge).setup ≠ #[] ∨ (Statement.run lake files challenge).errors ≠ #[] := by
   sorry
 
 @[kills Statement.run_code_ne_zero_iff] theorem Statement.run_code_ne_zero_iff_rejects_accepting :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[.noStatementTarget], writes := { lock? := none, config? := none }, killSearch := #[],
+        ({ setup := #[], errors := #[.noStatementTarget], writes := { lock? := none, config? := none },
            code := 0 } : Statement.Result)) lake files challenge).code ≠ 0 ↔
         ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-          ({ errors := #[.noStatementTarget], writes := { lock? := none, config? := none }, killSearch := #[],
+          ({ setup := #[], errors := #[.noStatementTarget], writes := { lock? := none, config? := none },
+             code := 0 } : Statement.Result)) lake files challenge).setup ≠ #[] ∨
+        ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+          ({ setup := #[], errors := #[.noStatementTarget], writes := { lock? := none, config? := none },
              code := 0 } : Statement.Result)) lake files challenge).errors ≠ #[] := by
   sorry
 
 @[kills Statement.run_code_ne_zero_iff] theorem Statement.run_code_ne_zero_iff_rejects_refusing :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
       ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+        ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
           Statement.Result)) lake files challenge).code ≠ 0 ↔
         ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
-          ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+          ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
+            Statement.Result)) lake files challenge).setup ≠ #[] ∨
+        ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+          ({ setup := #[], errors := #[], writes := { lock? := none, config? := none }, code := 1 } :
             Statement.Result)) lake files challenge).errors ≠ #[] := by
   sorry
 

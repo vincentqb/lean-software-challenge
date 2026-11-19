@@ -43,7 +43,7 @@ def packageModules (lake : LakeFacts) : Array Name :=
   distinct (lake.modules.map (·.module) ++ lake.challengeCandidates.map (·.module) ++ lake.exeRoots)
 
 def catalog (lake : LakeFacts) (challenge : Name) : Array Name :=
-  distinct ((lake.modules.map (·.module) ++ lake.exeRoots).filter (· != challenge))
+  distinct ((lake.modules.map (·.module)).filter (· != challenge))
 
 def fileOf (lake : LakeFacts) (module : Name) : String :=
   (((lake.modules ++ lake.challengeCandidates).find? (·.module == module)).map (·.file)).getD (sourcePath module)
@@ -145,7 +145,10 @@ def importEnvironment (lake : LakeFacts) (roots : Array Name) (next : Next) : IO
       return imported
 
 def challengeEnv (lake : LakeFacts) (challenge : Name) (next : Next) : IO Imported :=
-  importEnvironment lake (Statement.statementRoots lake challenge) next
+  importEnvironment lake #[challenge] next
+
+def ownedEnv (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) : IO Imported :=
+  importEnvironment lake (Statement.ownedRoots lake challenge) next
 
 def catalogEnv (lake : LakeFacts) (challenge : Name) (next : Next) : IO Imported :=
   importEnvironment lake (catalog lake challenge) next

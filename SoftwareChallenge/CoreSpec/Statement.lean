@@ -54,15 +54,20 @@ inductive Error where
   | lockUnreadable (problem : String)
   deriving BEq, Repr, Inhabited
 
+inductive Setup where
+  | lintDriver (found : String)
+  | builtinLint (place : Place)
+  deriving BEq, Repr, Inhabited
+
 structure Writes where
   lock? : Option (Array Lock.Entry)
   config? : Option Config
   deriving BEq, Repr, Inhabited
 
 structure Result where
+  setup : Array Setup
   errors : Array Error
   writes : Writes
-  killSearch : Array Name
   code : UInt32
   deriving BEq, Repr, Inhabited
 
@@ -127,5 +132,7 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
   ownedDerivedTotal : ∀ derived ∈ challenge.owned.derivedPartials, ¬ challenge.Owns derived.2
   ownedDigested : ∀ path, lake.Owned challenge path → files.Digested path
   lockCurrent : files.lock = .missing ∨ files.LockCurrent
+  lintDriven : lake.lintDriver = auditLintDriver := by rfl
+  builtinLintOff : lake.builtinLint = none := by rfl
 
 end SoftwareChallenge

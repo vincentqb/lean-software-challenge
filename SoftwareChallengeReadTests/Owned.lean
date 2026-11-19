@@ -12,7 +12,8 @@ def ownedModules : Array Name := #[`CoreSpec, `CoreSpec.Derived, `WorldSpec, `Co
 
 run_cmd Elab.Command.liftCoreM do
   let lake ← lakeOf ownedModules (some (fixture `Challenge))
-  let challenge ← readChallenge lake .build
+  let read ← readChallenge lake .build
+  let challenge := { read with owned := ← readOwned lake read .build }
   let owned := challenge.owned
   check (owned.inventory.modules.map (·.name) == #[`CoreSpec, `CoreSpec.Derived, `WorldSpec, `CoreCode].map fixture)
     s!"the statement step did not read every CoreSpec and WorldSpec module and the challenge's package imports: \
@@ -46,8 +47,8 @@ run_cmd Elab.Command.liftCoreM do
       line.text == "public import SoftwareChallengeTests.Fixtures.CoreSpec") "an owned module's import line was misread"
   check (challenge.imports.any fun (module, imports) => module == fixture `CoreCode &&
       imports.contains (fixture `CoreSpec)) "the import edges of the challenge's closure were misread"
-  check (Statement.statementRoots lake challenge.module == #[`Challenge, `CoreSpec, `CoreSpec.Derived, `WorldSpec].map
-      fixture) "the statement step's roots were misread"
+  check (Statement.ownedRoots lake challenge == #[`CoreSpec, `CoreSpec.Derived, `WorldSpec, `CoreCode].map fixture)
+    s!"the owned modules the statement step reads were misread: {Statement.ownedRoots lake challenge}"
 
 run_cmd Elab.Command.liftCoreM do
   let lake ← lakeOf #[] (some (fixture `KeptChallenge))
