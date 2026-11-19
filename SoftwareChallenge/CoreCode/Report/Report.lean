@@ -79,19 +79,17 @@ private def proved (facts : Facts) (target : TargetFact) : Bool :=
 private def assumptionsOf (facts : Facts) (headline : HeadlineFact) (short : Name → String) : Array Assumption :=
   let name := headline.target.constant.name
   let holds := proved facts headline.target
-  let used := (facts.solution.premiseUses.find? (·.1 == name)).map (·.2)
   let checksOf := fun (index : Nat) =>
     ((facts.solution.claimUses.find? fun use => use.headline == name && use.binder == index).map fun use =>
       (use.checks.filter (·.2 == .matched)).size).getD 0
-  let unusedOf := fun (index : Nat) => holds && used.any (!·.contains index)
-  let merged := headline.claims.foldl (init := (#[] : Array (Name × String × Nat × Bool)))
-    fun kept (index, claim, statement) =>
-      match kept.findIdx? (·.2.1 == statement) with
-      | some known => kept.modify known fun (claim, statement, checks, unused) =>
-        (claim, statement, checks, unused && unusedOf index)
-      | none => kept.push (claim, statement, checksOf index, unusedOf index)
-  merged.map fun (claim, statement, checks, unused) =>
-    { label := if (merged.filter (·.1 == claim)).size > 1 then statement else short claim, checks, unused }
+  let groups := Lint.assumed headline
+  groups.map fun group =>
+    { label := if (groups.filter (·.claim == group.claim)).size > 1 then group.statement else short group.claim
+      checks := ((group.binders[0]?).map checksOf).getD 0
+      unused := Lint.unusedByProof facts.solution holds name group.binders }
+
+private def markOf (facts : Facts) (kind : String) (targets : Array TargetFact) : Option String :=
+  targets.findSome? fun target => (marker (facts.solution.standingOf target)).map fun shown => s!"{kind} {shown}"
 
 def headlineLines (facts : Facts) : Array HeadlineLine :=
   let challenge := facts.challenge
@@ -101,12 +99,12 @@ def headlineLines (facts : Facts) : Array HeadlineLine :=
   challenge.headlines.map fun headline =>
     let name := headline.target.constant.name
     let standing := facts.solution.standingOf headline.target
-    let killed := (challenge.kills.filter (·.headline == name)).all (proved facts ·.target)
-    let witnessed := (challenge.witnesses.filter (·.headline == name)).all (proved facts ·.target)
+    let kills := (challenge.kills.filter (·.headline == name)).map (·.target)
+    let witnesses := (challenge.witnesses.filter (·.headline == name)).map (·.target)
     { name := short name
       assumptions := assumptionsOf facts headline short
-      marks := ((marker standing).toArray ++ (if killed then #[] else #["kill not yet proved"]) ++
-        if witnessed then #[] else #["witness not yet proved"])
+      marks := (marker standing).toArray ++ (markOf facts "kill" kills).toArray ++
+        (markOf facts "witness" witnesses).toArray
       followsFrom := if standing.proved then (Lint.followsFrom proofs provedHeadlines name).map short
         else #[] }
 
@@ -139,7 +137,7 @@ private def pendingOrder (facts : Facts) : Lint.Pending → Nat
 private def verdict (errors pending : Array String) : Array String :=
   if !errors.isEmpty then
     #[s!"lake lint found {errors.size} {if errors.size == 1 then "error" else "errors"}, as listed under Errors \
-      above, so the solution breaks a rule it must keep. Fix each as it says, then run `lake lint`."]
+      above, so the package does not pass `lake lint`. Fix each as it says, then run `lake lint`."]
   else if !pending.isEmpty then
     #[s!"lake lint found no errors, but {pending.size} {if pending.size == 1 then "item is" else "items are"} \
       pending, as listed under Pending above, so the solution is not complete. Do each as it says, then run \

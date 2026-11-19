@@ -27,18 +27,33 @@ private def command (test : OwnTestFact) : String :=
   | .library => s!"lake build {test.name}"
   | .executable => s!"lake exe {test.name}"
 
+def nativeMissing? (error : String) : Option String :=
+  match error.splitOn "Could not find native implementation of external declaration '" with
+  | _ :: rest :: _ => (rest.splitOn "'").head?
+  | _ => none
+
 def Failure.message (challengeFile : String) : Failure → Message
   | .checkFailed outcome =>
     let check := outcome.check
     let place := lineOne check.place
-    { place, what := s!"the Check of {check.claim} failed: {oneLine (outcome.error?.getD "")}"
-      why := s!"so either the Check is wrong or {check.claim} is false, since a Check tests a world claim against the \
-        real foreign code"
-      fix := s!"Fix the Check at {place.file}:{place.line}; if {check.claim} is false, no edit to the editable files \
-        makes `lake test` pass, because the statement assumes it: the statement must drop {check.claim} from the \
-        headlines of {challengeFile} and from its WorldSpec module, then delete owned.lock and run `lake build` to \
-        record it"
-      next := .test }
+    match nativeMissing? (outcome.error?.getD "") with
+    | some declaration =>
+      { place := ⟨"lakefile.lean", 1⟩
+        what := s!"the Checks could not run: they call {declaration}, an `@[extern]` declaration, whose native code \
+          Lean's interpreter finds only in precompiled modules"
+        why := "and the package does not precompile them"
+        fix := "Add `precompileModules := true` to the package's default lean_lib in lakefile.lean, then delete \
+          owned.lock and run `lake build`"
+        next := .test }
+    | none =>
+      { place, what := s!"the Check of {check.claim} failed: {oneLine (outcome.error?.getD "")}"
+        why := s!"so either the Check is wrong or {check.claim} is false, since a Check tests a world claim against \
+          the real foreign code"
+        fix := s!"Fix the Check at {place.file}:{place.line}; if {check.claim} is false, no edit to the editable \
+          files makes `lake test` pass, because the statement assumes it: the statement must drop {check.claim} from \
+          the headlines of {challengeFile} and from its WorldSpec module, then delete owned.lock and run `lake build` \
+          to record it"
+        next := .test }
   | .checkNotRun check =>
     let place := lineOne check.place
     { place, what := s!"the Check of {check.claim} did not run"

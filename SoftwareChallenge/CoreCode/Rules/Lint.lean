@@ -177,54 +177,84 @@ def drifted (facts : Facts) : Bool :=
   | .missing => false
   | _ => !(lockErrors facts).isEmpty
 
+def mergeReasons (known added : List Reason) : List Reason :=
+  known ++ added.filter (!known.contains ·)
+
+def impureOf? : Error → Option Name
+  | .violation (.impure declaration _ _) => some declaration
+  | _ => none
+
+def addReasons (added : List Reason) : Error → Error
+  | .violation (.impure written role known) => .violation (.impure written role (mergeReasons known added))
+  | other => other
+
+def groupImpure (facts : Facts) (errors : Array Error) : Array Error :=
+  errors.foldl (init := #[]) fun kept error => match error with
+    | .violation (.impure declaration role reasons) =>
+      let anchor := anchorOf facts ((moduleOf? facts declaration).getD .anonymous) declaration
+      match kept.findIdx? (impureOf? · == some anchor) with
+      | some index => kept.modify index (addReasons reasons)
+      | none => kept.push (.violation (.impure anchor role reasons))
+    | other => kept.push other
+
+def impurePlace? (facts : Facts) : Error → Option (Name × Place)
+  | .violation (.impure declaration _ _) =>
+    some (declaration, declarationPlace facts ((moduleOf? facts declaration).getD .anonymous) declaration)
+  | _ => none
+
+def sorryPlace? (facts : Facts) (error : Error) : Option Place :=
+  match error with
+  | .violation (.axioms _ found) => if found[0]? == some ``sorryAx then some (error.message facts).place else none
+  | .axiomUse blame => if blame.axiomName == ``sorryAx then some (error.message facts).place else none
+  | _ => none
+
 structure Pruning where
-  placed : Std.HashSet Name
   modules : Std.HashMap Name Name
-  written : Std.HashMap Name (Array (Name × List Reason))
   targets : Std.HashSet Name
+  named : Array Place
+  twice : Std.HashSet Name
   noTarget : Bool
   drifted : Bool
 
 def pruning (facts : Facts) (errors : Array Error) : Pruning :=
-  let placed := facts.solution.places.foldl (init := {}) fun placed found => placed.insert found.name
-  let modules := facts.solution.inventory.declarations.foldl (init := {}) fun modules fact =>
-    if modules.contains fact.name then modules else modules.insert fact.name fact.module
-  { placed, modules
-    written := errors.foldl (init := {}) fun written error => match error with
-      | .violation (.impure declaration _ reasons) =>
-        match modules[declaration]? with
-        | some module =>
-          if placed.contains declaration then
-            written.insert module ((written.getD module #[]).push (declaration, reasons))
-          else written
-        | none => written
-      | _ => written
+  { modules := facts.solution.inventory.declarations.foldl (init := {}) fun modules fact =>
+      if modules.contains fact.name then modules else modules.insert fact.name fact.module
     targets := facts.challenge.targets.foldl (init := {}) fun targets target => targets.insert target.constant.name
+    named := errors.filterMap fun error => (impurePlace? facts error).bind fun (declaration, place) =>
+      if declaration.hasMacroScopes then none else some place
+    twice := errors.foldl (init := {}) fun twice error => match error with
+      | .declaredTwice name _ _ => twice.insert name
+      | _ => twice
     noTarget := errors.any (· matches .noStatementTarget)
     drifted := drifted facts }
-
-def Pruning.collapses (pruning : Pruning) (declaration : Name) : Bool :=
-  !pruning.placed.contains declaration &&
-    (((pruning.modules[declaration]?).bind (pruning.written[·]?)).getD #[]).any fun (written, reasons) =>
-      written != declaration && (written.isPrefixOf declaration ||
-        declaration.hasMacroScopes && isInitializer declaration && reasons.contains .initializer)
 
 def Pruning.covers (pruning : Pruning) (blame : AxiomBlame) : Bool :=
   if blame.axiomName == blame.declaration then (nativeTactic? blame.axiomName).isSome
   else shownName blame.culprit != shownName blame.declaration && pruning.modules.contains blame.culprit &&
     !pruning.targets.contains (shownName blame.declaration)
 
-def Pruning.redundant (pruning : Pruning) : Error → Bool
+def Pruning.redundant (facts : Facts) (pruning : Pruning) : Error → Bool
   | .lockMissing => pruning.noTarget
   | .comparatorMissing => pruning.noTarget || pruning.drifted
   | .comparatorStale .. | .comparatorUnreadable _ => pruning.drifted
   | .axiomUse blame => pruning.covers blame
-  | .violation (.impure declaration _ _) => pruning.collapses declaration
-  | _ => false
+  | .declaredTwice name _ second =>
+    let anchor := anchorOf facts second name
+    anchor != name && pruning.twice.contains anchor
+  | error => match impurePlace? facts error with
+    | some (declaration, place) => declaration.hasMacroScopes && pruning.named.contains place
+    | none => false
+
+def withoutRepeatedSorries (facts : Facts) (errors : Array Error) : Array Error :=
+  let reported := errors.filterMap (sorryPlace? facts)
+  errors.filter fun error => match error with
+    | .sorryUsed place => !reported.contains { place with line := max 1 place.line }
+    | _ => true
 
 def reported (facts : Facts) (errors : Array Error) : Array Error :=
-  let pruning := pruning facts errors
-  let kept := errors.filter (!pruning.redundant ·)
+  let grouped := groupImpure facts errors
+  let pruning := pruning facts grouped
+  let kept := withoutRepeatedSorries facts (grouped.filter (!pruning.redundant facts ·))
   if kept.isEmpty then errors else kept
 
 def unproved (facts : Facts) (targets : Array TargetFact) : Array Pending :=

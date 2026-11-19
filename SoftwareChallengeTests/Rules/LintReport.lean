@@ -46,6 +46,44 @@ def outside : Facts := withSolution fun solution => { solution with
 
 #guard headlineLine outside == "fold_correct  assumes AddAgrees (1 check)  (outside Solution's imports)"
 
+def changeFound (name : Name) (change : FoundFact → FoundFact) : Facts := withSolution fun solution => { solution with
+  found := solution.found.map fun found => if found.constant.name == name then change found else found }
+
+#guard headlineLine (changeFound `App.fold_correct_rejects fun found =>
+    { found with constant := { found.constant with type := .sort .zero } }) ==
+  "fold_correct  assumes AddAgrees (1 check)  (kill stated differently)"
+#guard headlineLine (changeFound `App.fold_correct_rejects ({ · with module := `App.Proofs })) ==
+  "fold_correct  assumes AddAgrees (1 check)  (kill outside Solution's imports)"
+#guard headlineLine { restated with solution := { restated.solution with
+    found := restated.solution.found.filter (·.constant.name != `App.fold_correct_rejects) } } ==
+  "fold_correct  assumes AddAgrees (1 check)  (stated differently)  (kill not yet proved)"
+
+def applies : TargetFact :=
+  target `App.fold_correct_applies .proved (.sort .zero) 12 "fold_correct_applies" ": True" "True"
+
+def witnessed : Facts := withChallenge fun challenge => { challenge with
+  witnesses := #[{ target := applies, headline := `App.fold_correct, derived := true }] }
+
+#guard headlineLine witnessed == "fold_correct  assumes AddAgrees (1 check)  (witness not yet proved)"
+#guard headlineLine { witnessed with solution := { solution with
+    found := solution.found.push { found applies `App.Solution "App/Solution.lean" 18 with
+      constant := { applies.constant with type := .sort (.succ .zero) } } } } ==
+  "fold_correct  assumes AddAgrees (1 check)  (witness stated differently)"
+#guard headlineLine { witnessed with solution := { solution with
+    found := solution.found.push (found applies `App.Solution "App/Solution.lean" 18) } } ==
+  "fold_correct  assumes AddAgrees (1 check)"
+
+def twice : Facts := withChallenge fun challenge => { challenge with
+  headlines := challenge.headlines.map fun headline => { headline with
+    binders := headline.binders ++ [⟨.claim, false, []⟩],
+    claims := headline.claims.push (2, `App.AddAgrees, "AddAgrees nativeAdd") } }
+
+#guard (Lint.assumed (twice.challenge.headlines[0]!)).map (·.binders) == #[#[1, 2]]
+#guard headlineLine { twice with solution := { solution with premiseUses := #[(`App.fold_correct, #[2])] } } ==
+  "fold_correct  assumes AddAgrees (1 check)"
+#guard headlineLine { twice with solution := { solution with premiseUses := #[(`App.fold_correct, #[0])] } } ==
+  "fold_correct  assumes AddAgrees (1 check, unused by the proof)"
+
 def sorried : Facts := withSolution fun solution => { solution with inventory := { solution.inventory with
   declarations := solution.inventory.declarations.map fun fact =>
     if fact.name == `App.fold_correct then { fact with axioms := #[``sorryAx] } else fact } }
@@ -130,7 +168,9 @@ def failing : Facts := withSolution fun solution => { solution with
 #guard contains (rendered failing) "Errors: 1\n  App/Solution.lean:6: Lean reports `declaration uses 'sorry'` here"
 #guard contains (rendered failing) "Pending: 1\n  Challenge.lean:11: App.fold_correct_rejects is not proved yet"
 #guard (Lint.run failing).code == 1
-#guard contains (rendered failing) "lake lint found 1 error, as listed under Errors above"
+#guard contains (rendered failing) "lake lint found 1 error, as listed under Errors above, so the package does not \
+  pass `lake lint`. Fix each as it says, then run `lake lint`."
+#guard !contains (rendered failing) "the solution breaks"
 
 def ordered : Facts := withSolution fun solution => { solution with found := #[] }
 

@@ -114,6 +114,25 @@ def says (failure : Test.Failure) (fragments : List String) : Bool :=
 #guard (Report.test "Challenge.lean" (Test.run failing)).size == 3
 #guard contains ((Report.test "Challenge.lean" (Test.run failing))[2]!) "the Check of App.AddAgrees failed"
 
+def nativeError : String :=
+  "Could not find native implementation of external declaration 'App.nativeAdd' (symbols 'l_App_nativeAdd___boxed' \
+    or 'l_App_nativeAdd')"
+
+def nativeMissing : TestFacts :=
+  { complete with checks := #[{ passed agrees 3 with error? := some nativeError },
+    { passed advances 4 with error? := some nativeError }] }
+
+#guard Test.nativeMissing? nativeError == some "App.nativeAdd"
+#guard Test.nativeMissing? "expected 3, got 4" == none
+#guard says (.checkFailed { passed agrees 3 with error? := some nativeError })
+  ["lakefile.lean:1: the Checks could not run: they call App.nativeAdd, an `@[extern]` declaration, whose native \
+    code Lean's interpreter finds only in precompiled modules, and the package does not precompile them",
+    "Add `precompileModules := true` to the package's default lean_lib in lakefile.lean, then delete owned.lock and \
+      run `lake build`, then run `lake test`."]
+#guard !says (.checkFailed { passed agrees 3 with error? := some nativeError }) ["Fix the Check"]
+#guard (Test.run nativeMissing).code == 1
+#guard ((Report.test "Challenge.lean" (Test.run nativeMissing)).filter (contains · "precompileModules")).size == 1
+
 end
 
 end SoftwareChallengeTests.Rules.Test

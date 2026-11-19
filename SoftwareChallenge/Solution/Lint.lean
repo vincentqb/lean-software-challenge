@@ -329,6 +329,73 @@ theorem reachedFromMain_iff (solution : SolutionFacts) (name : Name) :
     obtain ⟨middle, first, rest⟩ := reaches_of_transGen path
     exact ⟨middle, (calls_iff _ _ _).mpr first, rest⟩
 
+theorem mem_followsFrom_iff (proofs : Graph) (proved : Array Name) (headline other : Name) :
+    other ∈ followsFrom proofs proved headline ↔ other ∈ proved ∧ other ≠ headline ∧
+      ∃ first ∈ proofs.next headline, (proofs.cut (proved.filter (· != headline))).Reaches first other := by
+  have outside : headline ∉ proved.filter (· != headline) := by simp
+  simp only [followsFrom, Array.mem_filter, Std.HashSet.contains_iff_mem, Graph.mem_closure_iff, Graph.next_cut,
+    outside, ite_false, bne_iff_ne, ne_eq, and_assoc]
+
+theorem unusedByProof_iff (solution : SolutionFacts) (proved : Bool) (headline : Name) (binders : Array Nat) :
+    unusedByProof solution proved headline binders = true ↔ proved = true ∧
+      ∃ used, premisesOf? solution headline = some used ∧ ∀ index ∈ binders, index ∉ used := by
+  unfold unusedByProof
+  cases premisesOf? solution headline with
+  | none => simp
+  | some used =>
+    simp only [Option.any_some, Bool.and_eq_true, Array.all_eq_true', Bool.not_eq_true', Bool.eq_false_iff, ne_eq,
+      Array.contains_iff_mem, Option.some.injEq, exists_eq_left']
+
+theorem mem_binders_assumed {headline : HeadlineFact} {group : Assumed} (member : group ∈ assumed headline)
+    (index : Nat) : index ∈ group.binders ↔ ∃ claim, (index, claim, group.statement) ∈ headline.claims := by
+  obtain ⟨statement, -, rfl⟩ := Array.mem_map.mp member
+  simp only [Array.mem_map, Array.mem_filter, beq_iff_eq]
+  constructor
+  · rintro ⟨⟨found, claim, said⟩, ⟨listed, same⟩, rfl⟩
+    exact ⟨claim, by simpa [← same] using listed⟩
+  · rintro ⟨claim, listed⟩
+    exact ⟨(index, claim, statement), ⟨listed, rfl⟩, rfl⟩
+
+private theorem mem_foldl_distinct (claims : List (Nat × Name × String)) (kept : Array String) (statement : String) :
+    statement ∈ claims.foldl (fun kept (claim : Nat × Name × String) =>
+        if kept.contains claim.2.2 then kept else kept.push claim.2.2) kept ↔
+      statement ∈ kept ∨ ∃ claim ∈ claims, claim.2.2 = statement := by
+  induction claims generalizing kept with
+  | nil => simp
+  | cons claim rest ih =>
+    rw [List.foldl_cons, ih]
+    by_cases contained : kept.contains claim.2.2 = true
+    · simp only [contained, ite_true, List.mem_cons, exists_eq_or_imp]
+      constructor
+      · rintro (old | later)
+        · exact .inl old
+        · exact .inr (.inr later)
+      · rintro (old | same | later)
+        · exact .inl old
+        · exact .inl (same ▸ Array.contains_iff_mem.mp contained)
+        · exact .inr later
+    · simp only [contained, Bool.false_eq_true, ite_false, Array.mem_push, List.mem_cons, exists_eq_or_imp]
+      constructor
+      · rintro ((old | same) | later)
+        · exact .inl old
+        · exact .inr (.inl same.symm)
+        · exact .inr (.inr later)
+      · rintro (old | same | later)
+        · exact .inl (.inl old)
+        · exact .inl (.inr same.symm)
+        · exact .inr later
+
+theorem mem_distinctStatements (claims : Array (Nat × Name × String)) (statement : String) :
+    statement ∈ distinctStatements claims ↔ ∃ claim ∈ claims, claim.2.2 = statement := by
+  rw [distinctStatements, ← Array.foldl_toList]
+  simpa using mem_foldl_distinct claims.toList #[] statement
+
+theorem assumed_complete {headline : HeadlineFact} {index : Nat} {claim : Name} {statement : String}
+    (listed : (index, claim, statement) ∈ headline.claims) :
+    ∃ group ∈ assumed headline, group.statement = statement ∧ index ∈ group.binders := by
+  refine ⟨_, Array.mem_map.mpr ⟨statement, (mem_distinctStatements _ _).mpr ⟨_, listed, rfl⟩, rfl⟩, rfl, ?_⟩
+  exact Array.mem_map.mpr ⟨(index, claim, statement), Array.mem_filter.mpr ⟨listed, by simp⟩, rfl⟩
+
 theorem mainItems_eq_empty_iff (facts : Facts)
     (defined : ∀ hole ∈ facts.challenge.holes, facts.solution.Holds hole) : mainItems facts = #[] ↔
     (facts.lake.Program → (∃ main, facts.solution.main? = some main) ∧
@@ -422,6 +489,10 @@ theorem pendingOf_eq_empty_iff (facts : Facts) : pendingOf facts = #[] ↔
     exact ⟨headlines, holes, kills, witnesses, (mainItems_eq_empty_iff facts holes).mpr main, decided, checked,
       visible⟩
 
+private theorem groupImpure_empty (facts : Facts) : groupImpure facts #[] = #[] := rfl
+
+private theorem withoutRepeatedSorries_empty (facts : Facts) : withoutRepeatedSorries facts #[] = #[] := rfl
+
 theorem reported_eq_empty_iff (facts : Facts) (errors : Array Error) :
     reported facts errors = #[] ↔ errors = #[] := by
   unfold reported
@@ -434,7 +505,8 @@ theorem reported_eq_empty_iff (facts : Facts) (errors : Array Error) :
       exact absurd (Array.isEmpty_iff.mpr empty) kept
     · intro empty
       subst empty
-      simp at kept
+      rw [groupImpure_empty, Array.filter_empty, withoutRepeatedSorries_empty] at kept
+      exact absurd rfl kept
 
 theorem code_eq_zero_iff (errors : Array Error) (pending : Array Pending) :
     code errors pending = 0 ↔ errors = #[] ∧ pending = #[] := by

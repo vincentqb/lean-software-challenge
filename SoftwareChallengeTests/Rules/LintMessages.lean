@@ -158,7 +158,9 @@ def pendingSays (facts : Facts) (found : Lint.Pending) (fragments : List String)
   (.violation (.forbiddenImport `App.CoreCode `App.Tools .coreCode))
   ["Rename App.Tools to a CoreCode module, as in App.CoreCode.Tools (App/CoreCode/Tools.lean)"]
 #guard errorSays complete (.violation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec))
-  ["from App/CoreSpec.lean, which is owned, so then delete owned.lock and run `lake build`"]
+  ["so that the statements rest only on pure definitions, and App.CoreSpec is owned, so no edit to the editable \
+    files fixes it", "Delete line 1, `import App.CoreCode`, from App/CoreSpec.lean, then delete owned.lock and run \
+    `lake build`, then run `lake lint`."]
 #guard errorSays complete (.violation (.axioms `App.fold_lemma #[``sorryAx]))
   ["App/Solution.lean:6: App.fold_lemma uses `sorry`, so it is not proved",
     "Replace each `sorry` in App.fold_lemma with a proof or a definition, then run `lake lint`."]
@@ -253,6 +255,91 @@ def pendingSays (facts : Facts) (found : Lint.Pending) (fragments : List String)
   ["lakefile.lean:5: the package block sets `builtinLint := true`", "delete owned.lock and run `lake build`"]
 #guard errorSays complete (.proofUnreadable `App.fold_correct `App.Solution)
   ["App/Solution.lean:10: the proof of App.fold_correct in App.Solution cannot be read"]
+
+def specDeclaration (name : Name) (line : Nat) : DeclarationFact := declaration name `App.CoreSpec line false
+
+def owning : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[specDeclaration `App.badSpec 9, specDeclaration `App.specLemma 11, specDeclaration `App.specAx 12,
+      specDeclaration `App.SpecClaim 13] }
+  places := solution.places ++ #[placeOf `App.badSpec "App/CoreSpec.lean" 9 "badSpec",
+    placeOf `App.specLemma "App/CoreSpec.lean" 11 "specLemma", placeOf `App.specAx "App/CoreSpec.lean" 12 "specAx",
+    placeOf `App.SpecClaim "App/CoreSpec.lean" 13 "SpecClaim", placeOf `App.helper "App/CoreCode.lean" 21 "helper",
+    placeOf `App.helper "App/CoreSpec.lean" 14 "helper"] }
+
+def specAxiom : AxiomBlame :=
+  { declaration := `App.specAx, axiomName := `App.specAx, culprit := `App.specAx, culpritModule? := some `App.CoreSpec }
+
+def ownedSamples : Array Lint.Error :=
+  #[.violation (.legacy `App.CoreSpec), .violation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec),
+    .violation (.axioms `App.specLemma #[``sorryAx]), .violation (.axioms `App.specAx #[`App.specAx]),
+    .violation (.impure `App.badSpec .coreSpec [.«unsafe»]), .axiomUse specAxiom,
+    .axiomUse { specAxiom with declaration := `App.specLemma, axiomName := `App.raw, culprit := `App.specLemma },
+    .claimOutsideWorldSpec `App.SpecClaim `App.CoreSpec, .unregisteredClaim { registration with module := `App.CoreSpec },
+    .lintWarning { warning with module := `App.CoreSpec, place := ⟨"App/CoreSpec.lean", 4⟩ },
+    .sorryUsed ⟨"App/CoreSpec.lean", 11⟩, .sorryUsed ⟨"Challenge.lean", 3⟩,
+    .declaredTwice `App.specLemma `App.CoreSpec `App.WorldSpec, .holeNoncomputable `App.fold `App.WorldSpec]
+
+def relocked : String := "then delete owned.lock and run `lake build`, then run `lake lint`."
+
+#guard ownedSamples.all fun error => follows (error.message owning)
+#guard ownedSamples.all fun error =>
+  errorSays owning error ["is owned, so no edit to the editable files fixes it", relocked]
+#guard errorSays owning (.violation (.legacy `App.CoreSpec))
+  ["App/CoreSpec.lean:1: App.CoreSpec does not start with `module`, so the audit cannot tell what it exposes, and \
+    App.CoreSpec is owned, so no edit to the editable files fixes it. Add `module` as the first line of \
+    App/CoreSpec.lean, " ++ relocked]
+#guard errorSays owning (.violation (.axioms `App.specLemma #[``sorryAx]))
+  ["App/CoreSpec.lean:11: App.specLemma uses `sorry`, so it is not proved, and App.CoreSpec is owned, so no edit to \
+    the editable files fixes it. Replace each `sorry` in App.specLemma with a proof or a definition in \
+    App/CoreSpec.lean, " ++ relocked]
+#guard errorSays owning (.violation (.axioms `App.specAx #[`App.specAx]))
+  ["App/CoreSpec.lean:12: `axiom App.specAx` asserts App.specAx without proof"]
+#guard errorSays owning (.violation (.impure `App.badSpec .coreSpec [.«unsafe»]))
+  ["App/CoreSpec.lean:9: App.badSpec uses `unsafe` in App.CoreSpec (CoreSpec), but CoreSpec code must be pure and \
+    total, so that the proofs are about the code that runs, and App.CoreSpec is owned, so no edit to the editable \
+    files fixes it. Remove `unsafe` from App.badSpec in App/CoreSpec.lean, " ++ relocked]
+#guard errorSays owning (.axiomUse specAxiom)
+  ["App/CoreSpec.lean:12: `axiom App.specAx` asserts App.specAx without proof, but the comparator permits only \
+    propext, Classical.choice, and Quot.sound, and App.CoreSpec is owned, so no edit to the editable files fixes it. \
+    Delete `axiom App.specAx` from App/CoreSpec.lean, and state it as a headline of Challenge.lean or as a \
+    WorldClaim in a WorldSpec module, " ++ relocked]
+def specRaw : AxiomBlame :=
+  { specAxiom with declaration := `App.specLemma, axiomName := `App.raw, culprit := `App.specLemma }
+
+#guard errorSays owning (.axiomUse specRaw) ["Prove App.specLemma without App.raw in App/CoreSpec.lean, " ++ relocked]
+#guard errorSays owning (.claimOutsideWorldSpec `App.SpecClaim `App.CoreSpec)
+  ["App/CoreSpec.lean:13: WorldClaim App.SpecClaim is declared in App.CoreSpec (CoreSpec)",
+    "Move the `WorldClaim SpecClaim` command and its doc comment from App/CoreSpec.lean to a WorldSpec module, " ++
+      relocked]
+#guard errorSays owning (.unregisteredClaim { registration with module := `App.CoreSpec })
+  ["Delete the command in App/CoreSpec.lean that calls `SoftwareChallenge.claimsExt.addEntry`, " ++ relocked]
+#guard errorSays owning (.lintWarning { warning with module := `App.CoreSpec, place := ⟨"App/CoreSpec.lean", 4⟩ })
+  ["App/CoreSpec.lean:4: Lean's linter linter.unusedVariables reports \"unused variable `x`\"",
+    "Change line 4 of App/CoreSpec.lean as the warning says, " ++ relocked]
+#guard errorSays owning (.sorryUsed ⟨"App/CoreSpec.lean", 11⟩)
+  ["App/CoreSpec.lean:11: Lean reports `declaration uses 'sorry'` here, so a proof or definition is missing, and \
+    App.CoreSpec is owned, so no edit to the editable files fixes it. Replace each `sorry` at line 11 with a proof or \
+    a definition in App/CoreSpec.lean, " ++ relocked]
+#guard errorSays owning (.sorryUsed ⟨"Challenge.lean", 3⟩) ["Challenge is owned", "in Challenge.lean, " ++ relocked]
+#guard errorSays owning (.declaredTwice `App.specLemma `App.CoreSpec `App.WorldSpec)
+  ["Rename or delete App.specLemma in App/WorldSpec.lean, " ++ relocked]
+#guard errorSays owning (.declaredTwice `App.helper `App.CoreCode `App.CoreSpec)
+  ["App/CoreCode.lean:21: App.helper is declared in both App.CoreCode and App.CoreSpec (App/CoreSpec.lean:14)",
+    "Rename or delete App.helper in App/CoreCode.lean, then run `lake lint`."]
+#guard errorSays owning (.declaredTwice `App.helper `App.CoreSpec `App.CoreCode)
+  ["App/CoreCode.lean:21:", "Rename or delete App.helper in App/CoreCode.lean, then run `lake lint`."]
+#guard !errorSays owning (.declaredTwice `App.helper `App.CoreCode `App.CoreSpec) ["owned.lock"]
+#guard errorSays owning (.axiomUse { blame with culprit := `App.specLemma, culpritModule? := some `App.CoreSpec })
+  ["App.fold_correct is not proved, because it uses App.specLemma (App/CoreSpec.lean:11), whose proof uses `sorry`, \
+    and App.CoreSpec is owned, so no edit to the editable files fixes it. Prove App.fold_correct without \
+    App.specLemma, then run `lake lint`."]
+
+def closureOwned : Facts := { owning with challenge := { challenge with closure := challenge.closure.push `App.Notation } }
+
+#guard errorSays closureOwned (.lintWarning { warning with module := `App.Notation, place := ⟨"App/Notation.lean", 2⟩ })
+  ["App.Notation is owned, so no edit to the editable files fixes it",
+    "Change line 2 of App/Notation.lean as the warning says, " ++ relocked]
 
 #guard pendingSays complete (.standing `App.fold_correct .absent)
   ["Challenge.lean:8: App.fold_correct is not proved yet, so the solution does not claim it yet",

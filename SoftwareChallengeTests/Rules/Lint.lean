@@ -97,6 +97,71 @@ def unsafeType : Facts := withSolution fun solution => { solution with
 #guard rejects unsafeType (· matches .violation (.impure `App.Tree .coreCode [.«unsafe»]))
 #guard !(errorsOf unsafeType).any (· matches .violation (.impure `App.Tree.casesOn ..))
 
+def impureErrors (facts : Facts) : Array Lint.Error :=
+  (errorsOf facts).filter (· matches .violation (.impure ..))
+
+def mergedType : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[{ declaration `App.Tree `App.CoreCode 30 true with isUnsafe := true },
+      { declaration `App.Tree.casesOn `App.CoreCode 0 true with isUnsafe := true, effects := true }] },
+  places := solution.places.push (placeOf `App.Tree "App/CoreCode.lean" 30 "Tree") }
+
+#guard impureErrors mergedType == #[.violation (.impure `App.Tree .coreCode [.«unsafe», .io])]
+
+def effectBox : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[declaration `App.EffectBox `App.CoreCode 30 false, declaration `App.EffectBox.mk `App.CoreCode 30 false,
+      { declaration `App.EffectBox.casesOn `App.CoreCode 0 true with effects := true },
+      { declaration `App.EffectBox.recOn `App.CoreCode 0 true with effects := true }] },
+  places := solution.places ++ #[placeOf `App.EffectBox "App/CoreCode.lean" 30 "EffectBox",
+    placeOf `App.EffectBox.mk "App/CoreCode.lean" 30 "EffectBox"] }
+
+#guard impureErrors effectBox == #[.violation (.impure `App.EffectBox .coreCode [.io])]
+#guard contains (rendered effectBox) "App/CoreCode.lean:30: App.EffectBox uses IO in App.CoreCode (CoreCode)"
+#guard contains (rendered effectBox) "Move App.EffectBox to a WorldCode module"
+#guard !contains (rendered effectBox) "casesOn" && !contains (rendered effectBox) "recOn"
+
+def hygienic : Name := Lean.addMacroScope `App.CoreCode `App.initFn 12
+
+def initialized : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[{ declaration `App.counter `App.CoreCode 40 true with initializes := true },
+      { declaration hygienic `App.CoreCode 40 true with effects := true }] },
+  places := solution.places ++ #[{ placeOf `App.counter "App/CoreCode.lean" 40 "counter" with
+      firstLine := "initialize counter : IO.Ref Nat ← IO.mkRef 0" },
+    placeOf hygienic "App/CoreCode.lean" 40 "initialize"] }
+
+#guard impureErrors initialized == #[.violation (.impure `App.counter .coreCode [.initializer])]
+#guard contains (rendered initialized) "`initialize counter : IO.Ref Nat ← IO.mkRef 0` runs IO when the program starts"
+
+def generatedTwice : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[declaration `App.Box `App.Solution 3 false, declaration `App.Box.casesOn `App.Solution 0 false,
+      declaration `App.Box `App.CoreCode 30 false, declaration `App.Box.casesOn `App.CoreCode 0 false] },
+  places := solution.places ++ #[placeOf `App.Box "App/Solution.lean" 3 "Box",
+    placeOf `App.Box "App/CoreCode.lean" 30 "Box"] }
+
+#guard (errorsOf generatedTwice).filter (· matches .declaredTwice ..) ==
+  #[.declaredTwice `App.Box `App.Solution `App.CoreCode]
+
+def sorryInLemmaLogged : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations.map fun fact =>
+    if fact.name == `App.fold_lemma then { fact with axioms := #[``sorryAx] } else fact },
+  blames := #[blame `App.fold_lemma `App.fold_lemma `App.Solution],
+  sorries := #[⟨"App/Solution.lean", 6⟩] }
+
+#guard errorsOf sorryInLemmaLogged == #[.axiomUse (blame `App.fold_lemma `App.fold_lemma `App.Solution)]
+
+def sorryElsewhere : Facts := { sorryInLemmaLogged with
+  solution := { sorryInLemmaLogged.solution with sorries := #[⟨"App/Solution.lean", 6⟩, ⟨"App/Solution.lean", 30⟩] } }
+
+#guard errorsOf sorryElsewhere ==
+  #[.axiomUse (blame `App.fold_lemma `App.fold_lemma `App.Solution), .sorryUsed ⟨"App/Solution.lean", 30⟩]
+
+def sorryOnly : Facts := withSolution ({ · with sorries := #[⟨"App/Solution.lean", 6⟩] })
+
+#guard errorsOf sorryOnly == #[.sorryUsed ⟨"App/Solution.lean", 6⟩]
+
 def foundIn (module : Name) (name : Name) (change : FoundFact → FoundFact := id) : Facts :=
   withSolution fun solution => { solution with
     found := solution.found.map fun found => if found.constant.name == name then change { found with module } else found }

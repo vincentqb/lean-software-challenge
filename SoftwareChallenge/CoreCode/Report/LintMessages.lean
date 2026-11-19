@@ -65,10 +65,10 @@ private def placeIn? (facts : Facts) (module name : Name) : Option DeclarationPl
     let file := fileOf facts module
     facts.solution.places.find? fun found => found.name == name && found.place.file == file
 
-private def anchorOf (facts : Facts) (module name : Name) : Name :=
+def anchorOf (facts : Facts) (module name : Name) : Name :=
   ((name :: ownerOf name :: prefixes name).find? fun candidate => (placeIn? facts module candidate).isSome).getD name
 
-private def declarationPlace (facts : Facts) (module name : Name) : Place :=
+def declarationPlace (facts : Facts) (module name : Name) : Place :=
   match placeIn? facts module (anchorOf facts module name) with
   | some found => { found.place with line := max 1 found.place.line }
   | none => ⟨fileOf facts module, 1⟩
@@ -263,19 +263,50 @@ def ownedList (facts : Facts) : Array String :=
     (facts.lake.modules.filter fun source =>
       source.module != facts.challenge.module && decide (facts.challenge.Owns source.module)).map (·.file)
 
-private def axiomOwnText (axiomName culprit : Name) (nativePlace : String) : String × String × String :=
+def ownsModule (facts : Facts) (module : Name) : Bool :=
+  module == facts.challenge.module || decide (facts.challenge.Owns module)
+
+private def relock : String := "then delete owned.lock and run `lake build`"
+
+private def ownerOnly (subject : String) : String := s!"{subject} is owned, so no edit to the editable files fixes it"
+
+private def ownedModule? (facts : Facts) (module : Name) : Option String :=
+  if ownsModule facts module then some (toString module) else none
+
+private def ownedPath? (facts : Facts) (path : String) : Option String :=
+  match ownedFile? facts path with
+  | some (.specModule module) | some (.closureModule module) => some (toString module)
+  | some .challenge => some (toString facts.challenge.module)
+  | some _ => some path
+  | none => none
+
+private def withOwner (owner? : Option String) (message : Message) (ownerFix : String) : Message :=
+  match owner? with
+  | some owner => { message with why := s!"{message.why}, and {ownerOnly owner}", fix := s!"{ownerFix}, {relock}" }
+  | none => message
+
+private structure Fault where
+  what : String
+  why : String
+  fix : String
+  ownerFix : String
+
+private def faultOf (axiomName culprit : Name) (nativePlace file : String) : Fault :=
   if axiomName == ``sorryAx then
-    (s!"{culprit} uses `sorry`", "so it is not proved", s!"Replace each `sorry` in {culprit} with a proof or a definition")
+    { what := s!"{culprit} uses `sorry`", why := "so it is not proved"
+      fix := s!"Replace each `sorry` in {culprit} with a proof or a definition"
+      ownerFix := s!"Replace each `sorry` in {culprit} with a proof or a definition in {file}" }
   else match nativeTactic? axiomName with
     | some tactic =>
       let replacement := if tactic == `native_decide then "`decide`" else "a proof the kernel checks, such as `decide`"
-      (s!"{culprit} is proved with `{tactic}`, which asserts the evaluated result as an axiom",
-        s!"but the comparator permits only {standardList}, so the proof is not checked",
-        s!"Replace `{tactic}` at {nativePlace} with {replacement}")
+      let fix := s!"Replace `{tactic}` at {nativePlace} with {replacement}"
+      { what := s!"{culprit} is proved with `{tactic}`, which asserts the evaluated result as an axiom"
+        why := s!"but the comparator permits only {standardList}, so the proof is not checked", fix, ownerFix := fix }
     | none =>
       let shown := privateToUserName axiomName
-      (s!"{culprit} depends on axiom {shown}", s!"but the comparator permits only {standardList}, so its proof is not \
-        checked", s!"Prove {culprit} without {shown}")
+      { what := s!"{culprit} depends on axiom {shown}"
+        why := s!"but the comparator permits only {standardList}, so its proof is not checked"
+        fix := s!"Prove {culprit} without {shown}", ownerFix := s!"Prove {culprit} without {shown} in {file}" }
 
 private def axiomWhose (axiomName : Name) : String :=
   if axiomName == ``sorryAx then "whose proof uses `sorry`"
@@ -283,37 +314,46 @@ private def axiomWhose (axiomName : Name) : String :=
     | some tactic => s!"which is proved with `{tactic}`, whose axiom the comparator does not permit"
     | none => s!"which depends on axiom {privateToUserName axiomName}"
 
-private def axiomFix (axiomName culprit : Name) (nativePlace : String) : String :=
-  (axiomOwnText axiomName culprit nativePlace).2.2
-
 private def blameMessage (facts : Facts) (blame : AxiomBlame) : Message :=
   let module := (moduleOf? facts blame.declaration).getD .anonymous
+  let file := fileOf facts module
   let place := declarationPlace facts module blame.declaration
   let shown := shownName blame.declaration
+  let owner? := ownedModule? facts module
   if blame.axiomName == blame.declaration then
-    { place, what := s!"`axiom {shown}` asserts {shown} without proof"
-      why := s!"but the comparator permits only {standardList}"
-      fix := s!"Delete `axiom {shown}` and prove what uses it", next := .lint }
+    withOwner owner?
+      { place, what := s!"`axiom {shown}` asserts {shown} without proof"
+        why := s!"but the comparator permits only {standardList}"
+        fix := s!"Delete `axiom {shown}` and prove what uses it", next := .lint }
+      s!"Delete `axiom {shown}` from {file}, and state it as a headline of {facts.challenge.file} or as a WorldClaim \
+        in a WorldSpec module"
   else
     let culprit := shownName blame.culprit
     let nativePlace := match moduleOf? facts blame.axiomName with
       | some axiomModule => shownPlace (declarationPlace facts axiomModule blame.axiomName)
       | none => shownPlace place
     if culprit == shown then
-      let (what, why, fix) := axiomOwnText blame.axiomName culprit nativePlace
-      { place, what, why, fix, next := .lint }
+      let fault := faultOf blame.axiomName culprit nativePlace file
+      withOwner owner? { place, what := fault.what, why := fault.why, fix := fault.fix, next := .lint } fault.ownerFix
     else match moduleOf? facts blame.culprit with
       | some culpritModule =>
-        { place
-          what := s!"{shown} is not proved, because it uses {culprit} \
-            ({shownPlace (declarationPlace facts culpritModule blame.culprit)})"
-          why := axiomWhose blame.axiomName
-          fix := axiomFix blame.axiomName culprit nativePlace, next := .lint }
+        let fault := faultOf blame.axiomName culprit nativePlace (fileOf facts culpritModule)
+        let what := s!"{shown} is not proved, because it uses {culprit} \
+          ({shownPlace (declarationPlace facts culpritModule blame.culprit)})"
+        match owner?, ownedModule? facts culpritModule with
+        | none, some culpritOwner =>
+          { place, what, why := s!"{axiomWhose blame.axiomName}, and {ownerOnly culpritOwner}"
+            fix := s!"Prove {shown} without {culprit}", next := .lint }
+        | _, culpritOwner? =>
+          withOwner culpritOwner? { place, what, why := axiomWhose blame.axiomName, fix := fault.fix, next := .lint }
+            fault.ownerFix
       | none =>
         let source := (blame.culpritModule?.map toString).getD "a module"
-        { place, what := s!"{shown} uses {culprit}, which {source} declares outside the package"
-          why := s!"{axiomWhose blame.axiomName}, so the proof of {shown} is not checked"
-          fix := s!"Prove {shown} without {culprit}", next := .lint }
+        withOwner owner?
+          { place, what := s!"{shown} uses {culprit}, which {source} declares outside the package"
+            why := s!"{axiomWhose blame.axiomName}, so the proof of {shown} is not checked"
+            fix := s!"Prove {shown} without {culprit}", next := .lint }
+          s!"Prove {shown} without {culprit} in {file}"
 
 private def forbiddenImportMessage (facts : Facts) (module dependency : Name) (role : Role) : Message :=
   let file := fileOf facts module
@@ -321,38 +361,47 @@ private def forbiddenImportMessage (facts : Facts) (module dependency : Name) (r
   let line := max 1 ((found.map (·.line)).getD 1)
   let comptime := (found.map (·.comptime)).getD false
   let text := importText facts module dependency comptime
-  let fix :=
+  let message : Message :=
+    { place := ⟨file, line⟩
+      what := s!"{module} ({role}) {if comptime then "meta-imports" else "imports"} {located facts dependency}"
+      why := s!"but {role} may import {allowedImports role}, so that {importPurpose role}"
+      fix := s!"Delete line {line}, `{text}`, from {file}", next := .lint }
+  match ownedModule? facts module with
+  | some owner => withOwner (some owner) message message.fix
+  | none =>
     if roleOf? facts dependency == some .tooling && (role == .coreCode || role == .worldCode) then
       let renamed := renamedInto .coreCode dependency
       let kinds := if role == .coreCode then "a CoreCode module" else "a CoreCode or WorldCode module"
-      s!"Rename {dependency} to {kinds}, as in {renamed} ({sourceFile renamed}), and update line {line} of {file}"
-    else if role == .coreSpec || role == .worldSpec then
-      s!"Delete line {line}, `{text}`, from {file}, which is owned, so then delete owned.lock and run `lake build`"
-    else s!"Delete line {line}, `{text}`, from {file}"
-  { place := ⟨file, line⟩
-    what := s!"{module} ({role}) {if comptime then "meta-imports" else "imports"} {located facts dependency}"
-    why := s!"but {role} may import {allowedImports role}, so that {importPurpose role}"
-    fix, next := .lint }
+      { message with
+        fix := s!"Rename {dependency} to {kinds}, as in {renamed} ({sourceFile renamed}), and update line {line} of \
+          {file}" }
+    else message
 
 private def impureMessage (facts : Facts) (declaration : Name) (role : Role) (reasons : List Reason) : Message :=
   let module := (moduleOf? facts declaration).getD .anonymous
+  let file := fileOf facts module
   let anchor := anchorOf facts module declaration
   let place := declarationPlace facts module declaration
   let shown := shownName declaration
   let site := located facts module
+  let owner? := ownedModule? facts module
   if reasons.contains .initializer || isInitializer declaration then
     let quoted := match placeIn? facts module anchor with
       | some found => if found.firstLine.isEmpty then s!"initialize {shown}" else found.firstLine
       | none => s!"initialize {shown}"
     let others := reasons.filter fun reason => reason != .initializer && reason != .io
     let also := if others.isEmpty then "" else s!", and {" and ".intercalate (others.map (cure shown))}"
-    { place, what := s!"`{quoted}` runs IO when the program starts, in {site}"
-      why := s!"but {role} code {purity role}"
-      fix := s!"Move it to a WorldCode module{also}", next := .lint }
+    withOwner owner?
+      { place, what := s!"`{quoted}` runs IO when the program starts, in {site}"
+        why := s!"but {role} code {purity role}"
+        fix := s!"Move it to a WorldCode module{also}", next := .lint }
+      s!"Move it from {file} to a WorldCode module{also}"
   else
-    { place, what := s!"{shown} uses {" and ".intercalate (reasons.map offence)} in {site}"
-      why := s!"but {role} code {purity role}"
-      fix := (" and ".intercalate (reasons.map (cure shown))).capitalize, next := .lint }
+    let fix := (" and ".intercalate (reasons.map (cure shown))).capitalize
+    withOwner owner?
+      { place, what := s!"{shown} uses {" and ".intercalate (reasons.map offence)} in {site}"
+        why := s!"but {role} code {purity role}", fix, next := .lint }
+      s!"{fix} in {file}"
 
 private def violationMessage (facts : Facts) : Violation → Message
   | .unplaced module =>
@@ -364,17 +413,15 @@ private def violationMessage (facts : Facts) : Violation → Message
       next := .lint }
   | .legacy module =>
     let file := fileOf facts module
-    { place := ⟨file, 1⟩, what := s!"{module} does not start with `module`"
-      why := "so the audit cannot tell what it exposes", fix := s!"Add `module` as the first line of {file}"
-      next := .lint }
+    let fix := s!"Add `module` as the first line of {file}"
+    withOwner (ownedModule? facts module)
+      { place := ⟨file, 1⟩, what := s!"{module} does not start with `module`"
+        why := "so the audit cannot tell what it exposes", fix, next := .lint }
+      fix
   | .forbiddenImport module dependency role => forbiddenImportMessage facts module dependency role
   | .axioms declaration found =>
-    let module := (moduleOf? facts declaration).getD .anonymous
-    let place := declarationPlace facts module declaration
-    let shown := shownName declaration
-    let first := (found[0]?).getD ``sorryAx
-    let (what, why, fix) := axiomOwnText first shown (shownPlace place)
-    { place, what, why, fix, next := .lint }
+    blameMessage facts { declaration, axiomName := (found[0]?).getD ``sorryAx, culprit := declaration
+                         culpritModule? := moduleOf? facts declaration }
   | .impure declaration role reasons => impureMessage facts declaration role reasons
 
 private def foundPlace (facts : Facts) (module name : Name) : Place :=
@@ -431,35 +478,52 @@ def Error.message (facts : Facts) : Error → Message
   | .violation found => violationMessage facts found
   | .axiomUse blame => blameMessage facts blame
   | .holeOutsideCode hole module =>
-    { place := foundPlace facts module hole, what := s!"hole {hole} is defined in {located facts module}"
-      why := "but a hole is code, which lives in CoreCode or WorldCode, where the audit checks what it may do"
-      fix := s!"Move `def {writtenOf facts module hole}` from {fileOf facts module} to {codeFile facts}, or to a \
-        WorldCode module if it does IO{spaceOf facts hole}"
-      next := .lint }
+    let fix := s!"Move `def {writtenOf facts module hole}` from {fileOf facts module} to {codeFile facts}, or to a \
+      WorldCode module if it does IO{spaceOf facts hole}"
+    withOwner (ownedModule? facts module)
+      { place := foundPlace facts module hole, what := s!"hole {hole} is defined in {located facts module}"
+        why := "but a hole is code, which lives in CoreCode or WorldCode, where the audit checks what it may do", fix
+        next := .lint }
+      fix
   | .holeNoncomputable hole module =>
-    { place := foundPlace facts module hole, what := s!"hole {hole} is `noncomputable` in {module}"
-      why := "so no code runs it, and the headlines about it say nothing about a program"
-      fix := s!"Define {hole} without `noncomputable` in {fileOf facts module}", next := .lint }
+    let fix := s!"Define {hole} without `noncomputable` in {fileOf facts module}"
+    withOwner (ownedModule? facts module)
+      { place := foundPlace facts module hole, what := s!"hole {hole} is `noncomputable` in {module}"
+        why := "so no code runs it, and the headlines about it say nothing about a program", fix, next := .lint }
+      fix
   | .fixpointWithoutTerminates hole module =>
-    { place := foundPlace facts module hole
-      what := s!"hole {hole} is defined with `partial_fixpoint` in {module}, so it may not return, but no headline of \
-        {facts.challenge.file} is marked `@[terminates {hole}]` to state on which inputs it does"
-      why := s!"so a headline about {hole} could hold while the program never returns"
-      fix := s!"Define {hole} by structural recursion or with `termination_by`, without `partial_fixpoint`, in \
-        {fileOf facts module}"
-      next := .lint }
+    let fix := s!"Define {hole} by structural recursion or with `termination_by`, without `partial_fixpoint`, in \
+      {fileOf facts module}"
+    withOwner (ownedModule? facts module)
+      { place := foundPlace facts module hole
+        what := s!"hole {hole} is defined with `partial_fixpoint` in {module}, so it may not return, but no headline \
+          of {facts.challenge.file} is marked `@[terminates {hole}]` to state on which inputs it does"
+        why := s!"so a headline about {hole} could hold while the program never returns", fix, next := .lint }
+      fix
   | .declaredTwice name first second =>
     let shown := shownName name
-    { place := declarationPlace facts second name
-      what := s!"{shown} is declared in both {second} and {first} ({shownPlace (declarationPlace facts first name)})"
-      why := s!"and Lean keeps only the one it imports first, so the audit and the comparator never check the one in \
-        {second}"
-      fix := s!"Rename or delete {shown} in {fileOf facts second}", next := .lint }
+    let (edited, other) := if ownsModule facts second && !ownsModule facts first then (first, second)
+      else (second, first)
+    let fix := s!"Rename or delete {shown} in {fileOf facts edited}"
+    withOwner (if ownsModule facts edited then some (toString edited) else none)
+      { place := declarationPlace facts edited name
+        what := s!"{shown} is declared in both {edited} and {other} ({shownPlace (declarationPlace facts other name)})"
+        why := s!"and Lean keeps only the one it imports first, so the audit and the comparator never check the one \
+          in {second}"
+        fix, next := .lint }
+      fix
   | .sorryUsed place =>
     let place := { place with line := max 1 place.line }
-    { place, what := "Lean reports `declaration uses 'sorry'` here"
-      why := "so a proof or definition is missing, and the comparator rejects the solution"
-      fix := s!"Replace each `sorry` at {shownPlace place} with a proof or a definition", next := .lint }
+    match ownedPath? facts place.file with
+    | some owner =>
+      { place, what := "Lean reports `declaration uses 'sorry'` here"
+        why := s!"so a proof or definition is missing, and {ownerOnly owner}"
+        fix := s!"Replace each `sorry` at line {place.line} with a proof or a definition in {place.file}, {relock}"
+        next := .lint }
+    | none =>
+      { place, what := "Lean reports `declaration uses 'sorry'` here"
+        why := "so a proof or definition is missing, and the comparator rejects the solution"
+        fix := s!"Replace each `sorry` at {shownPlace place} with a proof or a definition", next := .lint }
   | .mainOutsideProgram module =>
     let place := declarationPlace facts module `main
     let why := "but main runs the program, which does IO, and only WorldCode may"
@@ -473,37 +537,47 @@ def Error.message (facts : Facts) : Error → Message
         next := .lint }
     else
       let program := (programFile? facts).getD "the WorldCode module that is the root of the lean_exe"
-      { place, what := s!"main is defined in {located facts module}", why
-        fix := s!"Move `def main` from {fileOf facts module} to {program}, outside any namespace", next := .lint }
+      let fix := s!"Move `def main` from {fileOf facts module} to {program}, outside any namespace"
+      withOwner (ownedModule? facts module)
+        { place, what := s!"main is defined in {located facts module}", why, fix, next := .lint } fix
   | .notFixpoint hole headline =>
     let module := ((facts.solution.foundNamed? hole).map (·.module)).getD .anonymous
-    { place := foundPlace facts module hole, what := s!"hole {hole} is not defined with `partial_fixpoint`"
-      why := s!"but `@[terminates {hole}]` on {headline} ({shownPlace (hereOf facts headline)}) admits it only as a \
-        partial_fixpoint definition, whose termination {headline} states"
-      fix := s!"Define {hole} with `partial_fixpoint` after its body in {fileOf facts module}", next := .lint }
+    let fix := s!"Define {hole} with `partial_fixpoint` after its body in {fileOf facts module}"
+    withOwner (ownedModule? facts module)
+      { place := foundPlace facts module hole, what := s!"hole {hole} is not defined with `partial_fixpoint`"
+        why := s!"but `@[terminates {hole}]` on {headline} ({shownPlace (hereOf facts headline)}) admits it only as a \
+          partial_fixpoint definition, whose termination {headline} states"
+        fix, next := .lint }
+      fix
   | .claimOutsideWorldSpec claim module =>
-    { place := declarationPlace facts module claim, what := s!"WorldClaim {claim} is declared in {located facts module}"
-      why := "but a world claim is an assumption about the world, which only a WorldSpec module states"
-      fix := s!"Remove the `WorldClaim {writtenOf facts module claim}` command and its doc comment from \
-        {fileOf facts module}"
-      next := .lint }
+    let command := s!"the `WorldClaim {writtenOf facts module claim}` command and its doc comment"
+    withOwner (ownedModule? facts module)
+      { place := declarationPlace facts module claim
+        what := s!"WorldClaim {claim} is declared in {located facts module}"
+        why := "but a world claim is an assumption about the world, which only a WorldSpec module states"
+        fix := s!"Remove {command} from {fileOf facts module}", next := .lint }
+      s!"Move {command} from {fileOf facts module} to a WorldSpec module"
   | .unregisteredClaim registration =>
     let declared := match registration.home? with
       | some home => s!", declared at {shownPlace (declarationPlace facts home registration.claim)},"
       | none => ""
-    { place := { registration.place with line := max 1 registration.place.line }
-      what := s!"{registration.module} adds {registration.claim}{declared} to the world claims without the \
-        `WorldClaim` command"
-      why := "so headlines could assume it as a checked claim"
-      fix := s!"Delete the command in {fileOf facts registration.module} that calls \
-        `SoftwareChallenge.claimsExt.addEntry`"
-      next := .lint }
+    let fix := s!"Delete the command in {fileOf facts registration.module} that calls \
+      `SoftwareChallenge.claimsExt.addEntry`"
+    withOwner (ownedModule? facts registration.module)
+      { place := { registration.place with line := max 1 registration.place.line }
+        what := s!"{registration.module} adds {registration.claim}{declared} to the world claims without the \
+          `WorldClaim` command"
+        why := "so headlines could assume it as a checked claim", fix, next := .lint }
+      fix
   | .lintWarning lint =>
     let place := { lint.place with line := max 1 lint.place.line }
-    { place, what := s!"Lean's linter {lint.linter} reports \"{firstLineOf lint.message}\""
-      why := s!"so {lint.module} does not pass Lean's linters, which `lake lint` requires of every module the default \
-        targets build"
-      fix := s!"Change line {place.line} of {place.file} as the warning says", next := .lint }
+    let fix := s!"Change line {place.line} of {place.file} as the warning says"
+    withOwner ((ownedModule? facts lint.module).orElse fun _ => ownedPath? facts place.file)
+      { place, what := s!"Lean's linter {lint.linter} reports \"{firstLineOf lint.message}\""
+        why := s!"so {lint.module} does not pass Lean's linters, which `lake lint` requires of every module the \
+          default targets build"
+        fix, next := .lint }
+      fix
   | .ownedUnread path =>
     { place := ⟨path, 1⟩
       what := s!"{path} is owned, because {ownedReason facts (ownedFile? facts path)}, but lint could not read it"
@@ -589,11 +663,15 @@ def Error.message (facts : Facts) : Error → Message
     let file := fileOf facts importing.module
     let line := max 1 importing.fact.line
     let spec := (facts.lake.modules.find? (Role.ofName ·.module == .coreSpec)).map (·.module)
-    { place := ⟨file, line⟩, what := s!"{importing.module} imports {facts.challenge.module}"
-      why := "whose holes share names with the solution's definitions, so the solution cannot be checked against it"
-      fix := s!"Replace `{importing.text}` at {file}:{line} with imports of the CoreSpec and WorldSpec modules \
-        {importing.module} uses{(spec.map fun spec => s!", such as `public import {spec}`").getD ""}"
-      next := .build }
+    let message : Message :=
+      { place := ⟨file, line⟩, what := s!"{importing.module} imports {facts.challenge.module}"
+        why := "whose holes share names with the solution's definitions, so the solution cannot be checked against it"
+        fix := s!"Replace `{importing.text}` at {file}:{line} with imports of the CoreSpec and WorldSpec modules \
+          {importing.module} uses{(spec.map fun spec => s!", such as `public import {spec}`").getD ""}"
+        next := .build }
+    match ownedModule? facts importing.module with
+    | some owner => { withOwner (some owner) message message.fix with next := .lint }
+    | none => message
   | .builtinLintOn place =>
     let lakefile := lakefileOf facts
     { place := { place with line := max 1 place.line }, what := "the package block sets `builtinLint := true`"
