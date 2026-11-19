@@ -3,7 +3,7 @@ open Lean Lake DSL
 
 package «software_challenge» where
   fixedToolchain := true
-  lintDriver := "lint_challenge"
+  lintDriver := "software_challenge/lint_challenge"
   testDriver := "test_challenge"
   testDriverArgs := #["SoftwareChallengeTests", "SoftwareChallengeReadTests", "real_runs"]
   leanOptions := #[
