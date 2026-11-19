@@ -6,3 +6,4 @@ import SoftwareChallengeTests.Policy
 import SoftwareChallengeTests.Layering
 import SoftwareChallengeTests.Match
 import SoftwareChallengeTests.Format
+import SoftwareChallengeTests.Graph
