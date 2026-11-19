@@ -177,10 +177,13 @@ def placesOf (env : Environment) (modules : Array CatalogModule) : Array Declara
         written := textAt module.source ranges.selectionRange
         firstLine := lineAt module.source ranges.range.pos.line }
 
+def derivedPartial (env : Environment) (info : ConstantInfo) : Bool :=
+  info.isPartial && derivedInstance env info.name &&
+    (Compiler.isUnsafeRecName? info.name).any fun source => !terminates env source
+
 def derivedPartialsOf (env : Environment) (modules : Array CatalogModule) : Array (Name × Name) :=
   modules.flatMap fun module =>
-    (module.data.constants.filter fun info => info.isPartial && derivedInstance env info.name).map
-      (·.name, module.name)
+    (module.data.constants.filter (derivedPartial env)).map (·.name, module.name)
 
 structure InventoryFacts where
   inventory : Inventory

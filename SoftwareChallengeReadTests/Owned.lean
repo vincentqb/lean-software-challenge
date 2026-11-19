@@ -17,11 +17,11 @@ run_cmd Elab.Command.liftCoreM do
   check (owned.inventory.modules.map (·.name) == #[`CoreSpec, `CoreSpec.Derived, `WorldSpec, `CoreCode].map fixture)
     s!"the statement step did not read every CoreSpec and WorldSpec module and the challenge's package imports: \
       {owned.inventory.modules.map (·.name)}"
-  check (owned.derivedPartials == #[(fixture `instReprTree.repr._unsafe_rec, fixture `CoreSpec),
-      (fixture `instBEqForest.beq._unsafe_rec, fixture `CoreSpec.Derived)])
-    s!"the partial instances that deriving generates were misread: {owned.derivedPartials}"
-  check ((Statement.derivedPartialErrors challenge).contains
-      (.derivedPartial (fixture `instBEqForest.beq._unsafe_rec) (fixture `CoreSpec.Derived)))
+  check (owned.derivedPartials == #[(fixture `instBEqForest.beq._unsafe_rec, fixture `CoreSpec.Derived)])
+    s!"the partial instances that deriving generates, and only those that do not recurse structurally, were \
+      misread: {owned.derivedPartials}"
+  check (Statement.derivedPartialErrors challenge ==
+      #[.derivedPartial (fixture `instBEqForest.beq._unsafe_rec) (fixture `CoreSpec.Derived)])
     "a partial instance that deriving generates in a CoreSpec module was not reported to the owner"
   check (owned.registrations.any fun registration => registration.claim == fixture `SuccAgrees &&
       registration.home? == some (fixture `WorldSpec) && registration.place.line > 0)
@@ -32,8 +32,8 @@ run_cmd Elab.Command.liftCoreM do
   check (refusedClaims == #[(fixture `CoreClaim, fixture `CoreCode)])
     s!"only the WorldClaim that the challenge's CoreCode import declares is the owner's to move: {refusedClaims}"
   check ((Statement.ownedViolationErrors lake challenge).all fun error => match error with
-      | .ownedViolation (.impure name .coreSpec _) => ["instBEqForest", "instReprTree"].any
-          ((privateToUserName name).toString.startsWith <| toString <| fixture ·.toName)
+      | .ownedViolation (.impure name .coreSpec _) =>
+        (privateToUserName name).toString.startsWith (toString (fixture `instBEqForest))
       | _ => false)
     s!"an owned module was refused for what it may do: {repr (Statement.ownedViolationErrors lake challenge)}"
   check (owned.parents.contains (fixture `Forest.grove, fixture `Forest) &&

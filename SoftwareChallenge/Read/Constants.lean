@@ -73,8 +73,4 @@ def exprOf : Shape → Expr
   | .strLit value => .lit (.strVal value)
   | .proj structureName index value => .proj structureName index (exprOf value)
 
-def usedNames (exprs : Array Expr) : Array Name :=
-  exprs.foldl (fun found expr => expr.getUsedConstants.foldl
-    (fun found name => if found.contains name then found else found.push name) found) #[]
-
 end SoftwareChallenge.Read
