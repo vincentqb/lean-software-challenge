@@ -99,7 +99,7 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environmen
     IO ChallengeFacts := do
   let some (index, data) := moduleData? env challenge.module
     | throw <| .userError s!"{challenge.file}:1: {challenge.module} did not load from its compiled module, so its \
-        statements cannot be read. Run `lake build {challenge.module}`, then run `{command next}`."
+        statements cannot be read. Run `lake build {challenge.module}`, then run `{next.command}`."
   let source ← readSource lake challenge.file next
   let imports := placedImports challenge.module data (← importLines challenge.module challenge.file source)
   let rangesOf := fun (name : Name) => rangesIn env index name
@@ -164,7 +164,7 @@ def challengeFacts (lake : LakeFacts) (challenge : SourceFact) (env : Environmen
           catch failure => throwError "{target.place.file}:{target.place.line}: the step could not read headline \
             {name} ({failure.toMessageData}), so it cannot tell which claims, preconditions and witness it states; \
             no edit to the package fixes this. Fix SoftwareChallenge/Read so that it reads the headline, then run \
-            `{command next}`."
+            `{next.command}`."
         headlines := headlines.push read
     let holeTargets ← holes.mapM fun placed => targetOf placed (writtenOf placed) false
     return {

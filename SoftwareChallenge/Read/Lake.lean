@@ -26,7 +26,7 @@ def parseLake (text : String) : Except String LakeFacts := do
   fromJson? (← Json.parse text)
 
 def rebuildThenRun (next : Next) : String :=
-  if next == .build then "run `lake build`" else s!"run `lake build`, then run `{command next}`"
+  if next == .build then "run `lake build`" else s!"run `lake build`, then run `{next.command}`"
 
 def loadLake (path : System.FilePath) (next : Next) : IO LakeFacts := do
   let text ← try IO.FS.readFile path catch failure =>

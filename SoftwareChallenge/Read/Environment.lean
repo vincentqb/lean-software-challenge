@@ -58,7 +58,7 @@ def Imported.compiled? (imported : Imported) (module : Name) : Option (ModuleIdx
 def partsMessage (lake : LakeFacts) (module : Name) (missing : System.FilePath) (next : Next) : String :=
   s!"{fileOf lake module}:1: the compiled {module} lacks {missing}, which `lake build` writes for every `module` \
     file, so the step cannot read the declarations and proofs of {module}, as when a build cache ships only public \
-    .olean files. Run `lake build {module}` so that Lake rebuilds it, then run `{command next}`."
+    .olean files. Run `lake build {module}` so that Lake rebuilds it, then run `{next.command}`."
 
 private def requireParts (lake : LakeFacts) (state : ImportState) (next : Next) : IO Unit := do
   for name in packageModules lake do
@@ -120,7 +120,7 @@ def clashMessage (lake : LakeFacts) (imported : Imported) (clash : Clash) (next 
     else s!"Import at most one of {clash.kept} and {clash.dropped} in the package's modules"
   s!"{place}: {clash.name} is declared both in {clash.kept} and in {clash.dropped}, which no module imports \
     together, so the step cannot read the package's modules in one environment, as it must to judge them. {fix}, \
-    then run `{command next}`."
+    then run `{next.command}`."
 
 def importEnvironment (lake : LakeFacts) (roots : Array Name) (next : Next) : IO Imported := do
   let arts ← (packageModules lake).foldlM (init := ({} : NameMap ImportArtifacts)) fun arts module => do

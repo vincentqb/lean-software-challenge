@@ -6,7 +6,7 @@ public meta import SoftwareChallenge.Read.Environment
 public meta import SoftwareChallenge.Read.Challenge
 public meta import SoftwareChallenge.Read.Inventory
 public meta import SoftwareChallenge.Read.Checks
-public meta import SoftwareChallenge.Read.Solution
+public meta import SoftwareChallenge.Read.SolutionFacts
 public meta import SoftwareChallenge.Read.Census
 
 public section

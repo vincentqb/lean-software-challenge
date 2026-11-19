@@ -28,7 +28,7 @@ def catalogModules (lake : LakeFacts) (catalog : Array Name) (imported : Importe
     let file := fileOf lake name
     let some (index, data) := imported.compiled? name
       | throw <| .userError s!"{file}:1: lake.json lists {name}, but its compiled module did not load, so the step \
-          cannot read it. Run `lake build {name}`, then run `{command next}`."
+          cannot read it. Run `lake build {name}`, then run `{next.command}`."
     let source ← if named lake file then readSource lake file next else pure ""
     return { name, index, data, file, source, written := ← importLines name file source }
 

@@ -30,14 +30,14 @@ def readInput (lake : LakeFacts) (path : String) (next : Next) : IO (Option Stri
   unless lake.inputs.contains path do
     throw <| .userError s!"{path}:1: lake.json does not list it among the inputs, so the step may not read it, and \
       its result would not be traced; no edit to the package fixes this. List {path} in the inputs that the facet in \
-      SoftwareChallenge's lakefile.lean writes to lake.json, then run `{command next}`."
+      SoftwareChallenge's lakefile.lean writes to lake.json, then run `{next.command}`."
   readIfPresent (pathIn lake path)
 
 def readSource (lake : LakeFacts) (path : String) (next : Next) : IO String := do
   unless named lake path do
     throw <| .userError s!"{path}:1: lake.json names it neither as an input nor as a module's file, so the step may \
       not read it; no edit to the package fixes this. Name it in the modules or inputs that the facet in \
-      SoftwareChallenge's lakefile.lean writes to lake.json, then run `{command next}`."
+      SoftwareChallenge's lakefile.lean writes to lake.json, then run `{next.command}`."
   return (← readIfPresent (pathIn lake path)).getD ""
 
 def digestOf (text : String) : String := toString (hash text)

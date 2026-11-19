@@ -37,7 +37,7 @@ def censusMessage (file : String) (module : Name) (missed : Array Name) (next : 
     ", ".intercalate ((missed.filter (!·.isAnonymous)).map toString).toList
   s!"{file}:1: the facts the step read miss {listed}, which the compiled {module} holds, so the step cannot judge \
     the package: SoftwareChallenge.Read must record every constant it is shown, and no edit to the package fixes \
-    this. Fix SoftwareChallenge/Read so that it records them, then run `{command next}`."
+    this. Fix SoftwareChallenge/Read so that it records them, then run `{next.command}`."
 
 def requireChallengeCensus (env : Environment) (challenge : ChallengeFacts) (next : Next) : IO Unit := do
   let missed := challengeMisses env challenge
