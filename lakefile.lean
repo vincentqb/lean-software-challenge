@@ -73,6 +73,31 @@ def lineOf (file : System.FilePath) (holds : String → Bool) : IO (Option (Nat 
   return ((← IO.FS.readFile file).splitOn "\n").zipIdx.findSome? fun (line, index) =>
     if holds line then some (index + 1, line.trimAscii.toString) else none
 
+def statementTarget : String :=
+  "@[default_target]\ntarget statement pkg : Unit := do\n  \
+    return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())"
+
+def builtinLintLine (pkg : Package) : IO (Option Nat) := do
+  unless pkg.config.builtinLint? == some true do return none
+  return some (((← lineOf (pkg.dir / "lakefile.lean") (·.contains "builtinLint")).map (·.1)).getD 1)
+
+def setupProblems (pkg : Package) (next : String) : IO (Array String) := do
+  let mut problems := #[]
+  unless pkg.lintDriver == "software_challenge/lint_challenge" do
+    problems := problems.push s!"lakefile.lean: the package block does not set \
+      `lintDriver := \"software_challenge/lint_challenge\"`, so `lake lint` does not run the audit, and a `sorry` or \
+      an unproved headline goes unreported. Add `lintDriver := \"software_challenge/lint_challenge\"` to the package \
+      block of lakefile.lean, delete owned.lock and run `lake build`, then run `{next}`."
+  unless pkg.defaultTargets.contains `statement do
+    problems := problems.push s!"lakefile.lean: the package has no `statement` default target, so `lake build` \
+      neither checks the statement nor writes comparator.json for the comparator. Add these lines to lakefile.lean:\n\
+      {statementTarget}\nthen delete owned.lock and run `lake build`, then run `{next}`."
+  if let some line ← builtinLintLine pkg then
+    problems := problems.push s!"lakefile.lean:{line}: the package block sets `builtinLint := true`, but `lake lint` \
+      already runs Lean's linters through software_challenge/lint_challenge, so they would run twice. Remove that \
+      line, delete owned.lock and run `lake build`, then run `{next}`."
+  return problems
+
 def importsChallenge (catalog : Array Lake.Module) (challenge : Lake.Module) : FetchM (Option String) := do
   for mod in catalog do
     unless (← (← mod.imports.fetch).await).any (·.name == challenge.name) do continue
@@ -103,20 +128,26 @@ def addFileTraces (pkg : Package) (files : List String) : JobM Unit := do
   for file in files do
     if ← (pkg.dir / file).pathExists then addTrace (← BuildTrace.compute (TextFilePath.mk (pkg.dir / file)))
 
+def specModule (mod : Lake.Module) : Bool :=
+  mod.name.components.any fun part => part.toString == "CoreSpec" || part.toString == "WorldSpec"
+
 package_facet softwareChallengeStatement pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error auditMissing
+  let problems ← setupProblems pkg "lake build"
+  unless problems.isEmpty do error ("\n".intercalate problems.toList)
   let challenge ← match ← challengeOf pkg with | .ok challenge => pure challenge | .error message => error message
   let catalog ← packageModules pkg challenge
   if let some message ← importsChallenge catalog challenge then error message
   let mut job := Job.nil.mix (← audit.leanArts.fetch)
   for mod in ← (← challenge.transImports.fetch).await do
     if mod.pkg.keyName == pkg.keyName then job := job.mix (← mod.leanArts.fetch)
+  for mod in catalog do
+    if specModule mod then job := job.mix (← mod.leanArts.fetch)
   job.mapM fun _ => do
     addFileTraces pkg ["lakefile.lean", "lake-manifest.json", "lean-toolchain", "owned.lock"]
     addPureTrace (" ".intercalate (catalog.map fun mod => s!"{mod.name}={mod.relLeanFile}").toList) "modules"
     for mod in catalog.push challenge do
-      if mod.name == challenge.name ||
-          mod.name.components.any fun part => part.toString == "CoreSpec" || part.toString == "WorldSpec" then
+      if mod.name == challenge.name || specModule mod then
         addTrace (← BuildTrace.compute (TextFilePath.mk mod.leanFile))
     let report := pkg.buildDir / "softwareChallengeStatement.txt"
     let written := pkg.buildDir / "comparator.json"
@@ -172,10 +203,6 @@ package_facet softwareChallenge pkg : Unit := do
       IO.FS.writeFile report out.stdout
       logInfo ("\n" ++ out.stdout)
 
-def statementTarget : String :=
-  "@[default_target]\ntarget statement pkg : Unit := do\n  \
-    return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())"
-
 def pendingCount (report : String) : Nat :=
   ((report.splitOn "\n").findSome? fun line => (line.dropPrefix? "Pending: ").bind (·.toString.toNat?)).getD 0
 
@@ -192,9 +219,21 @@ def auditSolution (pkg : Package) : ScriptM UInt32 := do
     return 1
   return if pendingCount (← IO.FS.readFile (pkg.buildDir / "softwareChallenge.txt")) == 0 then 0 else 2
 
+def lintTargets (pkg : Package) : ScriptM (Array Lean.Name) := do
+  let .ok challenge ← challengeOf pkg | return #[]
+  runBuild do
+    let catalog ← packageModules pkg challenge
+    let mut imported : NameSet := {}
+    for mod in catalog do
+      for dependency in ← (← mod.transImports.fetch).await do
+        imported := imported.insert dependency.name
+    let roots := pkg.leanExes.map (·.config.root)
+    let tops := (catalog.filter (!imported.contains ·.name)).map (·.name)
+    return Job.pure (tops.filter (!roots.contains ·) ++ tops.filter roots.contains)
+
 def lintChallenge (pkg : Package) : ScriptM UInt32 := do
-  let linters ← (← IO.Process.spawn
-    { cmd := (← getLake).toString, args := #["lint", "--builtin-only"], cwd := pkg.dir }).wait
+  let args := #["lint", "--builtin-only"] ++ (← lintTargets pkg).map (·.toString)
+  let linters ← (← IO.Process.spawn { cmd := (← getLake).toString, args, cwd := pkg.dir }).wait
   let code ← auditSolution pkg
   unless linters == 0 do
     IO.eprintln "Lean's linters report the problems `lake lint --builtin-only` printed above, so the solution is not \
@@ -206,17 +245,14 @@ def lintChallenge (pkg : Package) : ScriptM UInt32 := do
       as listed under Pending above, so the solution is not complete. Do each as it says, then run `lake lint`."
   return code
 
-def builtinLintLine (pkg : Package) : IO (Option Nat) := do
-  unless pkg.config.builtinLint? == some true do return none
-  return some (((← lineOf (pkg.dir / "lakefile.lean") (·.contains "builtinLint")).map (·.1)).getD 1)
+def reportSetup (pkg : Package) (next : String) : IO Bool := do
+  let problems ← setupProblems pkg next
+  for problem in problems do IO.eprintln problem
+  return problems.isEmpty
 
 script lint_challenge do
   let pkg ← getRootPackage
-  if let some line ← builtinLintLine pkg then
-    IO.eprintln s!"lakefile.lean:{line}: the package block sets `builtinLint := true`, but `lake lint` already runs \
-      Lean's linters through software_challenge/lint_challenge, so they would run twice. Remove that line, delete \
-      owned.lock and run `lake build` to re-record it, then run `lake lint`."
-    return 1
+  unless ← reportSetup pkg "lake lint" do return 1
   lintChallenge pkg
 
 def runChecks (lake : String) (pkg : Package) : ScriptM UInt32 := do
@@ -230,7 +266,19 @@ def runChecks (lake : String) (pkg : Package) : ScriptM UInt32 := do
     (modules.map (s!"import {·.name}")).toList ++
     [s!"run_cmd SoftwareChallenge.runChecks #[{", ".intercalate (modules.map fun mod =>
       s!"(`{mod.name}, {(toJson mod.relLeanFile.toString).compress})").toList}]", ""]
-  (← IO.Process.spawn { cmd := lake, args := #["lean", runner.toString], cwd := pkg.dir }).wait
+  let out ← IO.Process.output { cmd := lake, args := #["lean", runner.toString], cwd := pkg.dir }
+  IO.print out.stdout
+  IO.eprint out.stderr
+  let missing := ((out.stdout ++ out.stderr).splitOn "Could not find native implementation of external declaration '")
+  if let some rest := missing[1]? then
+    let name := (rest.splitOn "'").headD rest
+    let line ← lineOf (pkg.dir / "lakefile.lean") (·.contains "lean_lib")
+    IO.eprintln s!"lakefile.lean:{(line.map (·.1)).getD 1}: the Checks could not run: they call {name}, an \
+      `@[extern]` declaration, whose native code Lean's interpreter finds only in precompiled modules, and the \
+      package does not precompile them. Add `precompileModules := true` to the package's default lean_lib in \
+      lakefile.lean, delete owned.lock and run `lake build`, then run `lake test`."
+    return 1
+  return out.exitCode
 
 script run_checks do
   runChecks (← getLake).toString (← getRootPackage)
@@ -260,6 +308,7 @@ def ownTests (pkg : Package) (names : List String) : ScriptM UInt32 := do
 
 script test_challenge (args) do
   let pkg ← getRootPackage
+  unless ← reportSetup pkg "lake test" do return 1
   let checks ← runChecks (← getLake).toString pkg
   return max checks (← ownTests pkg args)
 
@@ -285,13 +334,25 @@ def comparatorRejections : Array (String × String × String) := #[
   ("is not permitted; it is used by", "its proof uses an axiom beyond propext, Classical.choice, and Quot.sound",
     "Prove it without that axiom")]
 
+def missingConstant? (text : String) : Option String :=
+  (text.splitOn "\n").findSome? fun line =>
+    if line.startsWith "PANIC at LeanExport" then
+      match line.splitOn " not found in environment" with
+      | [before, _] => (before.splitOn " ").getLast?
+      | _ => none
+    else none
+
 def rejectionOf (output : IO.Process.Output) : Option (String × String) :=
   let text := output.stdout ++ output.stderr
   let lines := text.splitOn "\n"
   let signalled := lines.any fun line => match line.splitOn "exited with " with
     | [_, code] => (code.trimAscii.toString.toNat?.map fun code => decide (code ≥ 128)).getD false
     | _ => false
-  if output.exitCode != 1 || signalled || lines.any (·.startsWith "bwrap:") then none
+  if output.exitCode != 1 || lines.any (·.startsWith "bwrap:") then none
+  else if let some name := missingConstant? text then
+    some (s!"the solution does not declare {name}, which Challenge.lean states",
+      s!"Prove {name} in Solution or a module Solution imports, as `lake lint` lists under Pending")
+  else if signalled then none
   else (comparatorRejections.find? fun (verdict, _) => text.contains verdict).map fun (_, why, fix) => (why, fix)
 
 def comparatorFailure (output : IO.Process.Output) : String :=
@@ -400,11 +461,10 @@ script grade_candidate (args) do
       lakefile.lean, require {name} from git or from a directory outside those{move}, delete owned.lock, run \
       `lake build`, and commit, {again}."
   unless hidden.isEmpty do return 3
-  if let some line ← builtinLintLine pkg then
-    IO.eprintln s!"cannot judge: lakefile.lean:{line} sets `builtinLint := true`, so `lake lint` fails on every \
-      candidate, since it runs Lean's linters itself. In the base, remove that line, delete owned.lock, run \
-      `lake build`, and commit; merge that commit into {commit}, {again}."
-    return 3
+  let problems ← setupProblems pkg s!"lake exe grade {commit}"
+  for problem in problems do
+    IO.eprintln s!"cannot judge: {problem} Make that change in the base, commit it, and merge it into {commit}."
+  unless problems.isEmpty do return 3
   let refuse (step : String) : ScriptM UInt32 := do
     IO.eprintln s!"refused: `{step}` fails on {commit}, as printed above. Fix what it reports in {commit}, {again}."
     return 10
@@ -513,6 +573,12 @@ def mutants : List Mutant := [
       ("ConstantFolding" / "Notation.lean", appending "module\n\npublic section\n\ndef ConstantFolding.notationLevel : Nat := 1\n"),
       ("ConstantFolding" / "CoreSpec.lean", replacing "module\n\npublic section\n"
         "module\n\nmeta import ConstantFolding.Notation\n\npublic section\n")] },
+  { name := "owner-narrows-roots", owner := [
+      ("lakefile.lean", replacing "roots := #[`ConstantFolding.Solution]" "roots := #[`ConstantFolding.CoreCode]")] },
+  { name := "owner-drops-precompile", exits := { test := 1, grade := 1 }, owner := [
+      ("lakefile.lean", replacing "  precompileModules := true\n" "")] },
+  { name := "owner-io-in-corespec", exits := { build := 1, lint := 1, grade := 3 }, owner := [
+      ("ConstantFolding" / "CoreSpec.lean", appending "\ndef ConstantFolding.announce : IO Unit := pure ()\n")] },
   { name := "owner-adds-failing-test", exits := { test := 2, grade := 1 }, owner := [
       ("lakefile.lean", replacing "  testDriver := \"software_challenge/test_challenge\"\n"
         "  testDriver := \"software_challenge/test_challenge\"\n  testDriverArgs := #[\"own_test\"]\n"),
@@ -904,12 +970,28 @@ script test_sandbox do
         saying that it could not build the package's modules, as the log below shows. Restore that message in \
         auditSolution in lakefile.lean, then run `lake test`.\n{brokenText}"
       return 1
-    IO.FS.writeFile config ((← IO.FS.readFile config).replace "  lintDriver :=" "  builtinLint := true\n  lintDriver :=")
+    let configured ← IO.FS.readFile config
+    IO.FS.writeFile config (configured.replace "  lintDriver :=" "  builtinLint := true\n  lintDriver :=")
     let twice ← runIn consumer lake #["lint"]
     unless twice.exitCode == 1 && (twice.stdout ++ twice.stderr).contains "sets `builtinLint := true`" do
       IO.eprintln s!"lake lint on a package that sets `builtinLint := true` exited {twice.exitCode}, expected 1 \
         naming that setting, as the log below shows, so Lean's linters would run twice unreported. Restore the \
         builtinLint check in lint_challenge in lakefile.lean, then run `lake test`.\n{twice.stdout}{twice.stderr}"
+      return 1
+    IO.FS.writeFile config (configured.replace "  lintDriver := \"software_challenge/lint_challenge\"\n" "")
+    let undriven ← runIn consumer lake #["build"]
+    unless undriven.exitCode == 1 && (undriven.stdout ++ undriven.stderr).contains "does not set" do
+      IO.eprintln s!"lake build on a package without lintDriver exited {undriven.exitCode}, expected 1 naming the \
+        missing `lintDriver`, as the log below shows, so `lake lint` would skip the audit unreported. Restore the \
+        lintDriver check in setupProblems in lakefile.lean, then run `lake test`.\n{undriven.stdout}{undriven.stderr}"
+      return 1
+    IO.FS.writeFile config (configured.replace statementTarget "")
+    let untargeted ← runIn consumer lake #["lint"]
+    unless untargeted.exitCode == 1 && (untargeted.stdout ++ untargeted.stderr).contains "no `statement` default target" do
+      IO.eprintln s!"lake lint on a package without the statement target exited {untargeted.exitCode}, expected 1 \
+        naming the missing target, as the log below shows, so `lake build` would check no statement unreported. \
+        Restore the statement-target check in setupProblems in lakefile.lean, then run `lake test`.\n\
+        {untargeted.stdout}{untargeted.stderr}"
       return 1
     return 0
   finally

@@ -40,10 +40,21 @@ def signalled (line : String) : Bool :=
   | [_, code] => (code.trimAscii.toString.toNat?.map fun code => decide (code ≥ 128)).getD false
   | _ => false
 
+def missingConstant? (text : String) : Option String :=
+  (text.splitOn "\n").findSome? fun line =>
+    if line.startsWith "PANIC at LeanExport" then
+      match line.splitOn " not found in environment" with
+      | [before, _] => (before.splitOn " ").getLast?
+      | _ => none
+    else none
+
 def rejection? (out : IO.Process.Output) : Option String :=
   let text := out.stdout ++ out.stderr
   let lines := text.splitOn "\n"
-  if out.exitCode != 1 || lines.any signalled || lines.any (·.startsWith "bwrap:") then none
+  if out.exitCode != 1 || lines.any (·.startsWith "bwrap:") then none
+  else if let some name := missingConstant? text then
+    some s!"the solution does not declare {name}, which Challenge.lean states, as `lake lint` lists under Pending"
+  else if lines.any signalled then none
   else (rejections.find? (contains text ·.1)).map (·.2)
 
 def compare (lake : String) (checkout config : System.FilePath) : IO IO.Process.Output := do
@@ -129,13 +140,14 @@ def grade (candidate : String) : IO UInt32 := do
   let baseRef := if branch == "HEAD" then short else branch
   let merge := s!"merge {baseRef} into {candidate} (`git checkout {candidate} && git merge {baseRef} && git checkout \
     {baseRef}`)"
+  unless (← run lake #["build", ":softwareChallengeStatement"] base) == 0 do
+    IO.eprintln s!"cannot judge: the statement check fails in {base}, as printed above, so it states no challenge \
+      to grade {candidate} against. Fix each error there as it says until `lake build` passes in {base}, commit, \
+      {merge}, {again}."
+    return 3
   let some owned ← lockedFiles base | do
     IO.eprintln s!"cannot judge: {base / "owned.lock"} is missing, so grade cannot tell which files {candidate} \
-      must leave unchanged. Run `lake build` in {base} to record it and commit it, {merge}, {again}."
-    return 3
-  unless (← run lake #["build", ":softwareChallengeStatement"] base) == 0 do
-    IO.eprintln s!"cannot judge: the statement check fails in {base}, as printed above. Fix it there as it says, \
-      delete owned.lock, run `lake build`, and commit; {merge}, {again}."
+      must leave unchanged. Run `lake build` in {base} to record it, commit it, {merge}, {again}."
     return 3
   unless ← (base / "comparator.json").pathExists do
     IO.eprintln s!"cannot judge: the statement check wrote no comparator.json in {base}, so grade has no statement \

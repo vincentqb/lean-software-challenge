@@ -181,6 +181,28 @@ def rangesIn (env : Environment) (index : ModuleIdx) (name : Name) : Option Decl
       (fun a b => Name.quickLt a.1 b.1)).map (·.2)
   (find .exported).orElse fun _ => find .server
 
+def declarationParents (env : Environment) (inventory : Inventory) : Std.HashMap Name Name :=
+  inventory.declarations.foldl (init := {}) fun parents fact =>
+    let parent := match env.find? fact.name with
+      | some (.ctorInfo info) => some info.induct
+      | some (.recInfo _) => some fact.name.getPrefix
+      | _ => match env.getProjectionFnInfo? fact.name with
+        | some projection => some projection.ctorName.getPrefix
+        | none => if isAuxRecursor env fact.name || isNoConfusion env fact.name then some fact.name.getPrefix
+          else none
+    match parent with
+    | some parent => parents.insert fact.name parent
+    | none => parents
+
+def declarationLines (env : Environment) (catalog : Array Name) : Std.HashMap (Name × Name) Nat := Id.run do
+  let mut lines := {}
+  for module in catalog do
+    if let some index := env.getModuleIdx? module then
+      for info in env.header.moduleData[index.toNat]!.constants do
+        if let some ranges := rangesIn env index info.name then
+          lines := lines.insert (module, info.name) ranges.range.pos.line
+  return lines
+
 def duplicatesIn (env : Environment) (catalog : Array Name) : Array (Name × Name × Name) := Id.run do
   let mut declaredIn : Std.HashMap Name (Array Name) := {}
   for module in catalog do
@@ -314,8 +336,8 @@ structure Headline where
   proved : Bool := true
   marker : String := "not yet proved"
   unlinted : Option Name := none
-  killProved : Bool := true
-  witnessProved : Bool := true
+  killMark : Option String := none
+  witnessMark : Option String := none
 
 def matchBudget : Nat := 200000
 
@@ -774,6 +796,7 @@ structure Facts where
   noncomputableHoles : Array Name := #[]
   fixpoints : Array Name := #[]
   duplicates : Array (Name × Name × Name) := #[]
+  parents : Std.HashMap Name Name := {}
   challengeFile : String := "Challenge.lean"
 
 def Facts.fileOf (facts : Facts) (module : Name) : String :=
@@ -787,8 +810,20 @@ def Facts.place (facts : Facts) (module name : Name) : String :=
   let line := facts.lineOf module name
   if line == 0 then facts.fileOf module else s!"{facts.fileOf module}:{line}"
 
-def Facts.anchor (facts : Facts) (module name : Name) : Name :=
-  if facts.lineOf module (ownerOf name) != 0 then ownerOf name else name
+def Facts.settle (facts : Facts) (name : Name) : Name := Id.run do
+  let mut current := name
+  for _ in [0:name.getNumParts] do
+    match facts.parents.get? current with
+    | some parent => current := parent
+    | none => break
+  return current
+
+def Facts.anchor (facts : Facts) (module name : Name) : Name := Id.run do
+  let mut current := facts.settle (ownerOf (facts.settle name))
+  for _ in [0:current.getNumParts] do
+    if facts.lineOf module current != 0 then return current
+    current := current.getPrefix
+  return if facts.lineOf module (ownerOf name) != 0 then ownerOf name else name
 
 def Facts.writtenOf (facts : Facts) (name : Name) : String :=
   facts.written.getD name (facts.challenge.writtenOf name)
@@ -806,6 +841,11 @@ def Facts.codeFile (facts : Facts) : String :=
 private def lintNext : String := "then run `lake lint`"
 
 private def buildNext : String := "then run `lake build`"
+
+private def relockNext : String := "then delete owned.lock and run `lake build`"
+
+private def ownerOnly (module : Name) : String :=
+  s!"{module} is owned, so no edit to the editable files fixes it"
 
 private def standardList : String := "propext, Classical.choice, and Quot.sound"
 
@@ -903,24 +943,32 @@ private def faultOf (axiomName culprit : Name) (nativePlace : String) : Fault :=
         whose := s!"which depends on axiom {shown}"
         fix := s!"Prove {culprit} without {shown}" }
 
-def axiomErrors (facts : Facts) : Array String := Id.run do
+def axiomErrors (facts : Facts) (owner : Bool := false) : Array String := Id.run do
   let moduleOf := fun (name : Name) => (facts.inventory.declarations.find? (·.name == name)).map (·.moduleName)
   let placeOf := fun (name : Name) => (moduleOf name).map fun module => facts.place module (facts.anchor module name)
   let targets := facts.challenge.declared.map (·.name)
+  let close := fun (module : Name) (fix : String) =>
+    if owner then s!", and {ownerOnly module}. {fix} in {facts.fileOf module}, {relockNext}."
+    else s!". {fix}, {lintNext}."
   let mut errors := #[]
   for blame in facts.blames do
     let place := facts.place blame.module (facts.anchor blame.module blame.declaration)
     let shown := privateToUserName (ownerOf blame.declaration)
     if blame.axiomName == blame.declaration then
       if (nativeTactic? blame.axiomName).isNone then
+        let fix := if owner then s!"Delete `axiom {shown}`, and state it as a headline of {facts.challengeFile} or \
+            as a WorldClaim in a WorldSpec module"
+          else s!"Delete `axiom {shown}` and prove what uses it"
         errors := errors.push s!"{place}: `axiom {shown}` asserts {shown} without proof, but the comparator \
-          permits only {standardList}. Delete `axiom {shown}` and prove what uses it, {lintNext}."
+          permits only {standardList}{close blame.module fix}"
       continue
     let culprit := privateToUserName (ownerOf blame.culprit)
     let nativePlace := ((moduleOf blame.axiomName).map (facts.place · blame.axiomName)).getD place
     let fault := faultOf blame.axiomName culprit nativePlace
     if culprit == shown then
-      errors := errors.push s!"{place}: {fault.own}. {fault.fix}, {lintNext}."
+      errors := errors.push s!"{place}: {fault.own}{close blame.module fault.fix}"
+    else if owner then
+      continue
     else if let some culpritPlace := placeOf blame.culprit then
       if targets.contains shown then
         errors := errors.push s!"{place}: {shown} is not proved, because it uses {culprit} ({culpritPlace}), \
@@ -931,9 +979,53 @@ def axiomErrors (facts : Facts) : Array String := Id.run do
         {fault.whose}, so the proof of {shown} is not checked. Prove {shown} without {culprit}, {lintNext}."
   return errors
 
+def isSpec (project : Project) (module : Name) : Bool :=
+  (project.role? module) matches some .coreSpec | some .worldSpec
+
+def offenceGroups (project : Project) (facts : Facts) (spec : Bool) : Array (Name × Name × Role × List String) :=
+  Id.run do
+    let mut groups : Array (Name × Name × Role × List String) := #[]
+    for fact in facts.inventory.declarations do
+      let some role := project.role? fact.moduleName | continue
+      unless isSpec project fact.moduleName == spec do continue
+      let reasons := fact.reasons role
+      if reasons.isEmpty then continue
+      let anchor := facts.anchor fact.moduleName fact.name
+      match groups.findIdx? fun (module, name, _, _) => module == fact.moduleName && name == anchor with
+      | some index => groups := groups.modify index fun (module, name, role, known) =>
+          (module, name, role, known ++ reasons.filter (!known.contains ·))
+      | none => groups := groups.push (fact.moduleName, anchor, role, reasons)
+    return groups
+
+def offenceErrors (project : Project) (facts : Facts) (owner : Bool) : Array String := Id.run do
+  let mut errors := #[]
+  let groups := offenceGroups project facts owner
+  let named := groups.filterMap fun (module, anchor, _, _) =>
+    if anchor.hasMacroScopes then none else some (facts.place module anchor)
+  for (module, anchor, role, reasons) in groups do
+    let place := facts.place module anchor
+    if anchor.hasMacroScopes && named.contains place then continue
+    let shown := privateToUserName (ownerOf anchor)
+    let site := located project module
+    let close := if owner then s!", and {ownerOnly module}" else ""
+    let next := if owner then s!"in {facts.fileOf module}, {relockNext}" else lintNext
+    let initializes := isInitializer anchor || facts.inventory.declarations.any fun fact =>
+      fact.moduleName == module && isInitializer fact.name && facts.anchor module fact.name == anchor
+    if reasons.contains "initializer" || initializes then
+      let quoted := facts.firstLines.getD anchor s!"initialize {shown}"
+      let others := reasons.filter fun reason => reason != "initializer" && reason != "IO"
+      let also := if others.isEmpty then "" else s!", and {" and ".intercalate (others.map (cure shown))}"
+      errors := errors.push s!"{place}: `{quoted}` runs IO when the program starts, in {site}, but {role} code \
+        {purity role}{close}. Move it to a WorldCode module{also}, {next}."
+    else
+      errors := errors.push s!"{place}: {shown} uses {" and ".intercalate (reasons.map offence)} in {site}, but \
+        {role} code {purity role}{close}. {(" and ".intercalate (reasons.map (cure shown))).capitalize}, {next}."
+  return errors
+
 def sound (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
   for fact in facts.inventory.modules do
+    if isSpec project fact.name then continue
     let file := facts.fileOf fact.name
     let some role := project.role? fact.name
       | errors := errors.push s!"{file}: no lean_lib of the package builds {fact.name}, so the audit gives it no \
@@ -957,29 +1049,8 @@ def sound (project : Project) (facts : Facts) : Array String := Id.run do
         let how := if dependency.comptime then "meta-imports" else "imports"
         errors := errors.push s!"{file}:{line}: {fact.name} ({role}) {how} {located project dependency.name}, \
           but {role} may import {allowedImports role}, so that {importPurpose role}. {fix}, {lintNext}."
-  errors := errors ++ axiomErrors facts
-  let offenders := facts.inventory.declarations.filterMap fun fact =>
-    (project.role? fact.moduleName).bind fun role =>
-      let reasons := fact.reasons role
-      if reasons.isEmpty then none else some (fact, role, reasons)
-  let named := offenders.filterMap fun (fact, _, _) =>
-    if fact.name.hasMacroScopes then none
-    else some (facts.place fact.moduleName (facts.anchor fact.moduleName fact.name))
-  for (fact, role, reasons) in offenders do
-    let anchor := facts.anchor fact.moduleName fact.name
-    let place := facts.place fact.moduleName anchor
-    if fact.name.hasMacroScopes && named.contains place then continue
-    let shown := privateToUserName (ownerOf fact.name)
-    let site := located project fact.moduleName
-    if reasons.contains "initializer" || isInitializer fact.name then
-      let quoted := facts.firstLines.getD anchor s!"initialize {shown}"
-      let others := reasons.filter fun reason => reason != "initializer" && reason != "IO"
-      let also := if others.isEmpty then "" else s!", and {" and ".intercalate (others.map (cure shown))}"
-      errors := errors.push s!"{place}: `{quoted}` runs IO when the program starts, in {site}, but {role} code \
-        {purity role}. Move it to a WorldCode module{also}, {lintNext}."
-    else
-      errors := errors.push s!"{place}: {shown} uses {" and ".intercalate (reasons.map offence)} in {site}, but \
-        {role} code {purity role}. {(" and ".intercalate (reasons.map (cure shown))).capitalize}, {lintNext}."
+  errors := errors ++ axiomErrors { facts with blames := facts.blames.filter (!isSpec project ·.module) } ++
+    offenceErrors project facts false
   for (hole, module) in facts.holes do
     if let some module := module then
       unless (project.role? module) matches some .coreCode | some .worldCode do
@@ -1040,6 +1111,7 @@ def warned (facts : Facts) : Array String :=
 def registered (project : Project) (facts : Facts) : Array String := Id.run do
   let mut errors := #[]
   for (claim, module, role, home) in facts.registrations do
+    if isSpec project module then continue
     let file := facts.fileOf module
     if home != some module then
       let declared := match home with
@@ -1054,6 +1126,39 @@ def registered (project : Project) (facts : Facts) : Array String := Id.run do
         module states. Remove the `WorldClaim {facts.writtenOf claim}` command and its doc comment from {file}, \
         {lintNext}."
   return errors
+
+def ownedViolations (project : Project) (facts : Facts) (imports : Bool) : Array String := Id.run do
+  let mut errors := #[]
+  for fact in facts.inventory.modules do
+    let some role := project.role? fact.name | continue
+    unless isSpec project fact.name do continue
+    let file := facts.fileOf fact.name
+    unless fact.usesModuleSystem do
+      errors := errors.push s!"{file}:1: {fact.name} does not start with `module`, so the audit cannot tell what \
+        it exposes, and {ownerOnly fact.name}. Add `module` as the first line of {file}, {relockNext}."
+    if imports then
+      for dependency in fact.imports do
+        unless project.admits role dependency do
+          let line := facts.importLine fact.name dependency.name
+          let how := if dependency.comptime then "meta-imports" else "imports"
+          errors := errors.push s!"{file}:{line}: {fact.name} ({role}) {how} {located project dependency.name}, \
+            but {role} may import {allowedImports role}, so that {importPurpose role}, and {ownerOnly fact.name}. \
+            Delete line {line}, `{facts.importText fact.name dependency.name}`, from {file}, {relockNext}."
+  errors := errors ++ offenceErrors project facts true ++
+    axiomErrors { facts with blames := facts.blames.filter (isSpec project ·.module) } (owner := true)
+  for (claim, module, role, home) in facts.registrations do
+    unless isSpec project module do continue
+    let file := facts.fileOf module
+    if home != some module then
+      errors := errors.push s!"{file}: {module} adds {claim} to the world claims without the `WorldClaim` command, \
+        so headlines could assume it as a checked claim, and {ownerOnly module}. Delete the command in {file} that \
+        calls `SoftwareChallenge.claimsExt.addEntry`, {relockNext}."
+    else if role != some .worldSpec then
+      errors := errors.push s!"{facts.place module claim}: WorldClaim {claim} is declared in \
+        {located project module}, but a world claim is an assumption about the world, which only a WorldSpec \
+        module states, and {ownerOnly module}. Move the `WorldClaim {facts.writtenOf claim}` command and its doc \
+        comment from {file} to a WorldSpec module, {relockNext}."
+  return distinct errors
 
 def evidenced (facts : Facts) : Array String :=
   facts.headlines.filterMap fun line => line.unlinted.map fun module =>
@@ -1440,8 +1545,7 @@ def describe (short : Name → String) (line : Headline) : String :=
     s!"{label} ({assumption.checks} {if assumption.checks == 1 then "check" else "checks"}{unused})"
   let stated := if assumed.isEmpty then short line.name
     else s!"{short line.name}  assumes {", ".intercalate assumed.toList}"
-  let marks := (if line.proved then [] else [line.marker]) ++ (if line.killProved then [] else ["kill not yet proved"]) ++
-    if line.witnessProved then [] else ["witness not yet proved"]
+  let marks := (if line.proved then [] else [line.marker]) ++ line.killMark.toList ++ line.witnessMark.toList
   marks.foldl (fun shown mark => s!"{shown}  ({mark})") stated
 
 structure Arguments where
@@ -1499,7 +1603,11 @@ private def gather (project : Project) (arguments : Arguments) (solution : Optio
         | .outside module => if (importClosure env module).contains solution then some module else none
         | _ => none
       | none => #[]
-    let holds := fun (name : Name) => standings.any fun (found, current) => found == name && current matches .holds _
+    let markOf := fun (kind : String) (names : Array Name) => names.findSome? fun name =>
+      match (standings.find? (·.1 == name)).map (·.2) with
+      | some (.holds _) => none
+      | some current => some s!"{kind} {current.marker}"
+      | none => some s!"{kind} not yet proved"
     let headlines ← challenge.headlines.mapM fun name => do
       let current := ((standings.find? (·.1 == name)).map (·.2)).getD .absent
       let prover := match current with
@@ -1509,7 +1617,7 @@ private def gather (project : Project) (arguments : Arguments) (solution : Optio
         catch _ => pure { name, assumptions := #[], unnamed := #[] }
       return { analysed with
         proved := prover.isSome, marker := current.marker
-        killProved := (challenge.killsOf name).all holds, witnessProved := (challenge.witnessesOf name).all holds }
+        killMark := markOf "kill" (challenge.killsOf name), witnessMark := markOf "witness" (challenge.witnessesOf name) }
     let mut lines : Std.HashMap (Name × Name) Nat := {}
     let mut written : Std.HashMap Name String := {}
     let mut firstLines : Std.HashMap Name String := {}
@@ -1525,8 +1633,9 @@ private def gather (project : Project) (arguments : Arguments) (solution : Optio
       inventory.declarations.any fun fact => fact.name == hole && fact.computational
     let lints := (Linter.getAllLints env).flatMap fun (module, entries) =>
       if packaged.contains module then entries.map (module, ·) else #[]
+    let parents := declarationParents env inventory
     return {
-      inventory, blames, challenge, headlines, standings, cyclic, lines, written, firstLines, lints
+      inventory, blames, challenge, headlines, standings, cyclic, lines, written, firstLines, lints, parents
       duplicates := duplicatesIn env catalog
       noncomputableHoles := challenge.holes.filter fun hole => isNoncomputable env hole && computationalHole hole
       fixpoints := challenge.holes.filter (fixpoint env ·)
@@ -1566,7 +1675,12 @@ private def statementAudit (arguments : Arguments) : IO UInt32 := do
   let lockFailures := (locked.map fun locked =>
     lockErrors locked current (editableFiles project arguments.sources) arguments.challengeFile "lake build").getD #[]
   let solutionErrors := match solution with | .ok _ => #[] | .error error => #[error]
-  let errors := if lockFailures.isEmpty then meaningful facts ++ owned project facts ++ stated facts ++ solutionErrors
+  let specErrors ← if specs.isEmpty || !lockFailures.isEmpty then pure #[] else
+    try pure (ownedViolations project (← gather project { arguments with sources := specs } none) false)
+    catch failure => pure #[s!"the statement check cannot load the CoreSpec and WorldSpec modules together: \
+      {failure}. Fix what Lean reports in those modules, {relockNext}."]
+  let errors := if lockFailures.isEmpty then
+      meaningful facts ++ owned project facts ++ specErrors ++ stated facts ++ solutionErrors
     else lockFailures ++ solutionErrors
   unless errors.isEmpty do
     IO.println (listing "Errors" errors)
@@ -1617,9 +1731,8 @@ private def solutionAudit (arguments : Arguments) : IO UInt32 := do
     | .ok solution => if drifted then #[] else
       comparatorErrors (comparatorConfig solution facts.challenge) existing arguments.target
     | .error error => #[error]
-  let errors := distinct (sound project facts ++ registered project facts ++ evidenced facts ++ warned facts ++
-    lockFailures ++
-    comparator)
+  let errors := distinct (ownedViolations project facts true ++ sound project facts ++ registered project facts ++
+    evidenced facts ++ warned facts ++ lockFailures ++ comparator)
   let items := if drifted then #[] else pending facts
   let short := shorten (sharedNamespace (facts.headlines.map (·.name)))
   let mut report := facts.headlines.map (describe short) |>.push (proved facts)

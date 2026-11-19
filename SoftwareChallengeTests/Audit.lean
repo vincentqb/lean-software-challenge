@@ -51,7 +51,12 @@ private def expect (errors : Array String) (name reason : String) : CoreM Unit :
 
 private def violations (project : Project) (inventory : Inventory) (challenge : Audit.Challenge := {}) :
     CoreM (Array String) := do
-  return Audit.sound project { inventory, challenge, blames := ← Audit.blamesOf inventory }
+  let env ← getEnv
+  let blames ← Audit.blamesOf inventory
+  let lines := Audit.declarationLines env (inventory.modules.map (·.name))
+  let parents := Audit.declarationParents env inventory
+  let facts : Audit.Facts := { inventory, challenge, blames, lines, parents }
+  return Audit.ownedViolations project facts true ++ Audit.sound project facts
 
 private def expectedConfig : String := "{
   \"challenge_module\": \"Challenge\",
@@ -107,7 +112,7 @@ run_cmd Elab.Command.liftCoreM do
   let reassign (module : Name) (role : Role) : Project :=
     { modules := project.modules.map fun (name, r) => (name, if name == module then role else r) }
   let rejected ← Audit.collect (valid.push (fixture `Rejected))
-  for layout in #[project, reassign (fixture `Rejected) .coreSpec] do
+  for (layout, owned) in #[(project, false), (reassign (fixture `Rejected) .coreSpec, true)] do
     if layout.check rejected then throwError "Rejected fixtures passed"
     let found ← violations layout rejected
     for (name, reason) in #[("hiddenUnsafe", "unsafe"), ("diverging", "partial"),
@@ -120,6 +125,17 @@ run_cmd Elab.Command.liftCoreM do
         ("Fixtures.Rejected", "imports SoftwareChallengeTests.Fixtures.WorldSpec (WorldSpec), but"),
         ("Fixtures.Rejected", "Delete line 1, `import SoftwareChallengeTests.Fixtures.WorldSpec`")] do
       expect found name reason
+    let boxed := found.filter (contains · "EffectBox")
+    unless boxed.size == 1 && boxed.all (contains · "Rejected.EffectBox uses IO") do
+      throwError "A structure and what Lean generates for it were not reported once, as the structure: {boxed}"
+    for generated in ["casesOn", "recOn", "noConfusion", "ctorIdx", "EffectBox.mk", "EffectBox.rec",
+        "EffectBox.action"] do
+      if found.any (contains · generated) then throwError "A generated declaration was reported: {generated}"
+    if owned then
+      expect found "hiddenUnsafe" "is owned, so no edit to the editable files fixes it"
+      expect found "Rejected.raw" "then delete owned.lock and run `lake build`"
+      if found.any (contains · "then run `lake lint`") then
+        throwError "A problem in an owned module was given to the agent to fix: {found}"
     for (fragment, why) in [("_unsafe_rec", "A partial definition was reported by its compiler name"),
         ("_native", "A native_decide axiom was reported by its generated name"),
         ("_hyg", "An initializer was reported by its hygienic name"),
@@ -577,10 +593,11 @@ run_cmd Elab.Command.liftTermElabM do
   unless succLaw.assumptions.map (·.claim) == #[fixture `SuccAgrees] do
     throwError "A world claim a specification definition assumes was not read: {succLaw.assumptions.map (·.claim)}"
   let line : Audit.Headline := { name := `h, assumptions := #[], unnamed := #[] }
-  for (shown, ending) in [({ line with witnessProved := false }, "h  (witness not yet proved)"),
-      ({ line with killProved := false }, "h  (kill not yet proved)"),
+  for (shown, ending) in [({ line with witnessMark := some "witness not yet proved" }, "h  (witness not yet proved)"),
+      ({ line with killMark := some "kill not yet proved" }, "h  (kill not yet proved)"),
+      ({ line with killMark := some "kill stated differently" }, "h  (kill stated differently)"),
       ({ line with proved := false }, "h  (not yet proved)"),
-      ({ line with proved := false, marker := "stated differently", killProved := false },
+      ({ line with proved := false, marker := "stated differently", killMark := some "kill not yet proved" },
         "h  (stated differently)  (kill not yet proved)")] do
     unless Audit.describe toString shown == ending do
       throwError "The report misstated what is pending: {Audit.describe toString shown}, expected {ending}"
