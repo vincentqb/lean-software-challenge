@@ -191,7 +191,7 @@ structure Recorded where
   config : String
 
 def overridesFor (lsc : System.FilePath) : String :=
-  (Json.mkObj [("version", "1.3.0"), ("packages", Json.arr #[Json.mkObj [("type", "path"), ("scope", ""),
+  (Lean.Json.mkObj [("version", "1.3.0"), ("packages", Lean.Json.arr #[Lean.Json.mkObj [("type", "path"), ("scope", ""),
     ("name", "software_challenge"), ("manifestFile", "lake-manifest.json"), ("inherited", false),
     ("dir", lsc.toString), ("copy", false), ("configFile", "lakefile.lean")]])]).pretty
 
@@ -684,7 +684,7 @@ def inRepository (context : Context) (dir : System.FilePath) : Trial Unit := do
   for args in [#["add", "-A"], #["commit", "-q", "-m", judgeReplacement.candidate], #["checkout", "-q", "base"]] do
     succeed (← gitIn repository args) fail "Fix what git reports" next
   let template := repository / "Examples" / "ConstantFolding"
-  requireLocally (← IO.FS.realPath repository) template
+  TemplateRun.requireLocally (← IO.FS.realPath repository) template
   decides (← context.lakeIn template #["exe", "grade", judgeReplacement.candidate]) judgeReplacement
   worktreesRemoved template
 
@@ -721,7 +721,8 @@ def runs : List (String × String × (Context → IO (Array Outcome))) := [
 def usage : String :=
   s!"usage: `lake exe lsc-gate <run>` runs one real run from the library's root, where <run> is \
     {" or ".intercalate (runs.map (·.1))}; `lake build templateRun`, `lake build comparatorRun` and `lake build \
-    gradeRun` run them traced."
+    gradeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, and `lake exe lsc-gate full` runs all \
+    three again."
 
 def contextHere : IO (Except String Context) := do
   let lsc ← IO.FS.realPath (← IO.currentDir)
@@ -737,19 +738,51 @@ def contextHere : IO (Except String Context) := do
   let jobs := max 1 (((← IO.getEnv "SOFTWARE_CHALLENGE_JOBS").bind (·.toNat?)).getD threads)
   return .ok { lake := (← IO.getEnv "LAKE").getD "lake", lsc, root, jobs }
 
+def gate (name : String) : IO UInt32 := do
+  let some (_, title, run) := runs.find? (·.1 == name) | do IO.eprintln usage; return 2
+  match ← contextHere with
+  | .error message => IO.eprintln message; return 1
+  | .ok context =>
+    let start ← IO.monoMsNow
+    let outcomes ← run context
+    IO.println (report s!"lsc-gate {name}: {title}, in {context.root / name}" outcomes ((← IO.monoMsNow) - start))
+    return if outcomes.all fun outcome => (outcome.failure?).isNone then 0 else 1
+
+def targetOf (run : String) : String := s!"{run}Run"
+
+def stale (context : Context) : IO UInt32 := do
+  let found ← runs.filterM fun (run, _) => do
+    return (← context.lakeIn context.lsc #["build", "--no-build", targetOf run]).code != 0
+  unless found.isEmpty do
+    IO.println s!"Real runs stale: {", ".intercalate (found.map (targetOf ·.1))}; `lake test -- full` runs them"
+  return 0
+
+def full (context : Context) : IO UInt32 := do
+  let start ← IO.monoMsNow
+  for (run, _) in runs do
+    let trace := context.root / s!"{run}.txt.trace"
+    if ← trace.pathExists then IO.FS.removeFile trace
+  let code ← (← IO.Process.spawn {
+    cmd := context.lake, args := #["build"] ++ (runs.map (targetOf ·.1)).toArray, cwd := some context.lsc
+    env := unsetForChildren }).wait
+  let seconds := ((← IO.monoMsNow) - start) / 1000
+  IO.println s!"Real runs took {seconds} s"
+  if seconds ≤ 300 then return code
+  IO.eprintln s!"{context.root}: the real runs took {seconds} s, over the 300 s that `lake test -- full` allows, so \
+    the full gate fails. Make the slowest run, as its log in {context.root} times it, faster, then run \
+    `lake test -- full`."
+  return 1
+
 end SoftwareChallengeTests.Gate
 
 open SoftwareChallengeTests.Gate in
 def main : List String → IO UInt32
-  | [name] => do
-    let some (_, title, run) := runs.find? (·.1 == name) | do IO.eprintln usage; return 2
-    match ← contextHere with
-    | .error message => IO.eprintln message; return 1
-    | .ok context =>
-      let start ← IO.monoMsNow
-      let outcomes ← run context
-      IO.println (report s!"lsc-gate {name}: {title}, in {context.root / name}" outcomes ((← IO.monoMsNow) - start))
-      return if outcomes.all fun outcome => (outcome.failure?).isNone then 0 else 1
+  | [mode] =>
+    if mode == "stale" || mode == "full" then do
+      match ← contextHere with
+      | .error message => IO.eprintln message; return 1
+      | .ok context => if mode == "stale" then stale context else full context
+    else gate mode
   | _ => do
     IO.eprintln usage
     return 2

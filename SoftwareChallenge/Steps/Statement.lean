@@ -29,10 +29,13 @@ def challengeImports (lake : LakeFacts) (next : Next) : IO (Array ImportLine) :=
 
 namespace Statement
 
-def challengeOf (lake : LakeFacts) : IO ChallengeFacts := do
-  let some candidate := Read.challengeOf? lake | return Read.emptyChallenge .anonymous ""
-  unless ← (Read.pathIn lake candidate.file).pathExists do return Read.emptyChallenge .anonymous ""
-  Read.readChallenge lake .build
+def challengeOf (lake : LakeFacts) (compiled : List String) : IO ChallengeFacts := do
+  let (some candidate, [dir]) := (Read.challengeOf? lake, compiled) | return Read.emptyChallenge .anonymous ""
+  searchPathRef.modify (System.FilePath.mk dir :: ·)
+  let env := (← Read.importEnvironment { lake with challengeCandidates := #[] } #[candidate.module] .build).env
+  let challenge ← Read.challengeFacts lake candidate env .build
+  Read.requireChallengeCensus env challenge .build
+  return challenge
 
 def written (lake : LakeFacts) (file : String) (text : String) : IO Bool := do
   if (← Read.readInput lake file .build) == some text then return false
@@ -59,7 +62,7 @@ def run (lakeFile : System.FilePath) (args : List String) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .build
   if args == ["failed"] then return ← failed lake
   let files ← Read.fileFacts lake .build
-  let challenge ← challengeOf lake
+  let challenge ← challengeOf lake args
   let result := SoftwareChallenge.Statement.run lake files challenge
   if result.errors.isEmpty then
     for line in ← perform lake result.writes do IO.println line
