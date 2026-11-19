@@ -32,12 +32,10 @@ namespace Statement
 def challengeOf (lake : LakeFacts) (compiled : List String) : IO ChallengeFacts := do
   let (some candidate, [dir]) := (Read.challengeOf? lake, compiled) | return Read.emptyChallenge .anonymous ""
   searchPathRef.modify (System.FilePath.mk dir :: ·)
-  let owned := lake.modules.filter fun source =>
-    Role.ofName source.module == .coreSpec || Role.ofName source.module == .worldSpec
-  let roots := #[candidate.module] ++ owned.map (·.module)
-  let env := (← Read.importEnvironment { lake with challengeCandidates := #[] } roots .build).env
-  let challenge ← Read.challengeFacts lake candidate env .build
-  Read.requireChallengeCensus env challenge .build
+  let imported ← Read.challengeEnv { lake with challengeCandidates := #[] } candidate.module .build
+  let challenge ← Read.challengeFacts lake candidate imported .build
+  Read.requireChallengeCensus imported.env challenge .build
+  Read.requireClosureCensus lake challenge .build
   return challenge
 
 def written (lake : LakeFacts) (file : String) (text : String) : IO Bool := do

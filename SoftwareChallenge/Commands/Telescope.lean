@@ -65,9 +65,6 @@ def summarize (replaceable : Name → Bool) (binders : Array Expr) : MetaM (Arra
       refers := (List.range index).filter fun earlier => type.containsFVar binders[earlier]!.fvarId! }
   return summary
 
-def summaries (replaceable : Name → Bool) (type : Expr) : MetaM (List Binder) := do
-  forallTelescope (← unfolded type) fun binders _ => return (← summarize replaceable binders).toList
-
 def unfoldedDefinitions (type : Expr) : MetaM (List Name) := do
   let (meaning, outer) ← unfolding type
   forallTelescope meaning fun binders _ => do

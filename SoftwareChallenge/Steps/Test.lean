@@ -49,6 +49,11 @@ def crashed (ran : Checks.Ran) (output : IO.Process.Output) : Checks.Ran :=
     { ran with outcomes := ran.declared.map fun check => { check, elapsed := 0, error? := some line } }
   | _, _ => ran
 
+def libraryPlace (lake : LakeFacts) : IO Place := do
+  let some file := lake.configFiles[0]? | return ⟨"lakefile.lean", 1⟩
+  let lines := ((← Read.readInput lake file .test).getD "").splitOn "\n"
+  return { file, line := ((lines.findIdx? (·.contains "lean_lib")).map (· + 1)).getD 1 }
+
 def run (lakeFile : System.FilePath) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .test
   let dir := lakeFile.parent.getD "."
@@ -63,7 +68,9 @@ def run (lakeFile : System.FilePath) : IO UInt32 := do
     checks := ran.outcomes
     declaredOwnTests := lake.ownTests
     ownTests
-    unknownOwnTests := lake.testDriverArgs.filter fun name => !lake.ownTests.any (·.name == name) }
+    unknownOwnTests := lake.testDriverArgs.filter fun name => !lake.ownTests.any (·.name == name)
+    testDriverArgsPlace := lake.testDriverArgsPlace
+    libraryPlace := ← libraryPlace lake }
   let challengeFile := ((Read.challengeOf? lake).map (·.file)).getD "Challenge.lean"
   for line in Report.test challengeFile result do IO.println line
   return result.code
