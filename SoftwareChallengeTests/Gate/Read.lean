@@ -15,9 +15,9 @@ def source (module : Name) : SourceFact :=
   { module, file := module.toString.replace "." "/" ++ ".lean" }
 
 def casesLake (dir : String) (modules : Array Name) : LakeFacts :=
-  { packageDir := dir, repository? := none, configFiles := #["lakefile.lean"], modules := modules.map source,
-    challengeCandidates := #[source `Challenge], exeRoots := #[], packages := #[], defaultTargets := #[`Cases],
-    builtinLint := none, testDriver := "", testDriverArgs := #[],
+  { packageDir := dir, configFiles := #["lakefile.lean"], modules := modules.map source,
+    challengeCandidates := #[source `Challenge], defaultExeRoots := #[], packages := #[], defaultTargets := #[`Cases],
+    builtinLint := none, testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
     testDriverArgsPlace := { file := "lakefile.lean", line := 1 }, ownTests := #[],
     inputs := #["owned.lock", "comparator.json"] }
 

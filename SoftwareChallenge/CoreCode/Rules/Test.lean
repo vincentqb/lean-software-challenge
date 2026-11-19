@@ -55,7 +55,7 @@ def failuresOf (facts : TestFacts) : Array Failure :=
   failedChecks facts ++ checksNotRun facts ++ failedOwnTests facts ++ ownTestsNotRun facts ++ undeclaredOwnTests facts
 
 def Failure.code : Failure → UInt32
-  | .ownTest run => min run.code 2
+  | .ownTest _ => 1
   | _ => 1
 
 def code (failures : Array Failure) : UInt32 :=

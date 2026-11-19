@@ -88,7 +88,8 @@ def binderFacts (locals : Array Expr) : MetaM (List BinderFact) := do
       meaning := Shape.ofExpr (meaning.abstract earlier)
       prop := ← isProp type
       shown := ← shown type
-      conclusion, variables }
+      conclusion, variables
+      level := Universe.ofLevel (← getLevel type).normalize }
   return found.toList
 
 def headlineFact (replaceable : Name → Bool) (holes foreign : Array Name) (target : TargetFact)

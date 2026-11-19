@@ -47,6 +47,7 @@ def tag : Error → Nat
   | .specImport .. => 32
   | .ownedClaim .. => 33
   | .derivedPartial .. => 34
+  | .witnessMisstated .. => 35
 
 def challengeImporter : ImportLine :=
   { module := `App.Solution, fact := { name := `Challenge, comptime := false, line := 2 }, text := "import Challenge" }
@@ -106,6 +107,7 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.codeInClosure `App.CoreCode, metaReached, baseLake),
    (.witnessMissing `App.double_even, unwitnessed, baseLake),
    (.witnessPredeclared `App.double_even_applies `App.double_even, predeclared, baseLake),
+   (.witnessMisstated `App.double_even_applies `App.double_even, misstatedWitness, baseLake),
    (.unplainName (.str `App "1st"), unplainChallenge, baseLake),
    (.challengeLookup #[], baseChallenge, { baseLake with challengeCandidates := #[] }),
    (.challengeLookup twoChallenges.challengeCandidates, baseChallenge, twoChallenges),
@@ -139,7 +141,8 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec, derivedSpec, baseLake),
    (.codeInClosure `App.CoreCode, reachedThrough, baseLake)]
 
-def setupSamples : List Setup := [.lintDriver "", .lintDriver "other/lint", .builtinLint ⟨"lakefile.lean", 4⟩]
+def setupSamples : List Setup :=
+  [.lintDriver "", .lintDriver "other/lint", .testDriver "", .testDriver "other/test", .builtinLint ⟨"lakefile.lean", 4⟩]
 
 def messageOf (sample : Error × ChallengeFacts × LakeFacts) : Message :=
   sample.1.message sample.2.2 baseFiles sample.2.1
@@ -358,7 +361,8 @@ end
 
 #guard says (.exeRootsOutsideWorldCode #[`Main]) "a WorldCode module, such as App.WorldCode"
 
-#guard says (.ownedUnread "App/CoreSpec.lean") "Challenge.lean imports App.CoreSpec, so it is part of the statement"
+#guard says (.ownedUnread "App/CoreSpec.lean")
+  "a component of its module name is CoreSpec or WorldSpec, so it is part of the statement"
 
 #guard says (.ownedUnread "App/CoreSpec.lean") "or remove its module from the lean_lib that builds it in lakefile.lean"
 

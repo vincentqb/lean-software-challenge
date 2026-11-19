@@ -21,7 +21,7 @@ def unauditedModules (facts : Facts) : Array Error :=
     else some (.unaudited source.module)
 
 def unauditedExeRoots (facts : Facts) : Array Error :=
-  facts.lake.exeRoots.filterMap fun root =>
+  facts.lake.defaultExeRoots.filterMap fun root =>
     if ∃ fact ∈ facts.solution.inventory.modules, fact.name = root then none else some (.unaudited root)
 
 def unlintedModules (facts : Facts) : Array Error :=
@@ -56,12 +56,18 @@ def firstModules (declarations : Array DeclarationFact) : Std.HashMap Name Name 
   declarations.foldl (init := {}) fun first fact =>
     if first.contains fact.name then first else first.insert fact.name fact.module
 
-def duplicates (facts : Facts) : Array Error :=
-  let first := firstModules facts.solution.inventory.declarations
-  facts.solution.inventory.declarations.filterMap fun fact =>
+def counted (lake : LakeFacts) (fact : DeclarationFact) : Bool :=
+  fact.written && !(fact.name == `main && lake.defaultExeRoots.contains fact.module)
+
+def duplicatesIn (declarations : Array DeclarationFact) : Array Error :=
+  let first := firstModules declarations
+  declarations.filterMap fun fact =>
     match first[fact.name]? with
     | some module => if module = fact.module then none else some (.declaredTwice fact.name module fact.module)
     | none => none
+
+def duplicates (facts : Facts) : Array Error :=
+  duplicatesIn (facts.solution.inventory.declarations.filter (counted facts.lake))
 
 def holesOutsideCode (facts : Facts) : Array Error :=
   facts.challenge.holes.flatMap fun hole => facts.solution.found.filterMap fun found =>
@@ -125,14 +131,6 @@ def lockErrors (facts : Facts) : Array Error :=
   | .decoded locked => (Lock.violations locked facts.files.digests).map fun violation =>
     .lock violation (ownedFile? facts (violationPath violation))
 
-def configMatches (config : Config) (challenge : ChallengeFacts) (solution : Name) : Bool :=
-  config.challenge == challenge.module && config.solution == solution &&
-    config.theorems.all (fun name => challenge.theorems.any (·.constant.name == name)) &&
-    challenge.theorems.all (config.theorems.contains ·.constant.name) &&
-    config.definitions.all (fun name => challenge.holes.any (·.constant.name == name)) &&
-    challenge.holes.all (config.definitions.contains ·.constant.name) &&
-    config.axioms.all standardAxioms.contains && standardAxioms.all config.axioms.contains
-
 def staleness (facts : Facts) (config : Config) : Error :=
   let declared := facts.challenge.theorems.map (·.constant.name) ++ facts.challenge.holes.map (·.constant.name)
   let listed := config.theorems ++ config.definitions
@@ -146,7 +144,7 @@ def comparatorErrors (facts : Facts) : Array Error :=
   | .unreadable problem => #[.comparatorUnreadable problem]
   | .decoded config =>
     if facts.lake.modules.any fun source =>
-        decide (Name.NamedSolution source.module) && configMatches config facts.challenge source.module then #[]
+        decide (Name.NamedSolution source.module) && config == Config.expected facts.challenge source.module then #[]
     else #[staleness facts config]
 
 def solutionErrors (facts : Facts) : Array Error :=

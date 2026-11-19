@@ -36,12 +36,12 @@ def actionOf (evidence : Evidence) : CoreM (IO Unit) := do
   try unsafe evalConst (IO Unit) evidence.source
   catch failure => let shown ← failure.toMessageData.toString; return throw (IO.userError shown)
 
-def run (out : String) (modules : Array (Name × String)) : CommandElabM Unit := do
+def run (out : String) (modules : Array (Name × String)) (jobs? : Option Nat := none) : CommandElabM Unit := do
   let found ← liftTermElabM (declared modules)
   let write := fun (ran : Ran) => IO.FS.writeFile out (toJson ran).compress
   write { declared := found.map (·.2), outcomes := #[], finished := false }
   let actions ← liftCoreM <| found.mapM fun (evidence, check) => return (check, ← actionOf evidence)
-  let results ← schedule (← jobsAllowed) actions fun (_, action) => action.toBaseIO
+  let results ← schedule (jobs?.getD (← jobsAllowed)) actions fun (_, action) => action.toBaseIO
   let errorOf : Except IO.Error Unit → Option String
     | .ok () => none
     | .error failure => some (toString failure)

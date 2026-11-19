@@ -9,9 +9,9 @@ namespace SoftwareChallengeTests.Complete
 open Lean SoftwareChallenge
 
 def completeLake : LakeFacts :=
-  { packageDir := "/work", repository? := none, configFiles := #["lakefile.lean"],
+  { packageDir := "/work", configFiles := #["lakefile.lean"],
     modules := #[⟨`App.Solution, "App/Solution.lean"⟩], challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩],
-    exeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "",
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge",
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 def completeChallenge : ChallengeFacts :=
@@ -24,9 +24,7 @@ def digested : Array Lock.Entry :=
 
 def completeFiles : FileFacts :=
   { lock := .decoded digested, digests := digested,
-    comparator := .decoded
-      { challenge := `Challenge, solution := `App.Solution, theorems := #[], definitions := #[],
-        axioms := standardAxioms } }
+    comparator := .decoded (Config.expected completeChallenge `App.Solution) }
 
 def solutionModule : ModuleFact :=
   { name := `App.Solution, file := "App/Solution.lean", usesModuleSystem := true, imports := #[] }
@@ -80,6 +78,7 @@ theorem statementComplete : Statement.Complete completeLake completeFiles comple
   hypothesesClaimed := by simp [completeChallenge]
   preconditionsWitnessed := by simp [completeChallenge]
   witnessesDerived := by simp [completeChallenge]
+  witnessesStated := by simp [completeChallenge]
   terminatesNamesHole := by simp [completeChallenge]
   terminatesOnKilledHeadline := by simp [completeChallenge]
   terminatesMentionsHole := by simp [completeChallenge]
@@ -122,8 +121,7 @@ theorem lintComplete : Lint.Complete completeFacts where
   proofsReadable := by simp [completeFacts, completeChallenge]
   ownedDigested := completeOwnedDigested
   lockCurrent := ⟨digested, rfl, fun _ => rfl⟩
-  comparatorCurrent := ⟨_, rfl, ⟨`App.Solution, "App/Solution.lean"⟩, by simp [completeFacts, completeLake], rfl,
-    by simp [Config.Matches, completeFacts, completeChallenge, ChallengeFacts.theorems]⟩
+  comparatorCurrent := ⟨⟨`App.Solution, "App/Solution.lean"⟩, by simp [completeFacts, completeLake], rfl, rfl⟩
   oneSolution := completeOneSolution
   statementTarget := by simp [completeFacts, completeLake]
   challengeUnimported := by simp [completeFacts, completeSolution]
@@ -155,7 +153,7 @@ theorem unauditedModule_unclean : ¬ Lint.Clean unauditedModule := fun clean => 
   subst member
   simp [solutionModule] at named
 
-def unauditedExeRoot : Facts := { completeFacts with lake := { completeLake with exeRoots := #[`Main] } }
+def unauditedExeRoot : Facts := { completeFacts with lake := { completeLake with defaultExeRoots := #[`Main] } }
 
 theorem unauditedExeRoot_unclean : ¬ Lint.Clean unauditedExeRoot := fun clean => by
   obtain ⟨fact, member, named⟩ := clean.exeRootsAudited `Main (by simp [unauditedExeRoot])
@@ -216,7 +214,7 @@ theorem metaImportsCode_unclean (spec : (Role.ofName `App.CoreSpec.Defs).Owned)
 
 def toolingExeLake : LakeFacts :=
   { completeLake with modules := completeLake.modules.push ⟨`App.WorldCode, "App/WorldCode.lean"⟩,
-                      exeRoots := #[`Main] }
+                      defaultExeRoots := #[`Main] }
 
 #guard Role.ofName `App.WorldCode == .worldCode
 #guard Role.ofName `Main == .tooling

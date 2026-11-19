@@ -69,12 +69,6 @@ structure Result where
 
 end Lint
 
-def Config.Matches (config : Config) (challenge : ChallengeFacts) (solution : Name) : Prop :=
-  config.challenge = challenge.module ∧ config.solution = solution ∧
-    (∀ name, name ∈ config.theorems ↔ ∃ target ∈ challenge.theorems, target.constant.name = name) ∧
-    (∀ name, name ∈ config.definitions ↔ ∃ hole ∈ challenge.holes, hole.constant.name = name) ∧
-    ∀ name, name ∈ config.axioms ↔ name ∈ standardAxioms
-
 def SolutionFacts.Holds (solution : SolutionFacts) (target : TargetFact) : Prop :=
   ∃ found ∈ solution.found, found.constant.name = target.constant.name ∧ found.module ∈ solution.solutionClosure ∧
     found.constant.kind = target.constant.kind ∧ found.constant.levels = target.constant.levels ∧
@@ -93,10 +87,13 @@ def PackageFact.Visible (package : PackageFact) (packageDir : String) : Prop :=
   Path.Within package.real packageDir ∨
     ∀ hidden ∈ sandboxHidden, ¬ Path.Within package.configured hidden ∧ ¬ Path.Within package.real hidden
 
+def DeclarationFact.Counted (fact : DeclarationFact) (lake : LakeFacts) : Prop :=
+  fact.written = true ∧ (fact.name = `main → fact.module ∉ lake.defaultExeRoots)
+
 structure Lint.Clean (facts : Facts) : Prop where
   modulesAudited : ∀ source ∈ facts.lake.modules, source.module ≠ facts.challenge.module →
     ∃ fact ∈ facts.solution.inventory.modules, fact.name = source.module
-  exeRootsAudited : ∀ root ∈ facts.lake.exeRoots, ∃ fact ∈ facts.solution.inventory.modules, fact.name = root
+  exeRootsAudited : ∀ root ∈ facts.lake.defaultExeRoots, ∃ fact ∈ facts.solution.inventory.modules, fact.name = root
   lintersCover : ∀ fact ∈ facts.solution.inventory.modules, fact.name ∈ facts.solution.linted
   lintersPass : facts.solution.lints = #[]
   noSorry : facts.solution.sorries = #[]
@@ -105,7 +102,7 @@ structure Lint.Clean (facts : Facts) : Prop where
     ∀ dependency ∈ fact.imports, dependency.comptime = true → facts.lake.Builds dependency.name →
       facts.challenge.Owns dependency.name
   declaredOnce : ∀ fact ∈ facts.solution.inventory.declarations, ∀ other ∈ facts.solution.inventory.declarations,
-    fact.name = other.name → fact.module = other.module
+    fact.Counted facts.lake → other.Counted facts.lake → fact.name = other.name → fact.module = other.module
   holesInCode : ∀ hole ∈ facts.challenge.holes, ∀ found ∈ facts.solution.found,
     found.constant.name = hole.constant.name →
       facts.lake.project.role? found.module = some .coreCode ∨ facts.lake.project.role? found.module = some .worldCode
@@ -125,9 +122,8 @@ structure Lint.Clean (facts : Facts) : Prop where
       found.constant.value? ≠ none
   ownedDigested : ∀ path, facts.lake.Owned facts.challenge path → facts.files.Digested path
   lockCurrent : facts.files.LockCurrent
-  comparatorCurrent : ∃ config, facts.files.comparator = .decoded config ∧
-    ∃ solution ∈ facts.lake.modules, Name.NamedSolution solution.module ∧
-      config.Matches facts.challenge solution.module
+  comparatorCurrent : ∃ solution ∈ facts.lake.modules, Name.NamedSolution solution.module ∧
+    facts.files.comparator = .decoded (Config.expected facts.challenge solution.module)
   oneSolution : facts.lake.OneSolution
   statementTarget : `statement ∈ facts.lake.defaultTargets
   challengeUnimported : ∀ line ∈ facts.solution.imports, line.fact.name ≠ facts.challenge.module

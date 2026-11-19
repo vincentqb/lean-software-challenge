@@ -40,18 +40,19 @@ structure OwnTestFact where
 
 def auditLintDriver : String := "software_challenge/lint_challenge"
 
+def auditTestDriver : String := "software_challenge/test_challenge"
+
 structure LakeFacts where
   packageDir : String
-  repository? : Option String
   configFiles : Array String
   modules : Array SourceFact
   challengeCandidates : Array SourceFact
-  exeRoots : Array Name
+  defaultExeRoots : Array Name
   packages : Array PackageFact
   defaultTargets : Array Name
   builtinLint : Option Place
   lintDriver : String := auditLintDriver
-  testDriver : String
+  testDriver : String := auditTestDriver
   testDriverArgs : Array String
   testDriverArgsPlace : Place
   ownTests : Array OwnTestFact
@@ -121,6 +122,7 @@ structure BinderFact where
   shown : String
   conclusion : String
   variables : Array String
+  level : Universe := .zero
   deriving BEq, Repr, Inhabited
 
 structure HeadlineFact where
@@ -298,7 +300,7 @@ def LakeFacts.project (lake : LakeFacts) : Project :=
   { modules := lake.modules.map fun source => (source.module, Role.ofName source.module) }
 
 def LakeFacts.Program (lake : LakeFacts) : Prop :=
-  ∃ root ∈ lake.exeRoots, Role.ofName root = .worldCode
+  ∃ root ∈ lake.defaultExeRoots, Role.ofName root = .worldCode
 
 def ChallengeFacts.Owns (challenge : ChallengeFacts) (module : Name) : Prop :=
   module ∈ challenge.closure ∨ (Role.ofName module).Owned

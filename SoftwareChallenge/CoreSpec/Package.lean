@@ -35,6 +35,7 @@ structure DeclarationFact where
   effects : Bool
   debug : Bool
   axioms : Array Name
+  written : Bool := true
   deriving DecidableEq, Repr, Inhabited
 
 structure Inventory where

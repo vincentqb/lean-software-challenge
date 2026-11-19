@@ -73,6 +73,13 @@ def witnessOf (derived : Bool) : WitnessFact :=
   { target := targetOf `App.double_even_applies .proved (.const ``True []) 11 "double_even_applies"
     headline := `App.double_even, derived }
 
+def stated (challenge : ChallengeFacts) (witness : WitnessFact) : WitnessFact :=
+  match challenge.headlines.find? (·.target.constant.name == witness.headline) with
+  | some headline =>
+    { witness with target := { witness.target with constant := { witness.target.constant with
+        type := headline.expectedWitness challenge } } }
+  | none => witness
+
 def specImport : ImportLine :=
   { module := `Challenge, fact := { name := `App.CoreSpec, comptime := false, line := 3 },
     text := "public import App.CoreSpec" }
@@ -82,11 +89,11 @@ def codeImport : ImportLine :=
     text := "public import App.CoreCode" }
 
 def baseLake : LakeFacts :=
-  { packageDir := "/work", repository? := none, configFiles := #["lakefile.lean"],
+  { packageDir := "/work", configFiles := #["lakefile.lean"],
     modules := #[⟨`App.CoreSpec, "App/CoreSpec.lean"⟩, ⟨`App.CoreCode, "App/CoreCode.lean"⟩,
       ⟨`App.Solution, "App/Solution.lean"⟩],
-    challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], exeRoots := #[], packages := #[],
-    defaultTargets := #[`statement], builtinLint := none, testDriver := "", testDriverArgs := #[],
+    challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], defaultExeRoots := #[], packages := #[],
+    defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
     testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 def baseChallenge : ChallengeFacts :=
@@ -243,7 +250,9 @@ def claimedHypotheses : ChallengeFacts :=
         binderFact "b" (.forallE nat (agrees (.app double (.bvar 0)))) true "∀ m, App.Agrees (App.double m)",
         natBinder] }] }
 
-def unclaimedHypotheses : ChallengeFacts := { claimedHypotheses with claims := #[], witnesses := #[witnessOf true] }
+def unclaimedBase : ChallengeFacts := { claimedHypotheses with claims := #[] }
+
+def unclaimedHypotheses : ChallengeFacts := { unclaimedBase with witnesses := #[stated unclaimedBase (witnessOf true)] }
 
 def dependedHypothesis : ChallengeFacts :=
   { baseChallenge with
@@ -327,10 +336,9 @@ def unwitnessed : ChallengeFacts :=
   { baseChallenge with
     headlines := #[holeTypedInput] }
 
-def witnessed : ChallengeFacts :=
-  { baseChallenge with
-    headlines := #[holeTypedInput]
-    witnesses := #[witnessOf true] }
+def witnessedInput : ChallengeFacts := { baseChallenge with headlines := #[holeTypedInput] }
+
+def witnessed : ChallengeFacts := { witnessedInput with witnesses := #[stated witnessedInput (witnessOf true)] }
 
 def unwitnessedUnkilled : ChallengeFacts :=
   { baseChallenge with
@@ -364,11 +372,21 @@ def repeatedSolution : LakeFacts :=
 def toolingRoot : LakeFacts :=
   { baseLake with
     modules := baseLake.modules.push ⟨`App.WorldCode, "App/WorldCode.lean"⟩
-    exeRoots := #[`Main] }
+    defaultExeRoots := #[`Main] }
 
 def worldRoot : LakeFacts :=
   { toolingRoot with
-    exeRoots := #[`Main, `App.WorldCode] }
+    defaultExeRoots := #[`Main, `App.WorldCode] }
+
+def witnessedHeadline : HeadlineFact :=
+  { evenHeadline with telescope := [{ natBinder with level := .succ .zero },
+      binderFact "h" (equal (.app double (.bvar 0)) (.natLit 0)) true "App.double n = 0"] }
+
+def witnessedBase : ChallengeFacts := { baseChallenge with headlines := #[witnessedHeadline] }
+
+def misstatedWitness : ChallengeFacts := { witnessedBase with witnesses := #[witnessOf true] }
+
+def statedWitness : ChallengeFacts := { witnessedBase with witnesses := #[stated witnessedBase (witnessOf true)] }
 
 end
 
@@ -526,9 +544,23 @@ end
 
 #guard errorsOf (challenge := derivedCode) == #[]
 
-#guard statementRoots worldLake `Challenge == #[`Challenge, `App.CoreSpec, `App.WorldSpec]
-
 #guard refuses (.privateAuxiliary `App.double_even (privateName "proof_1")) (challenge := privateAuxiliary)
+
+#guard setupOf { baseLake with lintDriver := "" } == #[.lintDriver ""]
+
+#guard setupOf { baseLake with testDriver := "" } == #[.testDriver ""]
+
+#guard setupOf { baseLake with builtinLint := some ⟨"lakefile.lean", 5⟩ } == #[.builtinLint ⟨"lakefile.lean", 5⟩]
+
+#guard setupOf baseLake == #[]
+
+#guard refuses (.witnessMisstated `App.double_even_applies `App.double_even) (challenge := misstatedWitness)
+
+#guard !(errorsOf (challenge := statedWitness)).any (· matches .witnessMisstated ..)
+
+#guard witnessedHeadline.expectedWitness witnessedBase ==
+  .app (.app (.const ``Exists [.succ .zero]) (.const ``Nat []))
+    (.lam (.const ``Nat []) (equal (.app double (.bvar 0)) (.natLit 0)))
 
 #guard refuses (.witnessMissing `App.double_even) (challenge := unwitnessed)
 
@@ -558,7 +590,7 @@ end
 
 #guard refuses (.exeRootsOutsideWorldCode #[`Main]) (lake := toolingRoot)
 
-#guard errorsOf (lake := { baseLake with exeRoots := #[`Main] }) == #[]
+#guard errorsOf (lake := { baseLake with defaultExeRoots := #[`Main] }) == #[]
 
 #guard errorsOf (lake := worldRoot) == #[]
 
@@ -566,12 +598,12 @@ end
   (files := { baseFiles with lock := .missing, digests := digests.pop })
 
 #guard errorsOf (files := { baseFiles with digests := digests.pop }) ==
-  #[.lock (.missing "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec))]
+  #[.lock (.missing "App/CoreSpec.lean") (some (.specModule `App.CoreSpec))]
 
 #guard refuses (.lock (.differs "Challenge.lean") (some .challenge))
   (files := { baseFiles with digests := changedDigests })
 
-#guard refuses (.lock (.unrecorded "App/CoreSpec.lean") (some (.closureModule `App.CoreSpec)))
+#guard refuses (.lock (.unrecorded "App/CoreSpec.lean") (some (.specModule `App.CoreSpec)))
   (files := { baseFiles with lock := .decoded digests.pop })
 
 #guard refuses (.lock (.unrecorded "App/Solution.lean") none)

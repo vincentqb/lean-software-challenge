@@ -14,20 +14,41 @@ namespace SoftwareChallenge.Steps.Test
 
 def lakeCommand : IO String := return (← IO.getEnv "LAKE").getD "lake"
 
-def runnerSource (lake : LakeFacts) (out : System.FilePath) : String :=
-  let listed := ", ".intercalate (lake.modules.map fun source =>
+def runnerSource (modules : Array SourceFact) (out : System.FilePath) : String :=
+  let listed := ", ".intercalate (modules.map fun source =>
     s!"(`{source.module}, {(toJson source.file).compress})").toList
-  "\n".intercalate (["import SoftwareChallenge.Steps.Checks"] ++ (lake.modules.map (s!"import {·.module}")).toList ++
+  "\n".intercalate (["import SoftwareChallenge.Steps.Checks"] ++ (modules.map (s!"import {·.module}")).toList ++
     [s!"run_cmd SoftwareChallenge.Steps.Checks.run {(toJson out.toString).compress} #[{listed}]", ""])
 
-def runChecks (lake : LakeFacts) (dir : System.FilePath) : IO (Option Checks.Ran × IO.Process.Output) := do
-  let runner := dir / "Checks.lean"
-  let out := dir / "checks.json"
+def checkGroups (lake : LakeFacts) : Array (Array SourceFact) :=
+  let roots := lake.modules.filter (lake.defaultExeRoots.contains ·.module)
+  if roots.size ≤ 1 then #[lake.modules] else
+    let first := ((roots.find? (Role.ofName ·.module == .worldCode)).orElse fun _ => roots[0]?).getD default
+    let others := roots.filter (·.module != first.module)
+    #[lake.modules.filter fun source => !others.any (·.module == source.module)] ++ others.map (#[·])
+
+def runGroup (lake : LakeFacts) (dir : System.FilePath) (index : Nat) (modules : Array SourceFact) :
+    IO (Option Checks.Ran × IO.Process.Output) := do
+  let suffix := if index == 0 then "" else toString index
+  let runner := dir / s!"Checks{suffix}.lean"
+  let out := dir / s!"checks{suffix}.json"
   if ← out.pathExists then IO.FS.removeFile out
-  IO.FS.writeFile runner (runnerSource lake out)
+  IO.FS.writeFile runner (runnerSource modules out)
   let output ← IO.Process.output { cmd := ← lakeCommand, args := #["lean", runner.toString], cwd := lake.packageDir }
   unless ← out.pathExists do return (none, output)
   return ((Json.parse (← IO.FS.readFile out) >>= fromJson?).toOption, output)
+
+def runChecks (lake : LakeFacts) (dir : System.FilePath) : IO (Option Checks.Ran × IO.Process.Output) := do
+  let mut ran : Checks.Ran := { declared := #[], outcomes := #[], finished := true }
+  let mut printed : IO.Process.Output := { exitCode := 0, stdout := "", stderr := "" }
+  for (modules, index) in (checkGroups lake).zipIdx do
+    let (result?, output) ← runGroup lake dir index modules
+    printed := { exitCode := max printed.exitCode output.exitCode, stdout := printed.stdout ++ output.stdout
+                 stderr := printed.stderr ++ output.stderr }
+    let some result := result? | return (none, printed)
+    ran := { declared := ran.declared ++ result.declared, outcomes := ran.outcomes ++ result.outcomes
+             finished := ran.finished && result.finished }
+  return (some ran, printed)
 
 def runOwnTest (lake : LakeFacts) (test : OwnTestFact) : IO OwnTestRun := do
   let args := match test.kind with

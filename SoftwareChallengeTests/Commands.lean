@@ -6,6 +6,7 @@ meta import SoftwareChallengeTests.Fixtures.Sibling
 meta import SoftwareChallengeTests.Fixtures.Rendezvous
 meta import SoftwareChallengeTests.Support
 meta import SoftwareChallenge
+meta import SoftwareChallenge.Steps.Checks
 
 public section
 
@@ -38,33 +39,37 @@ meta section
 
 open Lean SoftwareChallenge
 
-private def contains (text fragment : String) : Bool := (text.splitOn fragment).length > 1
+private def ranAt (out : System.FilePath) : IO SoftwareChallenge.Steps.Checks.Ran := do
+  IO.ofExcept ((Lean.Json.parse (← IO.FS.readFile out)) >>= Lean.fromJson?)
 
-run_cmd Elab.Command.liftCoreM do
-  let failures ← checkFailures #[(`SoftwareChallengeTests.Fixtures.WorldCode, "SoftwareChallengeTests/Fixtures/WorldCode.lean"),
-    (`SoftwareChallengeTests.Fixtures.Sibling, "SoftwareChallengeTests/Fixtures/Sibling.lean")]
-  unless failures.size == 3 && failures.all (contains · "of SoftwareChallengeTests.Fixtures.WrongSuccAgrees failed") &&
-      failures.any (contains · "SoftwareChallengeTests/Fixtures/Sibling.lean:14:") &&
-      failures.any (contains · "ran during the build") && failures.all (contains · "Then run `lake test`.") do
-    throwError "The check runner misreported the fixture checks: {failures}"
-  unless (← checkFailures #[]).isEmpty do throwError "The check runner ran checks of an unlisted module"
+private def runnerOut : IO System.FilePath := return (← IO.currentDir) / ".lake" / "check-runner-test.json"
 
-run_cmd Elab.Command.liftCoreM do
-  let modules := #[(`SoftwareChallengeTests.Fixtures.Rendezvous, "SoftwareChallengeTests/Fixtures/Rendezvous.lean")]
+private def rendezvousOutcomes (jobs : Nat) : Elab.Command.CommandElabM (Array Bool) := do
   let dir ← Rendezvous.place
-  let fresh : IO Unit := do if ← dir.pathExists then IO.FS.removeDirAll dir
-  fresh
-  let together ← runAllChecks modules (jobs := some 2)
-  fresh
-  let apart ← runAllChecks modules (jobs := some 1)
-  fresh
-  unless together.size == 2 && together.all (·.error.isNone) do
-    throwError "Two Checks that meet did not run at the same time: {together.map (·.error)}"
-  unless (apart.map (·.error.isSome)).toList == [true, false] do
-    throwError "Two Checks run one after the other did not fail the first: {apart.map (·.error)}"
-  let lines := timings #[{ file := "A.lean", line := 1, claim := `A, elapsed := 100, error := none },
-    { file := "B.lean", line := 2, claim := `B, elapsed := 2500, error := none }]
-  unless lines == #["B.lean:2 B  2.5 s", "A.lean:1 A  0.1 s"] do throwError "Check times were misreported: {lines}"
+  if ← dir.pathExists then IO.FS.removeDirAll dir
+  let out ← runnerOut
+  SoftwareChallenge.Steps.Checks.run out.toString
+    #[(`SoftwareChallengeTests.Fixtures.Rendezvous, "SoftwareChallengeTests/Fixtures/Rendezvous.lean")] (jobs? := some jobs)
+  if ← dir.pathExists then IO.FS.removeDirAll dir
+  return (← ranAt out).outcomes.map (·.error?.isSome)
+
+run_cmd do
+  let out ← runnerOut
+  SoftwareChallenge.Steps.Checks.run out.toString
+    #[(`SoftwareChallengeTests.Fixtures.WorldCode, "SoftwareChallengeTests/Fixtures/WorldCode.lean"),
+      (`SoftwareChallengeTests.Fixtures.Sibling, "SoftwareChallengeTests/Fixtures/Sibling.lean")]
+  let failed := (← ranAt out).outcomes.filter (·.error?.isSome)
+  unless failed.size == 3 && failed.all (·.check.claim == `SoftwareChallengeTests.Fixtures.WrongSuccAgrees) &&
+      failed.any (·.check.place == ⟨"SoftwareChallengeTests/Fixtures/Sibling.lean", 14⟩) do
+    throwError "The check runner misreported the fixture checks: {failed.map (·.check.place.line)}"
+  SoftwareChallenge.Steps.Checks.run out.toString #[]
+  unless (← ranAt out).outcomes.isEmpty do throwError "The check runner ran checks of an unlisted module"
+
+run_cmd do
+  let together ← rendezvousOutcomes 2
+  let apart ← rendezvousOutcomes 1
+  unless together == #[false, false] do throwError "Two Checks that meet did not run at the same time: {together}"
+  unless apart == #[true, false] do throwError "Two Checks run one after the other did not fail the first: {apart}"
 
 end
 

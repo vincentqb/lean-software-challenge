@@ -253,7 +253,7 @@ def rows : List (Row × Cells) := [
         testDriverArgs := #["own_test"], testDriverArgsPlace := { file := "lakefile.lean", line := 7 },
         ownTests := #[{ name := "own_test", kind := .script, place := { file := "lakefile.lean", line := 34 } }] } }
      tests := fun facts => pure { facts with ownTests := facts.ownTests.map ({ · with code := 2 }) } },
-    ⟨0, 0, 2, 0, 1⟩),
+    ⟨0, 0, 1, 0, 1⟩),
   ({ name := "owner-requires-hidden-dependency", owner? := some fun facts => do
       expect (!facts.lake.packages.isEmpty) "the golden requires no package"
       let facts ← edited "lakefile.lean" facts

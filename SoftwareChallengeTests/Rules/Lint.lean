@@ -19,7 +19,7 @@ def rejects (facts : Facts) (expected : Lint.Error → Bool) : Bool :=
 def pends (facts : Facts) (expected : Lint.Pending → Bool) : Bool :=
   (Lint.run facts).code == 2 && (errorsOf facts).isEmpty && (pendingOf facts).any expected
 
-def unbuiltRoot : Facts := withLake fun lake => { lake with exeRoots := lake.exeRoots.push `App.Tool }
+def unbuiltRoot : Facts := withLake fun lake => { lake with defaultExeRoots := lake.defaultExeRoots.push `App.Tool }
 
 #guard rejects unbuiltRoot (· matches .unaudited `App.Tool)
 
@@ -355,7 +355,7 @@ def mainless : Facts := withSolution ({ · with main? := none })
 
 #guard pends mainless (· matches .mainMissing)
 
-def library : Facts := { mainless with lake := { lake with exeRoots := #[] } }
+def library : Facts := { mainless with lake := { lake with defaultExeRoots := #[] } }
 
 #guard (Lint.run library).code == 0
 
@@ -397,5 +397,31 @@ def insideRepository : Facts := withLake fun lake => { lake with packageDir := "
 #guard (Lint.run { unreached with files := { files with lock := .decoded #[] } }).code == 1
 
 end
+
+
+meta def twoPrograms : Facts :=
+  { complete with
+    lake := { lake with defaultExeRoots := #[`App.WorldCode, `App.Tool] }
+    solution := { solution with inventory := { solution.inventory with
+      declarations := solution.inventory.declarations.push
+        { declaration `main `App.Tool 3 true with effects := true } } } }
+
+#guard !(errorsOf twoPrograms).any (· matches .declaredTwice ..)
+
+meta def generatedEquations : Facts :=
+  { complete with
+    solution := { solution with inventory := { solution.inventory with
+      declarations := solution.inventory.declarations ++
+        #[{ declaration `App.fold.eq_1 `App.Solution 0 false with written := false },
+          { declaration `App.fold.eq_1 `App.CoreCode 0 false with written := false }] } } }
+
+#guard !(errorsOf generatedEquations).any (· matches .declaredTwice ..)
+
+meta def writtenTwice : Facts :=
+  { complete with
+    solution := { solution with inventory := { solution.inventory with
+      declarations := solution.inventory.declarations.push (declaration `App.fold `App.Solution 30 true) } } }
+
+#guard (errorsOf writtenTwice).any (· matches .declaredTwice `App.fold _ _)
 
 end SoftwareChallengeTests.Rules.Lint

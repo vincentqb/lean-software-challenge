@@ -19,7 +19,7 @@ instance Lint.decidableOwns (challenge : ChallengeFacts) (module : Name) : Decid
   inferInstanceAs (Decidable (module ∈ challenge.closure ∨ (Role.ofName module).Owned))
 
 instance Lint.decidableProgram (lake : LakeFacts) : Decidable lake.Program :=
-  inferInstanceAs (Decidable (∃ root ∈ lake.exeRoots, Role.ofName root = .worldCode))
+  inferInstanceAs (Decidable (∃ root ∈ lake.defaultExeRoots, Role.ofName root = .worldCode))
 
 instance Lint.decidableNamedSolution : DecidablePred Name.NamedSolution
   | .anonymous => isFalse id

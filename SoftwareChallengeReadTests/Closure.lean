@@ -56,7 +56,7 @@ run_cmd Elab.Command.liftCoreM do
 
 run_cmd Elab.Command.liftCoreM do
   let unbuilt := readFixture `Unbuilt
-  let lake := { (← lakeOf #[fixture `Program]) with exeRoots := #[fixture `Program, unbuilt] }
+  let lake := { (← lakeOf #[fixture `Program]) with defaultExeRoots := #[fixture `Program, unbuilt] }
   let challenge := emptyChallenge .anonymous ""
   let solution ← readSolution lake challenge .lint
   let facts : Facts := { lake, files := default, challenge, solution }

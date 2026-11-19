@@ -202,8 +202,8 @@ private def solutionFile (facts : Facts) : String :=
   fileOf facts (solutionName facts)
 
 private def programFile? (facts : Facts) : Option String :=
-  let worldRoots := facts.lake.exeRoots.filter (Role.ofName · == .worldCode)
-  let roots := if worldRoots.isEmpty then facts.lake.exeRoots else worldRoots
+  let worldRoots := facts.lake.defaultExeRoots.filter (Role.ofName · == .worldCode)
+  let roots := if worldRoots.isEmpty then facts.lake.defaultExeRoots else worldRoots
   match roots with
   | #[root] => some (fileOf facts root)
   | _ => none
@@ -462,7 +462,7 @@ private def difference (facts : Facts) (listedNotDeclared declaredNotListed : Ar
 
 def Error.message (facts : Facts) : Error → Message
   | .unaudited module =>
-    if facts.lake.exeRoots.contains module && !facts.lake.modules.any (·.module == module) then
+    if facts.lake.defaultExeRoots.contains module && !facts.lake.modules.any (·.module == module) then
       let lakefile := lakefileOf facts
       { place := ⟨lakefile, 1⟩, what := s!"{module} is the root of the package's lean_exe, but no default target builds it"
         why := "so the audit cannot see main or check what it may do"
@@ -542,7 +542,7 @@ def Error.message (facts : Facts) : Error → Message
   | .mainOutsideProgram module =>
     let place := declarationPlace facts module `main
     let why := "but main runs the program, which does IO, and only WorldCode may"
-    if facts.lake.exeRoots.contains module then
+    if facts.lake.defaultExeRoots.contains module then
       let lakefile := lakefileOf facts
       let moved := renamedInto .worldCode module
       { place, what := s!"main is defined in {located facts module}, the root of the package's lean_exe", why

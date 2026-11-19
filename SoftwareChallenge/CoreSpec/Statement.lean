@@ -1,6 +1,6 @@
 module
 
-public import SoftwareChallenge.CoreSpec.Facts
+public import SoftwareChallenge.CoreSpec.Witness
 
 @[expose] public section
 
@@ -41,6 +41,7 @@ inductive Error where
   | derivedPartial (declaration module : Name)
   | witnessMissing (headline : Name)
   | witnessPredeclared (witness headline : Name)
+  | witnessMisstated (witness headline : Name)
   | unplainName (name : Name)
   | challengeLookup (candidates : Array SourceFact)
   | challengeAbsent (module : Name) (file : String)
@@ -56,6 +57,7 @@ inductive Error where
 
 inductive Setup where
   | lintDriver (found : String)
+  | testDriver (found : String)
   | builtinLint (place : Place)
   deriving BEq, Repr, Inhabited
 
@@ -73,18 +75,23 @@ structure Result where
 
 end Statement
 
-def ChallengeFacts.isReplaceable (challenge : ChallengeFacts) (name : Name) : Bool :=
-  challenge.replaceable.contains name
-
 def ChallengeFacts.othersOf (challenge : ChallengeFacts) (headline : HeadlineFact) : List Shape :=
   (challenge.headlines.toList.filter (·.target.constant.name != headline.target.constant.name)).map
     (·.target.constant.type)
+
+def Config.byLine (targets : Array TargetFact) : Array Name :=
+  ((targets.toList.mergeSort fun earlier later => earlier.place.line ≤ later.place.line).map
+    (·.constant.name)).toArray
+
+def Config.expected (challenge : ChallengeFacts) (solution : Name) : Config :=
+  { challenge := challenge.module, solution, theorems := Config.byLine challenge.theorems,
+    definitions := Config.byLine challenge.holes, axioms := standardAxioms }
 
 structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Prop where
   challengeFound : ∃ candidate, lake.challengeCandidates = #[candidate] ∧ candidate.module = challenge.module
   oneSolution : lake.OneSolution
   statementTarget : `statement ∈ lake.defaultTargets
-  programRooted : lake.exeRoots ≠ #[] → (∃ source ∈ lake.modules, Role.ofName source.module = .worldCode) →
+  programRooted : lake.defaultExeRoots ≠ #[] → (∃ source ∈ lake.modules, Role.ofName source.module = .worldCode) →
     lake.Program
   importsOnlySpecs : ∀ line ∈ challenge.runtimeImports, lake.Builds line.fact.name →
     Role.ofName line.fact.name = .coreSpec ∨ Role.ofName line.fact.name = .worldSpec
@@ -117,6 +124,9 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
     (∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index) →
       ∃ witness ∈ challenge.witnesses, witness.headline = headline.target.constant.name
   witnessesDerived : ∀ witness ∈ challenge.witnesses, witness.derived = true
+  witnessesStated : ∀ witness ∈ challenge.witnesses, ∀ headline ∈ challenge.headlines,
+    headline.target.constant.name = witness.headline →
+      witness.target.constant.type = headline.expectedWitness challenge
   terminatesNamesHole : ∀ termination ∈ challenge.terminating,
     ∃ hole ∈ challenge.holes, hole.constant.name = termination.definition
   terminatesOnKilledHeadline : ∀ termination ∈ challenge.terminating,
@@ -133,6 +143,7 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
   ownedDigested : ∀ path, lake.Owned challenge path → files.Digested path
   lockCurrent : files.lock = .missing ∨ files.LockCurrent
   lintDriven : lake.lintDriver = auditLintDriver := by rfl
+  testDriven : lake.testDriver = auditTestDriver := by rfl
   builtinLintOff : lake.builtinLint = none := by rfl
 
 end SoftwareChallenge

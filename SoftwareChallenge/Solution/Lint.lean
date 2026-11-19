@@ -35,7 +35,7 @@ theorem unauditedModules_eq_empty_iff (facts : Facts) : unauditedModules facts =
   filterMap_ite_eq_empty
 
 theorem unauditedExeRoots_eq_empty_iff (facts : Facts) : unauditedExeRoots facts = #[] ↔
-    ∀ root ∈ facts.lake.exeRoots, ∃ fact ∈ facts.solution.inventory.modules, fact.name = root :=
+    ∀ root ∈ facts.lake.defaultExeRoots, ∃ fact ∈ facts.solution.inventory.modules, fact.name = root :=
   filterMap_ite_eq_empty
 
 theorem unlintedModules_eq_empty_iff (facts : Facts) : unlintedModules facts = #[] ↔
@@ -203,26 +203,25 @@ private theorem firstModules_spec (declarations : List DeclarationFact) (init : 
         · simp [Std.HashMap.contains_insert]
       · exact covered other later
 
-theorem duplicates_eq_empty_iff (facts : Facts) : duplicates facts = #[] ↔
-    ∀ fact ∈ facts.solution.inventory.declarations, ∀ other ∈ facts.solution.inventory.declarations,
-      fact.name = other.name → fact.module = other.module := by
-  obtain ⟨recorded, -, covered⟩ := firstModules_spec facts.solution.inventory.declarations.toList {}
+theorem duplicatesIn_eq_empty_iff (declarations : Array DeclarationFact) : duplicatesIn declarations = #[] ↔
+    ∀ fact ∈ declarations, ∀ other ∈ declarations, fact.name = other.name → fact.module = other.module := by
+  obtain ⟨recorded, -, covered⟩ := firstModules_spec declarations.toList {}
   simp only [Array.foldl_toList] at recorded covered
-  have present : ∀ fact ∈ facts.solution.inventory.declarations,
-      ∃ module, (firstModules facts.solution.inventory.declarations)[fact.name]? = some module := by
+  have present : ∀ fact ∈ declarations,
+      ∃ module, (firstModules declarations)[fact.name]? = some module := by
     intro fact member
     have contained := covered fact (Array.mem_toList_iff.mpr member)
     rw [Std.HashMap.contains_eq_isSome_getElem?] at contained
     exact Option.isSome_iff_exists.mp contained
-  have kept : ∀ fact ∈ facts.solution.inventory.declarations, ∀ module,
-      (firstModules facts.solution.inventory.declarations)[fact.name]? = some module →
-        ∃ other ∈ facts.solution.inventory.declarations, other.name = fact.name ∧ other.module = module := by
+  have kept : ∀ fact ∈ declarations, ∀ module,
+      (firstModules declarations)[fact.name]? = some module →
+        ∃ other ∈ declarations, other.name = fact.name ∧ other.module = module := by
     intro fact _ module found
     rcases recorded fact.name module found with initial | ⟨other, member, named, moduled⟩
     · rw [Std.HashMap.getElem?_empty] at initial
       cases initial
     · exact ⟨other, Array.mem_toList_iff.mp member, named, moduled⟩
-  simp only [duplicates, Array.filterMap_eq_empty_iff]
+  simp only [duplicatesIn, Array.filterMap_eq_empty_iff]
   constructor
   · intro unique fact member other otherMember named
     obtain ⟨module, found⟩ := present fact member
@@ -244,6 +243,23 @@ theorem duplicates_eq_empty_iff (facts : Facts) : duplicates facts = #[] ↔
     · rfl
 
 
+theorem counted_eq_true {lake : LakeFacts} {fact : DeclarationFact} :
+    counted lake fact = true ↔ fact.Counted lake := by
+  unfold counted DeclarationFact.Counted
+  by_cases named : fact.name = `main <;> simp [named]
+
+theorem duplicates_eq_empty_iff (facts : Facts) : duplicates facts = #[] ↔
+    ∀ fact ∈ facts.solution.inventory.declarations, ∀ other ∈ facts.solution.inventory.declarations,
+      fact.Counted facts.lake → other.Counted facts.lake → fact.name = other.name → fact.module = other.module := by
+  rw [duplicates, duplicatesIn_eq_empty_iff]
+  simp only [Array.mem_filter, counted_eq_true]
+  constructor
+  · intro once fact member other otherMember counted otherCounted named
+    exact once fact ⟨member, counted⟩ other ⟨otherMember, otherCounted⟩ named
+  · rintro once fact ⟨member, counted⟩ other ⟨otherMember, otherCounted⟩ named
+    exact once fact member other otherMember counted otherCounted named
+
+
 private theorem image_iff {β : Type} {listed : Array Name} {declared : Array β} {name : β → Name} :
     ((∀ entry ∈ listed, ∃ found ∈ declared, name found = entry) ∧ ∀ found ∈ declared, name found ∈ listed) ↔
       ∀ entry, entry ∈ listed ↔ ∃ found ∈ declared, name found = entry := by
@@ -259,31 +275,25 @@ private theorem sameMembers_iff {listed expected : Array Name} :
   ⟨fun ⟨forward, backward⟩ entry => ⟨forward entry, backward entry⟩,
     fun same => ⟨fun entry => (same entry).mp, fun entry => (same entry).mpr⟩⟩
 
-theorem configMatches_iff (config : Config) (challenge : ChallengeFacts) (solution : Name) :
-    configMatches config challenge solution = true ↔ config.Matches challenge solution := by
-  simp only [configMatches, Config.Matches, Bool.and_eq_true, beq_iff_eq, Array.all_eq_true', Array.any_eq_true',
-    Array.contains_iff_mem, ← image_iff, ← sameMembers_iff, and_assoc]
-
 theorem comparatorErrors_eq_empty_iff (facts : Facts) : comparatorErrors facts = #[] ↔
-    ∃ config, facts.files.comparator = .decoded config ∧ ∃ solution ∈ facts.lake.modules,
-      Name.NamedSolution solution.module ∧ config.Matches facts.challenge solution.module := by
+    ∃ solution ∈ facts.lake.modules, Name.NamedSolution solution.module ∧
+      facts.files.comparator = .decoded (Config.expected facts.challenge solution.module) := by
   unfold comparatorErrors
   cases facts.files.comparator with
   | missing => simp
   | unreadable problem => simp
   | decoded config =>
-    simp only [Decoded.decoded.injEq, exists_eq_left']
+    simp only [Decoded.decoded.injEq]
     split
     · next found =>
       simp only [true_iff]
       obtain ⟨source, member, matched⟩ := Array.any_eq_true'.mp found
-      simp only [Bool.and_eq_true, decide_eq_true_eq, configMatches_iff] at matched
+      simp only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at matched
       exact ⟨source, member, matched⟩
     · next missing =>
       refine ⟨fun empty => absurd empty (by simp), ?_⟩
       rintro ⟨source, member, named, matched⟩
-      exact absurd (Array.any_eq_true'.mpr ⟨source, member, by simp [named, (configMatches_iff _ _ _).mpr matched]⟩)
-        missing
+      exact absurd (Array.any_eq_true'.mpr ⟨source, member, by simp [named, matched]⟩) missing
 
 theorem holds_iff (solution : SolutionFacts) (target : TargetFact) :
     solution.holds target = true ↔ solution.Holds target := by
@@ -554,9 +564,9 @@ theorem Lint.run_code_ne_zero_iff (facts : Facts) :
   simp only [Lint.run, ne_eq, Lint.code_eq_zero_iff, Classical.not_and_iff_not_or_not]
 
 private def killLake : LakeFacts :=
-  { packageDir := "/work", repository? := none, configFiles := #["lakefile.lean"],
+  { packageDir := "/work", configFiles := #["lakefile.lean"],
     modules := #[⟨`App.Solution, "App/Solution.lean"⟩], challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩],
-    exeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "",
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge",
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 private def killChallenge : ChallengeFacts :=
@@ -569,9 +579,7 @@ private def killDigests : Array Lock.Entry :=
 
 private def killFiles : FileFacts :=
   { lock := .decoded killDigests, digests := killDigests,
-    comparator := .decoded
-      { challenge := `Challenge, solution := `App.Solution, theorems := #[], definitions := #[],
-        axioms := standardAxioms } }
+    comparator := .decoded (Config.expected killChallenge `App.Solution) }
 
 private def killModule : ModuleFact :=
   { name := `App.Solution, file := "App/Solution.lean", usesModuleSystem := true, imports := #[] }
@@ -627,8 +635,7 @@ private theorem killComplete : Lint.Complete killFacts where
   proofsReadable := by simp [killFacts, killChallenge]
   ownedDigested := killOwnedDigested
   lockCurrent := ⟨killDigests, rfl, fun _ => rfl⟩
-  comparatorCurrent := ⟨_, rfl, ⟨`App.Solution, "App/Solution.lean"⟩, by simp [killFacts, killLake], rfl,
-    by simp [Config.Matches, killFacts, killChallenge, ChallengeFacts.theorems]⟩
+  comparatorCurrent := ⟨⟨`App.Solution, "App/Solution.lean"⟩, by simp [killFacts, killLake], rfl, rfl⟩
   oneSolution := killOneSolution
   statementTarget := by simp [killFacts, killLake]
   challengeUnimported := by simp [killFacts, killSolution]

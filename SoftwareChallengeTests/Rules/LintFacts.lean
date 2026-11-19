@@ -63,12 +63,11 @@ def dependency : PackageFact :=
     real := "/work/.lake/packages/software_challenge" }
 
 def lake : LakeFacts :=
-  { packageDir := "/work", repository? := some "/work",
-    configFiles := #["lakefile.lean", "lake-manifest.json", "lean-toolchain"],
+  { packageDir := "/work", configFiles := #["lakefile.lean", "lake-manifest.json", "lean-toolchain"],
     modules := #[source `App.CoreSpec "App/CoreSpec.lean", source `App.WorldSpec "App/WorldSpec.lean",
       source `App.CoreCode "App/CoreCode.lean", source `App.WorldCode "App/WorldCode.lean",
       source `App.Solution "App/Solution.lean"],
-    challengeCandidates := #[source `Challenge "Challenge.lean"], exeRoots := #[`App.WorldCode],
+    challengeCandidates := #[source `Challenge "Challenge.lean"], defaultExeRoots := #[`App.WorldCode],
     packages := #[dependency],
     defaultTargets := #[`App, `statement], builtinLint := none, testDriver := "software_challenge/test_challenge",
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }

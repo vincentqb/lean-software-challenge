@@ -37,7 +37,7 @@ run_cmd Elab.Command.liftCoreM do
 
 run_cmd Elab.Command.liftCoreM do
   let lake := { (← lakeOf #[fixture `Program, fixture `SecondProgram]) with
-    exeRoots := #[fixture `Program, fixture `SecondProgram] }
+    defaultExeRoots := #[fixture `Program, fixture `SecondProgram] }
   let solution ← readSolution lake unread .lint
   check (declaredIn solution `main == #[(fixture `Program, 7), (fixture `SecondProgram, 5)])
     s!"the two executables' main were not both recorded: {declaredIn solution `main}"

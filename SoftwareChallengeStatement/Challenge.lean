@@ -381,12 +381,12 @@ theorem Test.run_code_eq_zero_iff (facts : TestFacts) : (Test.run facts).code = 
         Test.Complete facts := by
   sorry
 
-theorem Test.run_code_le_two (facts : TestFacts) : (Test.run facts).code ≤ 2 := by
+theorem Test.run_code_le_one (facts : TestFacts) : (Test.run facts).code ≤ 1 := by
   sorry
 
-@[kills Test.run_code_le_two] theorem Test.run_code_le_two_rejects_unjudged :
+@[kills Test.run_code_le_one] theorem Test.run_code_le_one_rejects_unjudged :
     ¬ ∀ (facts : TestFacts),
-      ((fun (_ : TestFacts) => ({ failures := #[], timings := #[], code := 3 } : Test.Result)) facts).code ≤ 2 := by
+      ((fun (_ : TestFacts) => ({ failures := #[], timings := #[], code := 2 } : Test.Result)) facts).code ≤ 1 := by
   sorry
 
 theorem Test.run_code_ne_zero_iff (facts : TestFacts) :

@@ -40,10 +40,13 @@ def distinct (names : Array Name) : Array Name :=
   names.foldl (fun kept name => if kept.contains name then kept else kept.push name) #[]
 
 def packageModules (lake : LakeFacts) : Array Name :=
-  distinct (lake.modules.map (·.module) ++ lake.challengeCandidates.map (·.module) ++ lake.exeRoots)
+  distinct (lake.modules.map (·.module) ++ lake.challengeCandidates.map (·.module) ++ lake.defaultExeRoots)
 
 def catalog (lake : LakeFacts) (challenge : Name) : Array Name :=
-  distinct ((lake.modules.map (·.module)).filter (· != challenge))
+  let modules := distinct ((lake.modules.map (·.module)).filter (· != challenge))
+  let roots := modules.filter lake.defaultExeRoots.contains
+  let programs := roots.filter (Role.ofName · == .worldCode)
+  programs ++ modules.filter (!roots.contains ·) ++ roots.filter (!programs.contains ·)
 
 def fileOf (lake : LakeFacts) (module : Name) : String :=
   (((lake.modules ++ lake.challengeCandidates).find? (·.module == module)).map (·.file)).getD (sourcePath module)

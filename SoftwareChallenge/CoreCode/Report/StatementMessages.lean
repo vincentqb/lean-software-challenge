@@ -336,6 +336,13 @@ def Setup.message (lake : LakeFacts) : Setup → Message
       why := "so `lake lint` does not run the audit, and a `sorry` or an unproved headline goes unreported"
       fix := s!"Set `lintDriver := \"{auditLintDriver}\"` in the package block of {lakefile lake}, and {relock}"
       next := .build }
+  | .testDriver found =>
+    { place := atLine (lakefile lake) 1
+      what := if found.isEmpty then s!"the package block of {lakefile lake} does not set `testDriver`"
+        else s!"the package block of {lakefile lake} sets `testDriver := \"{found}\"`"
+      why := "so `lake test` does not run the Checks, and a world claim nothing tests goes unreported"
+      fix := s!"Set `testDriver := \"{auditTestDriver}\"` in the package block of {lakefile lake}, and {relock}"
+      next := .build }
   | .builtinLint place =>
     { place := atLine place.file place.line
       what := s!"the package block of {lakefile lake} sets `builtinLint := true`"
@@ -548,6 +555,15 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
         stated one may not be the witness they call for"
       fix := s!"Delete theorem {witness} from {challenge.file}, or rename it if it is a headline of its own, and \
         {relock}"
+      next := .build }
+  | .witnessMisstated witness headline =>
+    { place := placeOf challenge witness
+      what := s!"{witness}, which `@[kills {writtenOf challenge headline}]` derived, does not state the witness that \
+        the binders of {headline} call for"
+      why := s!"so it may not show that some input meets the preconditions of {headline}, and no edit to the \
+        editable files can fix that, because software_challenge's witness derivation wrote it"
+      fix := s!"Update software_challenge in {lakefile lake} to a version whose derivation agrees with its \
+        specification, and {relock}"
       next := .build }
   | .unplainName name =>
     let place := placeOf challenge name

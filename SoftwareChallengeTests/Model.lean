@@ -38,7 +38,7 @@ def hidden (lake : LakeFacts) : Bool :=
 
 def comparator (base candidate : Facts) : Verdict :=
   match Statement.solution? base.lake, hidden base.lake with
-  | some solution, false => judge base.challenge (Statement.configOf base.challenge solution) candidate.solution
+  | some solution, false => judge base.challenge (Config.expected base.challenge solution) candidate.solution
   | _, _ => .cannotJudge
 
 def testFacts (facts : Facts) (libraryPlace : Place) : TestFacts :=

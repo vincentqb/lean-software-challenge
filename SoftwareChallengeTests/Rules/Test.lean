@@ -57,11 +57,15 @@ def movedCheck : TestFacts := { complete with checks := #[passed { agrees with p
 
 def ownFails : TestFacts := { complete with ownTests := #[⟨ownScript, 2⟩, ⟨ownLibrary, 0⟩] }
 
-#guard refuses ownFails 2 (· matches .ownTest { test := { name := "own_test", .. }, code := 2 })
+#guard refuses ownFails 1 (· matches .ownTest { test := { name := "own_test", .. }, code := 2 })
+
+def ownCrashes : TestFacts := { complete with ownTests := #[⟨ownScript, 3⟩, ⟨ownLibrary, 0⟩] }
+
+#guard (Test.run ownCrashes).code == 1
 
 def bothFail : TestFacts := { failing with ownTests := #[⟨ownScript, 2⟩, ⟨ownLibrary, 0⟩] }
 
-#guard (Test.run bothFail).code == 2 && (Test.run bothFail).failures.size == 2
+#guard (Test.run bothFail).code == 1 && (Test.run bothFail).failures.size == 2
 
 def ownNotRun : TestFacts := { complete with ownTests := #[⟨ownScript, 0⟩] }
 

@@ -65,7 +65,7 @@ def statementRejecting : List (LakeFacts × FileFacts × ChallengeFacts) := [
   (baseLake, baseFiles, terminatesElsewhere), (baseLake, baseFiles, closedHypothesis),
   (baseLake, baseFiles, privateAuxiliary), (baseLake, baseFiles, ownedImpure), (baseLake, baseFiles, specImportsCode),
   (baseLake, baseFiles, ownedClaimOutside), (baseLake, baseFiles, derivedSpec), (baseLake, baseFiles, unwitnessed),
-  (baseLake, baseFiles, predeclared), ({ baseLake with challengeCandidates := #[] }, baseFiles, baseChallenge),
+  (baseLake, baseFiles, predeclared), (baseLake, baseFiles, misstatedWitness), ({ baseLake with challengeCandidates := #[] }, baseFiles, baseChallenge),
   (otherChallenge, baseFiles, baseChallenge), (noSolution, baseFiles, baseChallenge),
   ({ baseLake with defaultTargets := #[] }, baseFiles, baseChallenge), (toolingRoot, baseFiles, baseChallenge),
   (baseLake, { baseFiles with lock := .missing, digests := digests.pop }, baseChallenge),
@@ -73,7 +73,8 @@ def statementRejecting : List (LakeFacts × FileFacts × ChallengeFacts) := [
   (baseLake, { baseFiles with lock := .unreadable "expected an object" }, baseChallenge)]
 
 def setupRejecting : List LakeFacts :=
-  [{ baseLake with lintDriver := "" }, { baseLake with builtinLint := some ⟨"lakefile.lean", 4⟩ }]
+  [{ baseLake with lintDriver := "" }, { baseLake with testDriver := "" },
+    { baseLake with builtinLint := some ⟨"lakefile.lean", 4⟩ }]
 
 def reportedSetup (lake : LakeFacts) : List Statement.Setup :=
   (Statement.run lake baseFiles baseChallenge).setup.toList

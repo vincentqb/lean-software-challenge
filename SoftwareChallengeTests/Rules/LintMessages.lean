@@ -137,7 +137,7 @@ def errorSays (facts : Facts) (error : Lint.Error) (fragments : List String) : B
 def pendingSays (facts : Facts) (found : Lint.Pending) (fragments : List String) : Bool :=
   says (found.message facts) fragments
 
-#guard errorSays (withLake fun lake => { lake with exeRoots := lake.exeRoots.push `App.Tool }) (.unaudited `App.Tool)
+#guard errorSays (withLake fun lake => { lake with defaultExeRoots := lake.defaultExeRoots.push `App.Tool }) (.unaudited `App.Tool)
   ["lakefile.lean:1: App.Tool is the root of the package's lean_exe, but no default target builds it",
     "mark that lean_exe `@[default_target]`", "delete owned.lock and run `lake build`, then run `lake lint`."]
 #guard errorSays complete (.unaudited `App.CoreCode) ["App/CoreCode.lean:1:", "`lake build App.CoreCode`"]
@@ -207,7 +207,7 @@ def pendingSays (facts : Facts) (found : Lint.Pending) (fragments : List String)
 #guard errorSays complete (.mainOutsideProgram `App.CoreCode)
   ["App/CoreCode.lean:1: main is defined in App.CoreCode (CoreCode), but main runs the program, which does IO, and only WorldCode may",
     "Move `def main` from App/CoreCode.lean to App/WorldCode.lean, outside any namespace"]
-#guard errorSays (withLake ({ · with exeRoots := #[`App.Main] })) (.mainOutsideProgram `App.Main)
+#guard errorSays (withLake ({ · with defaultExeRoots := #[`App.Main] })) (.mainOutsideProgram `App.Main)
   ["main is defined in App.Main, outside the package, the root of the package's lean_exe",
     "set that lean_exe's `root` to a WorldCode module, such as App.WorldCode.Main"]
 #guard errorSays (withSolution fun solution => { solution with

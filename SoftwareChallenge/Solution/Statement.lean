@@ -98,17 +98,17 @@ theorem targetErrors_eq_empty {lake : LakeFacts} : targetErrors lake = #[] ↔ `
   · simp [listed]
 
 theorem programErrors_eq_empty {lake : LakeFacts} :
-    programErrors lake = #[] ↔ (lake.exeRoots ≠ #[] →
+    programErrors lake = #[] ↔ (lake.defaultExeRoots ≠ #[] →
       (∃ source ∈ lake.modules, Role.ofName source.module = .worldCode) → lake.Program) := by
   unfold programErrors LakeFacts.Program
-  by_cases empty : lake.exeRoots = #[]
+  by_cases empty : lake.defaultExeRoots = #[]
   · simp [empty]
   · by_cases world : ∃ source ∈ lake.modules, Role.ofName source.module = .worldCode
-    · by_cases rooted : ∃ root ∈ lake.exeRoots, Role.ofName root = .worldCode
-      · have rootedAny : lake.exeRoots.any (Role.ofName · == .worldCode) = true := by
+    · by_cases rooted : ∃ root ∈ lake.defaultExeRoots, Role.ofName root = .worldCode
+      · have rootedAny : lake.defaultExeRoots.any (Role.ofName · == .worldCode) = true := by
           simpa [Array.any_eq_true'] using rooted
         simp [rootedAny, rooted]
-      · have rootedAny : lake.exeRoots.any (Role.ofName · == .worldCode) = false := by
+      · have rootedAny : lake.defaultExeRoots.any (Role.ofName · == .worldCode) = false := by
           simpa [Array.any_eq_false'] using rooted
         have worldAny : lake.modules.any (Role.ofName ·.module == .worldCode) = true := by
           simpa [Array.any_eq_true'] using world
@@ -525,13 +525,37 @@ theorem needsWitness_eq_true {challenge : ChallengeFacts} {headline : HeadlineFa
     simp only [Telescope.binderAt, Bool.and_eq_true, bne_iff_ne, ne_eq]
     exact ⟨(Telescope.kindAt_ne_claim_iff found).mpr notClaim, Telescope.mentions_any_iff.mpr mentions⟩
 
+theorem misstated_eq_false {challenge : ChallengeFacts} {witness : WitnessFact}
+    (stated : ∀ headline ∈ challenge.headlines, headline.target.constant.name = witness.headline →
+      witness.target.constant.type = headline.expectedWitness challenge) : misstated challenge witness = false := by
+  unfold misstated
+  rw [Bool.eq_false_iff]
+  intro found
+  obtain ⟨headline, member, matched⟩ := Array.any_eq_true'.mp found
+  simp only [Bool.and_eq_true, beq_iff_eq, bne_iff_ne, ne_eq] at matched
+  exact matched.2 (stated headline member matched.1)
+
+theorem stated_of_misstated {challenge : ChallengeFacts} {witness : WitnessFact}
+    (accepted : misstated challenge witness = false) :
+    ∀ headline ∈ challenge.headlines, headline.target.constant.name = witness.headline →
+      witness.target.constant.type = headline.expectedWitness challenge := by
+  intro headline member named
+  apply Classical.byContradiction
+  intro differs
+  have found : misstated challenge witness = true :=
+    Array.any_eq_true'.mpr ⟨headline, member, by simp [named, differs]⟩
+  simp [found] at accepted
+
 theorem witnessErrors_empty {challenge : ChallengeFacts}
     (witnessed : ∀ headline ∈ challenge.headlines,
       (∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index) →
         ∃ witness ∈ challenge.witnesses, witness.headline = headline.target.constant.name)
-    (derived : ∀ witness ∈ challenge.witnesses, witness.derived = true) : witnessErrors challenge = #[] := by
+    (derived : ∀ witness ∈ challenge.witnesses, witness.derived = true)
+    (stated : ∀ witness ∈ challenge.witnesses, ∀ headline ∈ challenge.headlines,
+      headline.target.constant.name = witness.headline →
+        witness.target.constant.type = headline.expectedWitness challenge) : witnessErrors challenge = #[] := by
   simp only [witnessErrors, Array.append_eq_empty_iff, Array.filterMap_eq_empty_iff]
-  constructor
+  refine ⟨⟨?_, ?_⟩, ?_⟩
   · intro headline member
     cases needs : needsWitness challenge headline
     · simp
@@ -541,6 +565,8 @@ theorem witnessErrors_empty {challenge : ChallengeFacts}
       simp [found]
   · intro witness member
     simp [derived witness member]
+  · intro witness member
+    simp [misstated_eq_false (stated witness member)]
 
 theorem witnessed_of_witnessErrors {challenge : ChallengeFacts} (witnessEmpty : witnessErrors challenge = #[])
     (killed : ∀ headline ∈ challenge.headlines,
@@ -548,10 +574,13 @@ theorem witnessed_of_witnessErrors {challenge : ChallengeFacts} (witnessEmpty : 
     (∀ headline ∈ challenge.headlines,
       (∃ index, ¬ headline.Claim challenge.claims index ∧ headline.Mentions challenge.isReplaceable index) →
         ∃ witness ∈ challenge.witnesses, witness.headline = headline.target.constant.name) ∧
-      ∀ witness ∈ challenge.witnesses, witness.derived = true := by
+      (∀ witness ∈ challenge.witnesses, witness.derived = true) ∧
+      ∀ witness ∈ challenge.witnesses, ∀ headline ∈ challenge.headlines,
+        headline.target.constant.name = witness.headline →
+          witness.target.constant.type = headline.expectedWitness challenge := by
   simp only [witnessErrors, Array.append_eq_empty_iff, Array.filterMap_eq_empty_iff] at witnessEmpty
-  obtain ⟨missing, predeclared⟩ := witnessEmpty
-  constructor
+  obtain ⟨⟨missing, predeclared⟩, misstatedEmpty⟩ := witnessEmpty
+  refine ⟨?_, ?_, ?_⟩
   · intro headline member needs
     have accepted := missing headline member
     rw [needsWitness_eq_true.mpr needs, hasKill_eq_true.mpr (killed headline member)] at accepted
@@ -564,6 +593,11 @@ theorem witnessed_of_witnessErrors {challenge : ChallengeFacts} (witnessEmpty : 
     cases stated : witness.derived
     · simp [stated] at accepted
     · rfl
+  · intro witness member
+    have accepted := misstatedEmpty witness member
+    cases judged : misstated challenge witness
+    · exact stated_of_misstated judged
+    · simp [judged] at accepted
 
 theorem holeErrors_eq_empty {challenge : ChallengeFacts} :
     holeErrors challenge = #[] ↔ ∀ hole ∈ challenge.holes,
@@ -680,17 +714,17 @@ theorem errors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : Chal
   · simp [found, isEmpty_eq_false found, findings, setupErrors]
 
 theorem setupOf_eq_empty {lake : LakeFacts} :
-    setupOf lake = #[] ↔ lake.lintDriver = auditLintDriver ∧ lake.builtinLint = none := by
-  unfold setupOf lintDriverSetup builtinLintSetup
-  by_cases driven : lake.lintDriver = auditLintDriver
-  · cases linted : lake.builtinLint <;> simp [driven]
-  · cases linted : lake.builtinLint <;> simp [driven]
+    setupOf lake = #[] ↔ lake.lintDriver = auditLintDriver ∧ lake.testDriver = auditTestDriver ∧
+      lake.builtinLint = none := by
+  unfold setupOf lintDriverSetup testDriverSetup builtinLintSetup
+  by_cases driven : lake.lintDriver = auditLintDriver <;> by_cases tested : lake.testDriver = auditTestDriver <;>
+    cases linted : lake.builtinLint <;> simp [driven, tested]
 
 theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
     setupOf lake = #[] ∧ errors lake files challenge = #[] ↔ Complete lake files challenge := by
   rw [setupOf_eq_empty, errors_eq_empty]
   constructor
-  · rintro ⟨⟨driven, unlinted⟩, locking, found⟩
+  · rintro ⟨⟨driven, tested, unlinted⟩, locking, found⟩
     obtain ⟨digestedOwned, current⟩ := lockingErrors_eq_empty.mp locking
     simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
       Array.append_eq_empty_iff, and_assoc] at found
@@ -725,7 +759,8 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
       holesMentioned := holeErrors_eq_empty.mp holeEmpty
       hypothesesClaimed := hypothesisErrors_eq_empty.mp hypothesisEmpty
       preconditionsWitnessed := witnesses.1
-      witnessesDerived := witnesses.2
+      witnessesDerived := witnesses.2.1
+      witnessesStated := witnesses.2.2
       terminatesNamesHole := fun termination member => (terminations termination member).1
       terminatesOnKilledHeadline := fun termination member => (terminations termination member).2.1
       terminatesMentionsHole := fun termination member => (terminations termination member).2.2
@@ -736,9 +771,10 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
       ownedDigested := digestedOwned
       lockCurrent := current
       lintDriven := driven
+      testDriven := tested
       builtinLintOff := unlinted }
   · intro complete
-    refine ⟨⟨complete.lintDriven, complete.builtinLintOff⟩, ?_, ?_⟩
+    refine ⟨⟨complete.lintDriven, complete.testDriven, complete.builtinLintOff⟩, ?_, ?_⟩
     · exact lockingErrors_eq_empty.mpr ⟨complete.ownedDigested, complete.lockCurrent⟩
     · simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
         Array.append_eq_empty_iff, and_assoc]
@@ -754,7 +790,7 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
         duplicateErrors_eq_empty.mpr complete.headlinesDistinct,
         mentionErrors_empty complete.headlinesMentionHoles, unmarkedErrors_empty complete.killsMarked,
         noKillErrors_empty complete.headlinesKilled, killErrors_empty complete.killsNameHeadlines complete.killsReject,
-        witnessErrors_empty complete.preconditionsWitnessed complete.witnessesDerived,
+        witnessErrors_empty complete.preconditionsWitnessed complete.witnessesDerived complete.witnessesStated,
         holeErrors_eq_empty.mpr complete.holesMentioned,
         terminationErrors_eq_empty.mpr fun termination member =>
           ⟨complete.terminatesNamesHole termination member, complete.terminatesOnKilledHeadline termination member,
@@ -792,9 +828,9 @@ theorem Statement.run_code_ne_zero_iff (lake : LakeFacts) (files : FileFacts) (c
   exact Classical.not_and_iff_not_or_not
 
 private def acceptedLake : LakeFacts :=
-  { packageDir := "", repository? := none, configFiles := #[], modules := #[⟨`Solution, "Solution.lean"⟩],
-    challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], exeRoots := #[], packages := #[],
-    defaultTargets := #[`statement], builtinLint := none, testDriver := "", testDriverArgs := #[],
+  { packageDir := "", configFiles := #[], modules := #[⟨`Solution, "Solution.lean"⟩],
+    challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], defaultExeRoots := #[], packages := #[],
+    defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
     testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 private def acceptedFiles : FileFacts :=
@@ -829,6 +865,7 @@ private theorem accepted : Statement.Complete acceptedLake acceptedFiles accepte
   hypothesesClaimed := by simp [acceptedChallenge]
   preconditionsWitnessed := by simp [acceptedChallenge]
   witnessesDerived := by simp [acceptedChallenge]
+  witnessesStated := by simp [acceptedChallenge]
   terminatesNamesHole := by simp [acceptedChallenge]
   terminatesOnKilledHeadline := by simp [acceptedChallenge]
   terminatesMentionsHole := by simp [acceptedChallenge]

@@ -9,9 +9,9 @@ meta section
 open Lean SoftwareChallenge SoftwareChallenge.Read SoftwareChallengeReadTests
 
 def sample : LakeFacts := {
-  packageDir := "/work/a package", repository? := some "/work", configFiles := #["lakefile.lean", "lean-toolchain"]
+  packageDir := "/work/a package", configFiles := #["lakefile.lean", "lean-toolchain"]
   modules := #[⟨`App.CoreCode, "App/CoreCode.lean"⟩, ⟨`App.«weird name», "App/weird name.lean"⟩]
-  challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], exeRoots := #[`App.WorldCode]
+  challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], defaultExeRoots := #[`App.WorldCode]
   packages := #[{ name := `lib, configured := "../lib", real := "/real/lib", overridden := true }]
   defaultTargets := #[`App, `statement]
   builtinLint := some ⟨"lakefile.lean", 4⟩, lintDriver := "software_challenge/lint_challenge"
@@ -24,7 +24,7 @@ def written : String := "{\"packageDir\": \"/work/a package\", \"repository\": \
   \"modules\": [{\"module\": \"App.CoreCode\", \"file\": \"App/CoreCode.lean\"},
     {\"module\": \"App.«weird name»\", \"file\": \"App/weird name.lean\"}],
   \"challengeCandidates\": [{\"module\": \"Challenge\", \"file\": \"Challenge.lean\"}],
-  \"exeRoots\": [\"App.WorldCode\"],
+  \"defaultExeRoots\": [\"App.WorldCode\"],
   \"packages\": [{\"name\": \"lib\", \"configured\": \"../lib\", \"real\": \"/real/lib\", \"overridden\": true}],
   \"defaultTargets\": [\"App\", \"statement\"], \"builtinLint\": {\"file\": \"lakefile.lean\", \"line\": 4},
   \"lintDriver\": \"software_challenge/lint_challenge\",
@@ -42,7 +42,7 @@ def parsed (text : String) : Option LakeFacts :=
 run_cmd Elab.Command.liftCoreM do
   check (parsed (renderLake sample) == some sample) "renderLake does not read back through parseLake"
   check (parsed written == some sample) "the JSON object a lakefile writes did not read as the Lake facts it names"
-  let bare := { sample with repository? := none, builtinLint := none, lintDriver := "" }
+  let bare := { sample with builtinLint := none, lintDriver := "" }
   check (parsed (renderLake bare) == some bare)
     "Lake facts without a repository, builtinLint, or lintDriver did not read back"
   check (contains (renderLake bare) "\"builtinLint\": null" && !contains (renderLake bare) "\"repository\"")

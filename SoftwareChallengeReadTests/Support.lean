@@ -16,10 +16,10 @@ def contains (text fragment : String) : Bool := (text.splitOn fragment).length >
 def lakeOf (modules : Array Name) (challenge? : Option Name := none) (inputs : Array String := #[]) :
     IO LakeFacts := do
   return {
-    packageDir := (← IO.currentDir).toString, repository? := none, configFiles := #["lakefile.lean"]
+    packageDir := (← IO.currentDir).toString, configFiles := #["lakefile.lean"]
     modules := modules.map fun module => ⟨module, sourcePath module⟩
     challengeCandidates := (challenge?.map fun module => #[⟨module, sourcePath module⟩]).getD #[]
-    exeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := ""
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge"
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs }
 
 def challengeNamed (module : Name) : IO ChallengeFacts := do

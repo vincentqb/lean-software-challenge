@@ -147,9 +147,9 @@ def ownedFile? (lake : LakeFacts) (challenge : ChallengeFacts) (path : String) :
   else if path = "lakefile.lean" ∨ path = "lakefile.toml" ∨ lake.configFiles.contains path then some .lakefile
   else match lake.modules.find? (·.file == path) with
     | some source =>
-      if challenge.closure.contains source.module then some (.closureModule source.module)
-      else if Role.ofName source.module == .coreSpec || Role.ofName source.module == .worldSpec then
+      if Role.ofName source.module == .coreSpec || Role.ofName source.module == .worldSpec then
         some (.specModule source.module)
+      else if challenge.closure.contains source.module then some (.closureModule source.module)
       else none
     | none => none
 
@@ -169,16 +169,12 @@ def targetErrors (lake : LakeFacts) : Array Error :=
   if lake.defaultTargets.contains `statement then #[] else #[.noStatementTarget]
 
 def programErrors (lake : LakeFacts) : Array Error :=
-  if lake.exeRoots.isEmpty || !lake.modules.any (Role.ofName ·.module == .worldCode) ||
-      lake.exeRoots.any (Role.ofName · == .worldCode) then #[]
-  else #[.exeRootsOutsideWorldCode lake.exeRoots]
+  if lake.defaultExeRoots.isEmpty || !lake.modules.any (Role.ofName ·.module == .worldCode) ||
+      lake.defaultExeRoots.any (Role.ofName · == .worldCode) then #[]
+  else #[.exeRootsOutsideWorldCode lake.defaultExeRoots]
 
 def specRole (module : Name) : Bool :=
   Role.ofName module == .coreSpec || Role.ofName module == .worldSpec
-
-def statementRoots (lake : LakeFacts) (challenge : Name) : Array Name :=
-  #[challenge] ++ ((lake.modules.filter fun source => specRole source.module && source.module != challenge).map
-    (·.module))
 
 def ownedRoots (lake : LakeFacts) (challenge : ChallengeFacts) : Array Name :=
   (lake.modules.filter fun source => source.module != challenge.module && ownsModule challenge source.module).map
@@ -289,14 +285,22 @@ def hypothesisErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.headlines.flatMap fun headline =>
     ((closedHypotheses challenge headline).map (Error.unnamedHypothesis headline.target.constant.name)).toArray
 
+def misstated (challenge : ChallengeFacts) (witness : WitnessFact) : Bool :=
+  challenge.headlines.any fun headline =>
+    headline.target.constant.name == witness.headline &&
+      witness.target.constant.type != headline.expectedWitness challenge
+
 def witnessErrors (challenge : ChallengeFacts) : Array Error :=
   (challenge.headlines.filterMap fun headline =>
     if needsWitness challenge headline && hasKill challenge headline.target.constant.name &&
         !challenge.witnesses.any (·.headline == headline.target.constant.name) then
       some (.witnessMissing headline.target.constant.name)
     else none) ++
+  (challenge.witnesses.filterMap fun witness =>
+    if witness.derived then none else some (.witnessPredeclared witness.target.constant.name witness.headline)) ++
   challenge.witnesses.filterMap fun witness =>
-    if witness.derived then none else some (.witnessPredeclared witness.target.constant.name witness.headline)
+    if misstated challenge witness then some (.witnessMisstated witness.target.constant.name witness.headline)
+    else none
 
 def terminationErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.terminating.flatMap fun termination =>
@@ -348,22 +352,17 @@ def errors (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) :
   else if !locking.isEmpty then locking ++ solutionErrors lake
   else findings lake challenge
 
-def byLine (targets : Array TargetFact) : Array Name :=
-  ((targets.toList.mergeSort fun earlier later => earlier.place.line ≤ later.place.line).map
-    (·.constant.name)).toArray
-
-def configOf (challenge : ChallengeFacts) (solution : Name) : Config :=
-  { challenge := challenge.module, solution, theorems := byLine challenge.theorems,
-    definitions := byLine challenge.holes, axioms := standardAxioms }
-
 def writesOf (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Writes :=
   { lock? := match files.lock with
       | .missing => some files.digests
       | _ => none
-    config? := (solution? lake).map (configOf challenge) }
+    config? := (solution? lake).map (Config.expected challenge) }
 
 def lintDriverSetup (lake : LakeFacts) : Array Setup :=
   if lake.lintDriver = auditLintDriver then #[] else #[.lintDriver lake.lintDriver]
+
+def testDriverSetup (lake : LakeFacts) : Array Setup :=
+  if lake.testDriver = auditTestDriver then #[] else #[.testDriver lake.testDriver]
 
 def builtinLintSetup (lake : LakeFacts) : Array Setup :=
   match lake.builtinLint with
@@ -371,7 +370,7 @@ def builtinLintSetup (lake : LakeFacts) : Array Setup :=
   | none => #[]
 
 def setupOf (lake : LakeFacts) : Array Setup :=
-  lintDriverSetup lake ++ builtinLintSetup lake
+  lintDriverSetup lake ++ testDriverSetup lake ++ builtinLintSetup lake
 
 def run (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Result :=
   let setup := setupOf lake

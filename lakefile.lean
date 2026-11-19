@@ -4,7 +4,7 @@ open Lean Lake DSL
 package «software_challenge» where
   fixedToolchain := true
   lintDriver := "software_challenge/lint_challenge"
-  testDriver := "test_challenge"
+  testDriver := "software_challenge/test_challenge"
   testDriverArgs := #["SoftwareChallengeTests", "SoftwareChallengeReadTests", "real_runs"]
   leanOptions := #[
     ⟨`autoImplicit, false⟩,
@@ -91,8 +91,10 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
   let challenge? ← match roots with
     | [root] => (pkg.findModule? root).filterM (·.leanFile.pathExists)
     | _ => pure none
+  let defaultExes := pkg.leanExes.filter fun exe => pkg.defaultTargets.contains exe.name
   let mut catalog := #[]
-  for root in (← (← pkg.defaultModules.fetch).await) ++ challenge?.toArray do
+  for root in (← (← pkg.defaultModules.fetch).await) ++ defaultExes.filterMap (pkg.findModule? ·.config.root) ++
+      challenge?.toArray do
     for mod in (← (← root.transImports.fetch).await).push root do
       unless mod.pkg.keyName != pkg.keyName || (challenge?.toArray ++ catalog).any (·.name == mod.name) do
         catalog := catalog.push mod
@@ -107,7 +109,7 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
   let importers ← challenge?.elim (pure #[]) fun challenge => catalog.filterM fun mod => do
     return (← (← mod.imports.fetch).await).any (·.name == challenge.name)
   let tops := catalog.filter fun mod => !imports.any (·.2.any (·.name == mod.name))
-  let exeRoots := pkg.leanExes.map (·.config.root)
+  let defaultExeRoots := defaultExes.map (·.config.root)
   let dir ← IO.FS.realPath pkg.dir
   let overridden ← overriddenPackages (← getWorkspace).packageOverridesFile
   let packages ← ((← getWorkspace).packages.filter (!·.isRoot)).mapM fun dep => do
@@ -117,7 +119,7 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
   let fields := [("packageDir", toJson dir.toString), ("configFiles", toJson configs),
     ("modules", toJson (catalog.map source)),
     ("challengeCandidates", toJson (roots.filterMap (pkg.findModule? · |>.map source))),
-    ("exeRoots", toJson exeRoots), ("packages", toJson packages), ("defaultTargets", toJson pkg.defaultTargets),
+    ("defaultExeRoots", toJson defaultExeRoots), ("packages", toJson packages), ("defaultTargets", toJson pkg.defaultTargets),
     ("builtinLint", ← if pkg.config.builtinLint? == some true then placeIn pkg (·.contains "builtinLint")
       else pure Json.null),
     ("lintDriver", toJson pkg.lintDriver), ("testDriver", toJson pkg.testDriver),
@@ -125,7 +127,7 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
     ("testDriverArgsPlace", ← placeIn pkg (·.contains "testDriverArgs")),
     ("ownTests", toJson (← (testArgs.filterMapM (ownTest pkg) : IO (Array Json)))), ("inputs", toJson inputs)]
   return { text := (Json.mkObj fields).pretty, inputs, challenge?, catalog, owned, importers
-           lintTargets := ((tops.filter (!exeRoots.contains ·.name)) ++ tops.filter (exeRoots.contains ·.name)).map
+           lintTargets := ((tops.filter (!defaultExeRoots.contains ·.name)) ++ tops.filter (defaultExeRoots.contains ·.name)).map
              (·.name.toString) }
 
 def stepDir (pkg : Package) : System.FilePath := pkg.buildDir / "softwareChallenge"

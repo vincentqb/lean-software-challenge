@@ -8,57 +8,6 @@ namespace SoftwareChallenge
 
 open Lean
 
-def Shape.constants : Shape → List Name
-  | .const name _ => [name]
-  | .app function argument => function.constants ++ argument.constants
-  | .lam type body | .forallE type body => type.constants ++ body.constants
-  | .letE type value body => type.constants ++ value.constants ++ body.constants
-  | .proj _ _ value => value.constants
-  | .bvar _ | .fvar _ | .mvar _ | .sort _ | .natLit _ | .strLit _ => []
-
-def Shape.refers (index : Nat) : Shape → Bool
-  | .bvar found => found == index
-  | .app function argument => function.refers index || argument.refers index
-  | .lam type body | .forallE type body => type.refers index || body.refers (index + 1)
-  | .letE type value body => type.refers index || value.refers index || body.refers (index + 1)
-  | .proj _ _ value => value.refers index
-  | .fvar _ | .mvar _ | .sort _ | .const _ _ | .natLit _ | .strLit _ => false
-
-def Shape.concludes? (shape : Shape) : Option Name :=
-  match shape.conclusion.appHead with
-  | .const name _ => some name
-  | _ => none
-
-def ChallengeFacts.isClaim (challenge : ChallengeFacts) : Name → Bool :=
-  challenge.claims.contains
-
-namespace Telescope
-
-def depended (telescope : List BinderFact) (index : Nat) : Bool :=
-  (List.range telescope.length).any fun later =>
-    decide (index < later) && ((telescope[later]?).map fun binder => binder.type.refers (later - 1 - index)).getD false
-
-def kindAt (claims : Name → Bool) (telescope : List BinderFact) (index : Nat) (binder : BinderFact) : BinderKind :=
-  if depended telescope index || !binder.prop then .input
-  else if binder.meaning.concludes?.any claims then .claim
-  else .precondition
-
-def refersAt (index : Nat) (binder : BinderFact) : List Nat :=
-  (List.range index).filter fun earlier => binder.type.refers (index - 1 - earlier)
-
-def binderAt (claims replaceable : Name → Bool) (telescope : List BinderFact) (index : Nat) (binder : BinderFact) :
-    Binder :=
-  { kind := kindAt claims telescope index binder, prop := binder.prop
-    mentions := binder.meaning.constants.any replaceable, refers := refersAt index binder }
-
-def summary (claims replaceable : Name → Bool) (telescope : List BinderFact) : List Binder :=
-  telescope.zipIdx.map fun (binder, index) => binderAt claims replaceable telescope index binder
-
-end Telescope
-
-def HeadlineFact.binders (challenge : ChallengeFacts) (headline : HeadlineFact) : List Binder :=
-  Telescope.summary challenge.isClaim challenge.isReplaceable headline.telescope
-
 def HeadlineFact.claimsWith (claims : Name → Bool) (headline : HeadlineFact) : Array (Nat × Name × String) :=
   (headline.telescope.zipIdx.filterMap fun (binder, index) =>
     if Telescope.kindAt claims headline.telescope index binder == .claim then

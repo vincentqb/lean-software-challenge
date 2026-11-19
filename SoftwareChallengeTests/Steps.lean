@@ -2,6 +2,7 @@ module
 
 meta import SoftwareChallenge.Steps.Schedule
 meta import SoftwareChallenge.Steps.Replay
+meta import SoftwareChallenge.Steps.Test
 
 meta section
 
@@ -43,5 +44,19 @@ run_cmd Elab.Command.liftCoreM do
 
 #guard Replay.lineFor `A.b { exitCode := 1, stdout := "bwrap: Can't bind mount", stderr := "" } 0 ==
   "A.b  0.0 s  (could not run, exit 1)"
+
+
+def twoExes : SoftwareChallenge.LakeFacts :=
+  { packageDir := "/work", configFiles := #["lakefile.lean"],
+    modules := #[⟨`App.CoreCode, "App/CoreCode.lean"⟩, ⟨`App.Tool, "App/Tool.lean"⟩,
+      ⟨`App.WorldCode, "App/WorldCode.lean"⟩],
+    challengeCandidates := #[], defaultExeRoots := #[`App.Tool, `App.WorldCode], packages := #[],
+    defaultTargets := #[`statement], builtinLint := none, testDriverArgs := #[],
+    testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
+
+#guard (Test.checkGroups twoExes).map (·.map (·.module)) ==
+  #[#[`App.CoreCode, `App.WorldCode], #[`App.Tool]]
+
+#guard (Test.checkGroups { twoExes with defaultExeRoots := #[`App.WorldCode] }).size == 1
 
 end SoftwareChallengeTests.Steps

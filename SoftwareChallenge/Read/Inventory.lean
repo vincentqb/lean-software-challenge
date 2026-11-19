@@ -144,7 +144,8 @@ def declarationFact (reachesIO : Std.HashSet Name) (terminating : Array Name) (m
     initializes := (getInitFnNameFor? env info.name).isSome
     effects := isComputational && info.type.getUsedConstants.any reachesIO.contains
     debug := info.getUsedConstantsAsSet.any fun used => used.isAtomic && "dbg".isPrefixOf used.toString
-    axioms := ← ownAxioms info }
+    axioms := ← ownAxioms info
+    written := ranges.isSome }
 
 def blameOf (env : Environment) (fact : DeclarationFact) (own : ConstantInfo) (axiomName : Name) :
     AxiomWalk AxiomBlame := do
