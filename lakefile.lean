@@ -429,6 +429,54 @@ script grade_candidate (args) do
 lean_exe «grade» where
   root := `SoftwareChallenge.Steps.Grade
 
+lean_exe «lsc-gate» where
+  root := `SoftwareChallengeTests.Gate
+
+def gateInputs (pkg : Package) (dirs : List System.FilePath) : IO (Array System.FilePath) := do
+  let mut files := #[]
+  for file in ["lakefile.lean", "lake-manifest.json", "lean-toolchain", "Audit.lean", "SoftwareChallengeRun.lean"] do
+    if ← (pkg.dir / file).pathExists then files := files.push (pkg.dir / file)
+  for dir in dirs do
+    for file in ← (pkg.dir / dir).walkDir (enter := fun path => pure (path.fileName != some ".lake")) do
+      unless (← file.isDir) || file.fileName == some "comparator.json" do files := files.push file
+  return files.qsort (·.toString < ·.toString)
+
+def gateRun (pkg : Package) (run : String) (dirs : List System.FilePath) (usesLibrary : Bool) :
+    FetchM (Job Unit) := do
+  let named := s!"{run}Run"
+  let missing := fun (what : String) => s!"lakefile.lean declares no {what}, so `lake build {named}` cannot run \
+    the {run} real run. Restore {what} in lakefile.lean, then run `lake build {named}`."
+  let some gate := pkg.findLeanExe? `«lsc-gate» | error (missing "lean_exe «lsc-gate»")
+  let mut job := Job.nil.mix (← gate.exe.fetch)
+  if usesLibrary then
+    let some grade := pkg.findLeanExe? `grade | error (missing "lean_exe «grade»")
+    let some library := pkg.findLeanLib? `SoftwareChallenge | error (missing "lean_lib «SoftwareChallenge»")
+    job := ((job.mix (← grade.exe.fetch)).mix (← library.leanArts.fetch)).mix (← library.shared.fetch)
+  job.mapM fun _ => do
+    addLeanTrace
+    for file in ← gateInputs pkg dirs do
+      addTrace (← BuildTrace.compute (TextFilePath.mk file))
+    let log := pkg.buildDir / "gate" / s!"{run}.txt"
+    buildUnlessUpToDate log (← getTrace) (log.addExtension "trace") do
+      IO.FS.createDirAll (pkg.buildDir / "gate")
+      let out ← IO.Process.output {
+        cmd := gate.file.toString
+        args := #[run]
+        cwd := some pkg.dir
+        env := #[("LAKE", some (← getLake).toString)] }
+      IO.FS.writeFile log (out.stdout ++ out.stderr)
+      unless out.exitCode == 0 do
+        logError (out.stdout ++ out.stderr)
+        error s!"`lake exe lsc-gate {run}` exited {out.exitCode}, so the {run} real run does not hold: fix each \
+          failure above as it says, then run `lake build {named}`."
+      logInfo out.stdout
+
+target templateRun pkg : Unit := gateRun pkg "template" ["Examples" / "ConstantFolding"] true
+
+target comparatorRun pkg : Unit := gateRun pkg "comparator" ["SoftwareChallengeTests" / "Comparator"] false
+
+target gradeRun pkg : Unit := gateRun pkg "grade" ["Examples" / "ConstantFolding"] true
+
 def replayTimes (report : String) : Array (String × Nat) :=
   (report.splitOn "\n").toArray.filterMap fun line =>
     match (line.splitOn "  ", line.splitOn " in ") with
