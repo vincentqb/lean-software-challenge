@@ -5,11 +5,11 @@ module
 namespace SoftwareChallenge
 
 inductive Stage where
-  | lock | statement | owned | dependencies | worktree | comparator | build | lint | test
+  | lock | statement | owned | dependencies | worktree | build | lint | test | comparator
   deriving DecidableEq, Repr, Inhabited
 
 def Stage.order : List Stage :=
-  [.lock, .statement, .owned, .dependencies, .worktree, .comparator, .build, .lint, .test]
+  [.lock, .statement, .owned, .dependencies, .worktree, .build, .lint, .test, .comparator]
 
 inductive Verdict where
   | accept | refuse | cannotJudge

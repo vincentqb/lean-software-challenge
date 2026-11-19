@@ -107,8 +107,6 @@ def addFileTraces (pkg : Package) (files : List String) : JobM Unit := do
   for file in files do
     if ← (pkg.dir / file).pathExists then addTrace (← BuildTrace.compute (TextFilePath.mk (pkg.dir / file)))
 
-def statementDir (pkg : Package) : System.FilePath := pkg.buildDir / "softwareChallenge" / "statement"
-
 package_facet softwareChallengeStatement pkg : Unit := do
   let some audit ← findModule? `SoftwareChallenge.Audit | error auditMissing
   let challenge ← match ← challengeOf pkg with | .ok challenge => pure challenge | .error message => error message
@@ -132,8 +130,8 @@ package_facet softwareChallengeStatement pkg : Unit := do
     unless current.isSome && current == previous && (← (pkg.dir / "owned.lock").pathExists) do
       if ← (report.addExtension "trace").pathExists then IO.FS.removeFile (report.addExtension "trace")
     buildUnlessUpToDate report (← getTrace) (report.addExtension "trace") do
-      let olean := statementDir pkg / "Challenge.olean"
-      IO.FS.createDirAll (statementDir pkg)
+      let olean := pkg.buildDir / "softwareChallenge" / "statement" / "Challenge.olean"
+      IO.FS.createDirAll (pkg.buildDir / "softwareChallenge" / "statement")
       let compiled ← IO.Process.output {
         cmd := (← getLean).toString
         args := #[challenge.leanFile.toString, "-o", olean.toString] ++ challenge.leanOptions.values.foldl
@@ -376,33 +374,14 @@ script replay do
     return 1
   replayEach (← getLake).toString pkg.dir pkg.buildDir
 
-script grade_base do
+script grade_packages do
   let workspace ← getWorkspace
   let entries ← (workspace.packages.filter (!·.isRoot)).mapM fun pkg => do
     return Json.mkObj [("type", "path"), ("scope", toJson pkg.scope), ("name", toJson pkg.baseName),
       ("manifestFile", toJson pkg.relManifestFile.toString), ("inherited", toJson false),
       ("dir", toJson (← IO.FS.realPath pkg.dir).toString), ("copy", toJson false),
       ("configFile", toJson pkg.relConfigFile.toString)]
-  IO.println (Json.mkObj [("overrides", Json.mkObj [("version", "1.3.0"), ("packages", toJson entries)]),
-    ("statement", toJson (← IO.FS.realPath (statementDir (← getRootPackage))).toString)]).pretty
-  return 0
-
-script grade_modules (args) do
-  let workspace ← getWorkspace
-  let root ← getRootPackage
-  let mut found : Array Lake.Module := #[]
-  for name in args do
-    let some mod := workspace.findModule? name.toName | continue
-    unless mod.pkg.keyName == root.keyName || found.any (·.name == mod.name) do
-      if ← mod.leanFile.pathExists then found := found.push mod
-  let pinned ← runBuild do
-    let mut pinned := #[]
-    for mod in found do
-      let closure ← (← mod.transImports.fetch).await
-      unless closure.any (·.pkg.keyName == root.keyName) do
-        pinned := pinned.push #[mod.pkg.baseName.toString, mod.name.toString]
-    return Job.pure pinned
-  IO.println (Json.mkObj [("targets", toJson pinned)]).compress
+  IO.println (Json.mkObj [("version", "1.3.0"), ("packages", toJson entries)]).pretty
   return 0
 
 script grade_candidate (args) do
