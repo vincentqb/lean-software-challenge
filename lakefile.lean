@@ -91,7 +91,7 @@ def auditOutput (pkg : Package) (mode : String) (flags : Array String) (challeng
   IO.Process.output {
     cmd := (← getLean).toString
     args := #["--run", (__dir__ / "Audit.lean").toString, mode] ++ flags ++
-      (if pkg.leanExes.isEmpty then #[] else #["--executable"]) ++
+      pkg.leanExes.map (s!"--executable={·.config.root}") ++
       #[challenge.relLeanFile.toString, olean.toString] ++
       catalog.map fun mod => s!"{mod.name}={mod.relLeanFile}"
     cwd := some pkg.dir

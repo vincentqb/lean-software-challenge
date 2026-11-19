@@ -107,18 +107,43 @@ elab doc?:(docComment)? "WorldClaim " n:ident bs:(ppSpace bracketedBinder)* " :=
   let name ← resolveGlobalConstNoOverload n
   modifyEnv (claimsExt.addEntry · name)
 
+private def shown (term : Term) : CoreM String :=
+  return (← PrettyPrinter.ppTerm term).pretty 100000
+
 private def claimOf (claim : Term) : CommandElabM (Name × Expr) := liftTermElabM do
-  let statement ← Term.elabTermEnsuringType claim (mkSort .zero)
+  let written ← shown claim
+  let statement ← Term.elabTerm claim none
   Term.synthesizeSyntheticMVarsNoPostponing
   let statement ← instantiateMVars statement
   let head := statement.getAppFn.constName
   unless isWorldClaim (← getEnv) head do
-    throwError "{claim} is not a WorldClaim, so this Check would test nothing a headline assumes. Name a claim \
-      declared with `WorldClaim` in a WorldSpec module, then run `lake build`."
+    throwError "`{written}` is not a WorldClaim, so this Check would test nothing a headline assumes. Name a claim \
+      declared with `WorldClaim` in a WorldSpec module, as in `Check <claim> <its arguments> := …`, then run \
+      `lake build`."
+  let type ← Meta.whnf (← Meta.inferType statement)
+  unless type.isProp do
+    let missing ← Meta.forallTelescope type fun binders _ => binders.mapM fun binder => do
+      return (← binder.fvarId!.getUserName, (← Meta.ppExpr (← Meta.inferType binder)).pretty 100000)
+    let listed := ", ".intercalate (missing.map fun (name, type) => s!"`({name} : {type})`").toList
+    let filled := " ".intercalate (missing.map fun (name, _) => s!"({name} := …)").toList
+    throwError "`{written}` is a WorldClaim that takes {missing.size} more \
+      {if missing.size == 1 then "argument" else "arguments"}, {listed}, so this Check states no proposition. \
+      Write `Check {written} {filled} := …`, with the arguments the headlines assume it of, then run `lake build`."
   if statement.hasMVar then
-    throwError "{claim} leaves an argument unstated, so the Check would not test one definite statement: give \
+    throwError "`{written}` leaves an argument unstated, so the Check would not test one definite statement: give \
       every argument of the claim, replacing each `_` with a term, then run `lake build`."
   return (head, statement)
+
+private partial def inputsHeld (statement : Expr) : MetaM Expr := do
+  match statement with
+  | .forallE name type body _ =>
+    if ← Meta.isProp type then return statement
+    inputsHeld (body.instantiate1 (← Meta.mkFreshExprMVar type (userName := name)))
+  | _ => return statement
+
+private def instanceTemplate (statement : Expr) : MetaM String := do
+  let unfolded := (← Meta.unfoldDefinition? statement).getD statement
+  return (← Meta.ppExpr (← inputsHeld (← Meta.whnfR unfolded))).pretty 100000
 
 private def register (claim : Name × Expr) (action : Term) : CommandElabM Unit := do
   let env ← getEnv
@@ -137,31 +162,77 @@ elab "Check " claim:term " : " inst:term : command => do
   try checked (← `(example : $claim → $inst := fun h => by first | exact h | apply h))
   catch _ =>
     modify ({ · with messages })
-    throwError "{inst} is not an instance of {claim}, so the Check would test something the claim does not \
-      imply. State a proposition that {claim} implies, such as {claim} at concrete values, then run `lake build`."
-  let falsified := Syntax.mkStrLit s!"{← liftCoreM (PrettyPrinter.ppTerm inst)} is false"
+    let claimed ← liftCoreM (shown claim)
+    let stated ← liftCoreM (shown inst)
+    let template ← liftTermElabM (instanceTemplate found.2)
+    throwError "`{stated}` is not an instance of `{claimed}`, so the Check would test something the claim does not \
+      imply. State `{claimed}` at concrete values, as in `Check {claimed} : {template}` with each `?` replaced by a \
+      value, then run `lake build`."
+  let falsified := Syntax.mkStrLit s!"{← liftCoreM (shown inst)} is false"
   register found (← `(unless decide ($inst) do throw (IO.userError $falsified)))
 
 elab "Check " claim:term " := " action:term : command => do
   register (← claimOf claim) action
 
-def checkFailures (modules : Array (Name × String)) : CoreM (Array String) := do
+structure CheckRun where
+  file : String
+  line : Nat
+  claim : Name
+  elapsed : Nat
+  error : Option String
+
+def checkJobs : IO Nat := do
+  let threads := min 16 (System.Platform.Internal.getHardwareConcurrency ()).toNat
+  return max 1 (((← IO.getEnv "SOFTWARE_CHALLENGE_JOBS").bind (·.toNat?)).getD threads)
+
+def concurrently (actions : Array (IO Unit)) (jobs : Nat) : IO (Array (Nat × Except IO.Error Unit)) := do
+  let next ← IO.mkRef 0
+  let results ← IO.mkRef (#[] : Array (Nat × Nat × Except IO.Error Unit))
+  let worker : IO Unit := do
+    repeat
+      let index ← next.modifyGet fun index => (index, index + 1)
+      let some action := actions[index]? | break
+      let start ← IO.monoMsNow
+      let outcome ← action.toBaseIO
+      results.modify (·.push (index, (← IO.monoMsNow) - start, outcome))
+  let workers ← (List.range (min actions.size (max 1 jobs))).mapM fun _ => IO.asTask worker (prio := .dedicated)
+  for task in workers do IO.ofExcept task.get
+  return ((← results.get).qsort (·.1 < ·.1)).map fun (_, elapsed, outcome) => (elapsed, outcome)
+
+def runAllChecks (modules : Array (Name × String)) (jobs : Option Nat := none) : CoreM (Array CheckRun) := do
   let env ← getEnv
-  let mut failures := #[]
+  let mut found := #[]
   for evidence in allEvidence env do
     let some index := env.getModuleIdxFor? evidence.source | continue
     let module := env.header.modules[index.toNat]!.module
     let some (_, file) := modules.find? (·.1 == module) | continue
-    let action ← unsafe evalConst (IO Unit) evidence.source
-    if let .error error ← action.toBaseIO then
-      failures := failures.push s!"{file}:{evidence.line}: the Check of {evidence.claim} failed: {error}. A Check \
-        tests a world claim against the real foreign code, so either the Check is wrong or {evidence.claim} is \
-        false. Fix the Check; if {evidence.claim} is false, remove it from Challenge.lean and its WorldSpec \
-        module. Then run `lake test`."
-  return failures
+    found := found.push (file, evidence, ← unsafe evalConst (IO Unit) evidence.source)
+  let planned := found.qsort fun (a, x, _) (b, y, _) => a < b || a == b && x.line < y.line
+  let outcomes ← concurrently (planned.map (·.2.2)) (jobs.getD (← checkJobs))
+  return (planned.zip outcomes).map fun ((file, evidence, _), (elapsed, outcome)) => {
+    file, line := evidence.line, claim := evidence.claim, elapsed
+    error := match outcome with
+      | .ok _ => none
+      | .error error => some (toString error) }
+
+def CheckRun.failure? (run : CheckRun) : Option String :=
+  run.error.map fun error => s!"{run.file}:{run.line}: the Check of {run.claim} failed: {error}. A Check tests a \
+    world claim against the real foreign code, so either the Check is wrong or {run.claim} is false. Fix the Check; \
+    if {run.claim} is false, the statement assumes something false: remove {run.claim} from the headlines of \
+    Challenge.lean and from its WorldSpec module, delete owned.lock, and run `lake build` to record the new \
+    statement. Then run `lake test`."
+
+def timings (runs : Array CheckRun) : Array String :=
+  (runs.qsort (·.elapsed > ·.elapsed)).map fun run =>
+    s!"{run.file}:{run.line} {run.claim}  {run.elapsed / 1000}.{run.elapsed % 1000 / 100} s"
+
+def checkFailures (modules : Array (Name × String)) (jobs : Option Nat := none) : CoreM (Array String) :=
+  return (← runAllChecks modules jobs).filterMap (·.failure?)
 
 def runChecks (modules : Array (Name × String)) : CommandElabM Unit := do
-  let failures ← liftCoreM (checkFailures modules)
+  let runs ← liftCoreM (runAllChecks modules)
+  for line in timings runs do IO.println line
+  let failures := runs.filterMap (·.failure?)
   unless failures.isEmpty do throwError ("\n".intercalate failures.toList)
 
 end SoftwareChallenge

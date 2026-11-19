@@ -82,6 +82,9 @@ When `lake lint` exits 0, Lean's linters pass, and:
 
 When `lake test` exits 0, every `Check` passed against the real foreign code, and so did the
 package's own tests.
+`lake test` runs the Checks concurrently, `SOFTWARE_CHALLENGE_JOBS` at a time (default: the
+hardware threads, at most 16), and prints each Check's time, slowest first, so a Check must not
+depend on another Check's order or side effects.
 
 When `lake comparator` accepts, the kernel accepted every proof replayed from a sandboxed export,
 with only the standard axioms. The build alone does not ensure this: a proof can skip the kernel
@@ -101,12 +104,12 @@ fold_idempotent  (not yet proved)
 fold_normalizes  (kill not yet proved)
 fold_two_plus_three  (one instance)
 output_correct  assumes AddAgrees (2 checks, unused by the proof)
-Proved: 2 of 4 headlines, 3 of 4 kills
-Independent: 1 of 4 headlines
+Proved: 4 of 5 headlines, 4 of 5 kills
+Independent: 1 of 5 headlines
 Unclaimed: 2 of 6 definitions main runs
   main run
 Pending: 2
-  Challenge.lean:24: ConstantFolding.fold_idempotent is not proved yet, so the solution does not ...
+  Challenge.lean:34: ConstantFolding.fold_idempotent is not proved yet, so the solution does not ...
   ...
 Edit: ConstantFolding/CoreCode.lean ConstantFolding/WorldCode.lean ConstantFolding/Solution.lean
 Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean ...
@@ -121,11 +124,14 @@ Owned: lakefile.lean lake-manifest.json lean-toolchain owned.lock Challenge.lean
   stating each as its own headline gives each its own kill and witness.
 - `unused by the proof`: the proof does not use this world claim, so the headline holds
   without it; only you can drop it.
-- `Independent`: how many headlines have a kill showing that the others do not imply them.
+- `Independent`: how many headlines have a proved kill showing that the others do not imply
+  them.
 - `Unclaimed`: how many of the CoreCode and WorldCode definitions `main` runs no hole reaches, so
   no headline speaks about them; the next line names them. A library has no `main` and no line.
-- `Pending`: what the solution still has to do, each with its fix. Errors, listed under
-  `Errors`, are what it must not do.
+- `h terminates via t`: the `@[terminates h]` headline `t` states on which inputs the
+  `partial_fixpoint` hole `h` returns.
+- `Pending`: what is not done yet, each with its fix; all but a hidden dependency are the
+  solution's to do. Errors, listed under `Errors`, are what it must not do.
 
 The [template](Examples/ConstantFolding) is a complete challenge.
 
@@ -170,8 +176,9 @@ all of Lean's linters on except `missingDocs`, which asks for doc comments, and 
 which is meant for Lean's own repository. Commit `lean-toolchain` and `lake-manifest.json`, and add
 `/comparator.json` to `.gitignore`: `lake build` writes it from `Challenge.lean`. Require
 `software_challenge` by git, or from a directory outside `/home`, `/root`, `/run`, `/tmp` and `/var`:
-the comparator's sandbox hides those, so `lake lint` reports such a dependency as pending and grade
-cannot judge. `lakefile.lean` is owned: after editing it, delete `owned.lock` and run `lake build`.
+the comparator's sandbox hides those, so `lake lint` reports such a dependency as pending, which only
+a new statement resolves. `lakefile.lean` is owned: after editing it, delete
+`owned.lock` and run `lake build`.
 
 A module's role is the first component of its name that is `CoreSpec`, `WorldSpec`, `CoreCode`,
 or `WorldCode`; any other module is tooling. Modules outside the package are trusted, and every

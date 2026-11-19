@@ -43,6 +43,10 @@ private theorem chained : 1 = 2 := viaRaw.elim
 
 theorem hole : Identity identity := by sorry
 
+theorem viaHole : Identity identity := hole
+
+theorem decided : 10 + 10 = 20 := by native_decide
+
 run_cmd Lean.modifyEnv (SoftwareChallenge.claimsExt.addEntry · `SoftwareChallengeTests.Fixtures.Identity)
 
 end SoftwareChallengeTests.Fixtures.Rejected
