@@ -78,4 +78,13 @@ def DeclarationFact.Allowed (fact : DeclarationFact) : Role → Prop
   | .worldCode => fact.isUnsafe = false ∧ fact.external = false ∧ fact.replaced = false
   | .tooling => True
 
+structure Project.Admits (project : Project) (inventory : Inventory) : Prop where
+  placed : ∀ fact ∈ inventory.modules, ∃ role, project.role? fact.name = some role
+  modular : ∀ fact ∈ inventory.modules, fact.usesModuleSystem = true
+  layered : ∀ fact ∈ inventory.modules, ∀ dependency ∈ fact.imports, dependency.comptime = false →
+    ∀ source target, project.role? fact.name = some source → project.role? dependency.name = some target →
+      source.MayImport target
+  pure : ∀ fact ∈ inventory.declarations, ∃ role, project.role? fact.module = some role ∧
+    (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ (fact.computational = true → fact.Allowed role)
+
 end SoftwareChallenge

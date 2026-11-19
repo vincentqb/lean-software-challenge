@@ -6,6 +6,8 @@ public import SoftwareChallenge.CoreSpec.Expr
 public import SoftwareChallenge.CoreSpec.Graph
 public import SoftwareChallenge.CoreSpec.Format
 public import SoftwareChallenge.CoreSpec.Grade
+public import SoftwareChallenge.CoreSpec.Lint
+public import SoftwareChallenge.CoreSpec.Test
 meta import SoftwareChallenge
 
 public section
@@ -15,18 +17,24 @@ public section
 
 An inventory the audit accepts keeps CoreSpec, WorldSpec, and CoreCode from reaching WorldCode or
 tooling at runtime. It also keeps every declaration within its role's table and the standard
-axioms. A kill is accepted exactly when it negates the headline under a closed replacement of the
-holes. An independence kill is accepted exactly when it also restates every other headline under
-that replacement. Two statements have one shape exactly when they differ only in binder names,
-binder kinds, metadata, and let versus have. Closure is reachability along the edges. owned.lock
-reads back what was written, and so does comparator.json when its names are plain. The lock check
-passes exactly when every path has the same digest in owned.lock as on disk. Grade accepts exactly
-when every stage, in order, accepted; otherwise it gives the verdict of the first stage that did
-not.
+axioms, and the audit accepts every inventory whose modules and declarations meet that table. A
+kill is accepted exactly when it negates the headline under a closed replacement of the holes. An
+independence kill is accepted exactly when it also restates every other headline under that
+replacement. Two statements have one shape exactly when they differ only in binder names, binder
+kinds, metadata, and let versus have. Closure is reachability along the edges. owned.lock reads
+back what was written, and so does comparator.json when its names are plain. The lock check passes
+exactly when every path has the same digest in owned.lock as on disk. Grade accepts exactly when
+every stage, in order, accepted; otherwise it gives the verdict of the first stage that did not.
+The statement, lint, and test steps each exit 0 exactly when their facts meet README's list for
+that step, one condition per item, over every module, declaration, binder, and constant occurrence
+the facts hold; lint exits other than 1 exactly when the facts hold nothing README lists under
+Errors; and each step exits nonzero exactly when it reports an error, a pending item, or a failure.
 
 Not claimed:
 - that the reader's facts match Lean, Lake, or the files;
 - that a message's fix works;
+- that each message names an item of README's list that the facts miss;
+- that lint exits 2, rather than another code, when only pending items remain;
 - that Lake reads a plain name back as `Config.parse` does;
 - that `lake comparator` judges as the comparator model says;
 - that the derived witnesses are the ones README describes.
@@ -59,6 +67,12 @@ def Lock.parse : String → Option (Array Lock.Entry) := sorry
 def Lock.violations : Array Lock.Entry → Array Lock.Entry → Array Lock.Violation := sorry
 
 def Grade.decide : List Observation → Verdict := sorry
+
+def Statement.run : LakeFacts → FileFacts → ChallengeFacts → Statement.Result := sorry
+
+def Lint.run : Facts → Lint.Result := sorry
+
+def Test.run : TestFacts → Test.Result := sorry
 
 theorem layering_sound (project : Project) (inventory : Inventory)
     (accepted : project.violations inventory = #[]) (source target : Name) (role : Role)
@@ -99,6 +113,24 @@ theorem purity_sound (project : Project) (inventory : Inventory)
 @[witness purity_sound] theorem purity_sound_applies :
     ∃ (project : Project) (inventory : Inventory) (fact : DeclarationFact),
       project.violations inventory = #[] ∧ fact ∈ inventory.declarations := by
+  sorry
+
+theorem Project.violations_eq_empty_iff_admits (project : Project) (inventory : Inventory) :
+    project.violations inventory = #[] ↔ project.Admits inventory := by
+  sorry
+
+@[kills Project.violations_eq_empty_iff_admits]
+theorem Project.violations_eq_empty_iff_admits_rejects_accepting :
+    ¬ ∀ (project : Project) (inventory : Inventory),
+      (fun (_ : Project) (_ : Inventory) => (#[] : Array Violation)) project inventory = #[] ↔
+        project.Admits inventory := by
+  sorry
+
+@[kills Project.violations_eq_empty_iff_admits]
+theorem Project.violations_eq_empty_iff_admits_rejects_refusing :
+    ¬ ∀ (project : Project) (inventory : Inventory),
+      (fun (_ : Project) (_ : Inventory) => #[Violation.unplaced .anonymous]) project inventory = #[] ↔
+        project.Admits inventory := by
   sorry
 
 theorem Shape.witnesses?_sound {replaceable : Name → Bool} {pattern target : Shape} {σ : Witnesses}
@@ -270,6 +302,146 @@ theorem Grade.decide_eq_first (passed : List Observation) (stopped : Observation
     ¬ ∀ (passed : List Observation) (stopped : Observation) (rest : List Observation),
       (∀ observation ∈ passed, observation.verdict = .accept) → stopped.verdict ≠ .accept →
       (fun (_ : List Observation) => Verdict.refuse) (passed ++ stopped :: rest) = stopped.verdict := by
+  sorry
+
+theorem Statement.run_code_eq_zero_iff (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) :
+    (Statement.run lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
+  sorry
+
+@[kills Statement.run_code_eq_zero_iff] theorem Statement.run_code_eq_zero_iff_rejects_accepting :
+    ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
+      ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 0 } :
+          Statement.Result)) lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
+  sorry
+
+@[kills Statement.run_code_eq_zero_iff] theorem Statement.run_code_eq_zero_iff_rejects_refusing :
+    ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
+      ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+          Statement.Result)) lake files challenge).code = 0 ↔ Statement.Complete lake files challenge := by
+  sorry
+
+theorem Statement.run_code_ne_zero_iff (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) :
+    (Statement.run lake files challenge).code ≠ 0 ↔ (Statement.run lake files challenge).errors ≠ #[] := by
+  sorry
+
+@[kills Statement.run_code_ne_zero_iff] theorem Statement.run_code_ne_zero_iff_rejects_accepting :
+    ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
+      ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+        ({ errors := #[.noStatementTarget], writes := { lock? := none, config? := none }, killSearch := #[],
+           code := 0 } : Statement.Result)) lake files challenge).code ≠ 0 ↔
+        ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+          ({ errors := #[.noStatementTarget], writes := { lock? := none, config? := none }, killSearch := #[],
+             code := 0 } : Statement.Result)) lake files challenge).errors ≠ #[] := by
+  sorry
+
+@[kills Statement.run_code_ne_zero_iff] theorem Statement.run_code_ne_zero_iff_rejects_refusing :
+    ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),
+      ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+        ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+          Statement.Result)) lake files challenge).code ≠ 0 ↔
+        ((fun (_ : LakeFacts) (_ : FileFacts) (_ : ChallengeFacts) =>
+          ({ errors := #[], writes := { lock? := none, config? := none }, killSearch := #[], code := 1 } :
+            Statement.Result)) lake files challenge).errors ≠ #[] := by
+  sorry
+
+theorem Lint.run_code_eq_zero_iff (facts : Facts) : (Lint.run facts).code = 0 ↔ Lint.Complete facts := by
+  sorry
+
+@[kills Lint.run_code_eq_zero_iff] theorem Lint.run_code_eq_zero_iff_rejects_accepting :
+    ¬ ∀ (facts : Facts),
+      ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 0 } : Lint.Result))
+        facts).code = 0 ↔ Lint.Complete facts := by
+  sorry
+
+@[kills Lint.run_code_eq_zero_iff] theorem Lint.run_code_eq_zero_iff_rejects_refusing :
+    ¬ ∀ (facts : Facts),
+      ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 1 } : Lint.Result))
+        facts).code = 0 ↔ Lint.Complete facts := by
+  sorry
+
+theorem Lint.run_code_ne_one_iff (facts : Facts) : (Lint.run facts).code ≠ 1 ↔ Lint.Clean facts := by
+  sorry
+
+@[kills Lint.run_code_ne_one_iff] theorem Lint.run_code_ne_one_iff_rejects_accepting :
+    ¬ ∀ (facts : Facts),
+      ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 0 } : Lint.Result))
+        facts).code ≠ 1 ↔ Lint.Clean facts := by
+  sorry
+
+@[kills Lint.run_code_ne_one_iff] theorem Lint.run_code_ne_one_iff_rejects_refusing :
+    ¬ ∀ (facts : Facts),
+      ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 1 } : Lint.Result))
+        facts).code ≠ 1 ↔ Lint.Clean facts := by
+  sorry
+
+theorem Lint.run_code_ne_zero_iff (facts : Facts) :
+    (Lint.run facts).code ≠ 0 ↔ (Lint.run facts).errors ≠ #[] ∨ (Lint.run facts).pending ≠ #[] := by
+  sorry
+
+@[kills Lint.run_code_ne_zero_iff] theorem Lint.run_code_ne_zero_iff_rejects_accepting :
+    ¬ ∀ (facts : Facts),
+      ((fun (_ : Facts) =>
+        ({ errors := #[.noStatementTarget], pending := #[], report := #[], code := 0 } : Lint.Result))
+          facts).code ≠ 0 ↔
+        ((fun (_ : Facts) =>
+          ({ errors := #[.noStatementTarget], pending := #[], report := #[], code := 0 } : Lint.Result))
+            facts).errors ≠ #[] ∨
+        ((fun (_ : Facts) =>
+          ({ errors := #[.noStatementTarget], pending := #[], report := #[], code := 0 } : Lint.Result))
+            facts).pending ≠ #[] := by
+  sorry
+
+@[kills Lint.run_code_ne_zero_iff] theorem Lint.run_code_ne_zero_iff_rejects_refusing :
+    ¬ ∀ (facts : Facts),
+      ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 1 } : Lint.Result))
+        facts).code ≠ 0 ↔
+        ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 1 } : Lint.Result))
+          facts).errors ≠ #[] ∨
+        ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 1 } : Lint.Result))
+          facts).pending ≠ #[] := by
+  sorry
+
+theorem Test.run_code_eq_zero_iff (facts : TestFacts) : (Test.run facts).code = 0 ↔ Test.Complete facts := by
+  sorry
+
+@[kills Test.run_code_eq_zero_iff] theorem Test.run_code_eq_zero_iff_rejects_accepting :
+    ¬ ∀ (facts : TestFacts),
+      ((fun (_ : TestFacts) =>
+        ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 0 } : Test.Result))
+          facts).code = 0 ↔ Test.Complete facts := by
+  sorry
+
+@[kills Test.run_code_eq_zero_iff] theorem Test.run_code_eq_zero_iff_rejects_refusing :
+    ¬ ∀ (facts : TestFacts),
+      ((fun (_ : TestFacts) =>
+        ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 1 } : Test.Result))
+          facts).code = 0 ↔ Test.Complete facts := by
+  sorry
+
+theorem Test.run_code_ne_zero_iff (facts : TestFacts) :
+    (Test.run facts).code ≠ 0 ↔ (Test.run facts).failures ≠ #[] := by
+  sorry
+
+@[kills Test.run_code_ne_zero_iff] theorem Test.run_code_ne_zero_iff_rejects_accepting :
+    ¬ ∀ (facts : TestFacts),
+      ((fun (_ : TestFacts) =>
+        ({ failures := #[.counterexample .anonymous ""], timings := #[], sampled := 0, notSampled := #[],
+           code := 0 } : Test.Result)) facts).code ≠ 0 ↔
+        ((fun (_ : TestFacts) =>
+          ({ failures := #[.counterexample .anonymous ""], timings := #[], sampled := 0, notSampled := #[],
+             code := 0 } : Test.Result)) facts).failures ≠ #[] := by
+  sorry
+
+@[kills Test.run_code_ne_zero_iff] theorem Test.run_code_ne_zero_iff_rejects_refusing :
+    ¬ ∀ (facts : TestFacts),
+      ((fun (_ : TestFacts) =>
+        ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 1 } : Test.Result))
+          facts).code ≠ 0 ↔
+        ((fun (_ : TestFacts) =>
+          ({ failures := #[], timings := #[], sampled := 0, notSampled := #[], code := 1 } : Test.Result))
+            facts).failures ≠ #[] := by
   sorry
 
 end SoftwareChallenge

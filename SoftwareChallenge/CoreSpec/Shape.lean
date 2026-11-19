@@ -64,6 +64,25 @@ def conjunction : List Shape → Shape
   | [statement] => statement
   | statement :: rest => .app (.app (.const ``And []) statement) (conjunction rest)
 
+inductive Mentions (name : Name) : Shape → Prop where
+  | const (levels : List Universe) : Mentions name (.const name levels)
+  | appFunction {function argument : Shape} : Mentions name function → Mentions name (.app function argument)
+  | appArgument {function argument : Shape} : Mentions name argument → Mentions name (.app function argument)
+  | lamType {type body : Shape} : Mentions name type → Mentions name (.lam type body)
+  | lamBody {type body : Shape} : Mentions name body → Mentions name (.lam type body)
+  | forallEType {type body : Shape} : Mentions name type → Mentions name (.forallE type body)
+  | forallEBody {type body : Shape} : Mentions name body → Mentions name (.forallE type body)
+  | letEType {type value body : Shape} : Mentions name type → Mentions name (.letE type value body)
+  | letEValue {type value body : Shape} : Mentions name value → Mentions name (.letE type value body)
+  | letEBody {type value body : Shape} : Mentions name body → Mentions name (.letE type value body)
+  | proj {structureName : Name} {index : Nat} {value : Shape} :
+      Mentions name value → Mentions name (.proj structureName index value)
+
+def KilledBy (headline : Shape) (replaceable : Name → Bool) (others : List Shape) (kill : Shape) : Prop :=
+  ∃ σ : Witnesses, (∀ entry ∈ σ, entry.2.closedUnder 0 = true) ∧ headline.subst replaceable σ ≠ headline ∧
+    (kill = (headline.subst replaceable σ).negation ∨
+      others ≠ [] ∧ kill = conjunction ((headline.subst replaceable σ).negation :: others.map (·.subst replaceable σ)))
+
 end Shape
 
 end SoftwareChallenge
