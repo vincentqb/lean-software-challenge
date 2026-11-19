@@ -23,8 +23,9 @@ lean_lib «SoftwareChallengeStatement» where
 
 lean_lib «SoftwareChallengeTests» where
   roots := #[]
-  globs := #[`Support, `Commands, `Complete, `Format, `Grade, `Graph, `Layering, `Match, `Steps].map
-    (.one <| `SoftwareChallengeTests ++ ·) |>.push (.submodules `SoftwareChallengeTests.Rules)
+  globs := #[`Support, `Coverage, `Commands, `Complete, `Format, `Grade, `Graph, `Layering, `Match, `Steps, `Model,
+    `Matrix, `Gate.Read].map (.one <| `SoftwareChallengeTests ++ ·) ++ #[.submodules `SoftwareChallengeTests.Rules,
+      .submodules `SoftwareChallengeTests.Golden]
   leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
 lean_lib «SoftwareChallengeFixtures» where
@@ -241,11 +242,16 @@ def gateRun (pkg : Package) (run : String) : FetchM (Job Unit) := do
       or lean_lib «SoftwareChallenge», so no real run can start. Restore them, then run `lake build {run}Run`."
   let inputs ← (gateInputs run).toArray.mapM fun dir => return (← inputDir (pkg.dir / dir) true fun path =>
     !path.components.contains ".lake" && path.fileName != some "comparator.json").map fun _ => ()
+  let read ← #[`SoftwareChallengeTests.Model, `SoftwareChallengeTests.Golden.ConstantFolding].mapM fun name => do
+    let some mod ← findModule? name | error s!"{name} is not in the workspace, so the real run's reader cannot \
+      start. Restore it in lean_lib «SoftwareChallengeTests», then run `lake build {run}Run`."
+    return (← mod.leanArts.fetch).map fun _ => ()
   let deps := #[(← gate.exe.fetch).map (fun _ => ()), (← grade.exe.fetch).map (fun _ => ()),
-    (← library.leanArts.fetch).map (fun _ => ()), ← stepsJob] ++ inputs
+    (← library.leanArts.fetch).map (fun _ => ()), ← stepsJob] ++ read ++ inputs
   (Job.mixArray deps).mapM fun _ => do
     addLeanTrace
-    for file in ["lakefile.lean", "lake-manifest.json", "lean-toolchain", runner.toString] do
+    for file in ["lakefile.lean", "lake-manifest.json", "lean-toolchain", runner.toString,
+        "SoftwareChallengeTests/Gate/Read.lean"] do
       addTrace (← computeTrace (TextFilePath.mk (pkg.dir / file)))
     let log := pkg.buildDir / "gate" / s!"{run}.txt"
     buildUnlessUpToDate log (← getTrace) (log.addExtension "trace") do

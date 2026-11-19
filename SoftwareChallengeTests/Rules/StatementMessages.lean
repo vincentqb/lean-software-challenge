@@ -1,7 +1,9 @@
 module
 
-meta import SoftwareChallenge.CoreCode.Report.StatementMessages
-meta import SoftwareChallengeTests.Rules.Statement
+public meta import SoftwareChallenge.CoreCode.Report.StatementMessages
+public meta import SoftwareChallengeTests.Rules.Statement
+
+public section
 
 namespace SoftwareChallengeTests.Rules.StatementMessages
 

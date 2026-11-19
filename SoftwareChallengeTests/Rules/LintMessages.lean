@@ -1,6 +1,8 @@
 module
 
-meta import SoftwareChallengeTests.Rules.LintFacts
+public meta import SoftwareChallengeTests.Rules.LintFacts
+
+public section
 
 namespace SoftwareChallengeTests.Rules.LintMessages
 

@@ -1,7 +1,9 @@
 module
 
-meta import SoftwareChallenge.CoreCode.Rules.Test
-meta import SoftwareChallenge.CoreCode.Report.Report
+public meta import SoftwareChallenge.CoreCode.Rules.Test
+public meta import SoftwareChallenge.CoreCode.Report.Report
+
+public section
 
 namespace SoftwareChallengeTests.Rules.Test
 
