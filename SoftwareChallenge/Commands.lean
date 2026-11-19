@@ -52,6 +52,11 @@ initialize link witnessExt `witness "marks a theorem of the challenge as a witne
 
 def isWorldClaim (env : Environment) (name : Name) : Bool := (claimsExt.getState env).contains name
 
+def conclusionHead : Expr → Name
+  | .forallE _ _ body _ => conclusionHead body
+  | .mdata _ expr => conclusionHead expr
+  | conclusion => conclusion.getAppFn.constName
+
 def allEvidence (env : Environment) : Array Evidence := evidenceExt.getState env
 
 def premisesEntry : String := "softwareChallenge.premises"
@@ -60,7 +65,7 @@ partial def premiseUses (env : Environment) (type value : Expr) (index : Nat := 
   match type.consumeMData, value.consumeMData with
   | .forallE _ binder rest _, .lam _ _ body _ =>
     let later := premiseUses env rest body (index + 1)
-    if isWorldClaim env binder.getAppFn.constName then #[(index, body.hasLooseBVar 0)] ++ later else later
+    if isWorldClaim env (conclusionHead binder) then #[(index, body.hasLooseBVar 0)] ++ later else later
   | _, _ => #[]
 
 def premisesLinter : Linter where

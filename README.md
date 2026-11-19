@@ -23,13 +23,15 @@ To show a headline independent of the others, state its kill as `¬ H ∧ H₂ �
 headline, then every other headline in file order, all with the same replacement. Its wrong
 implementation is then close to a correct one, and it is public.
 
-A headline's preconditions are its hypotheses that are not world claims. When one mentions a hole
-or a foreign function, no kill shows that some input meets it, so state a witness that one does:
-`∃` the inputs the preconditions use, in headline order, of the conjunction of the
-preconditions, with the holes kept, marked `@[witness headline]`. If the headline assumes world
-claims that mention no input, the witness assumes them first. The audit reads a headline with the
-`Prop`-valued definitions of CoreSpec and WorldSpec unfolded, except world claims, so the
-hypotheses and inputs of such a definition are the headline's.
+A hypothesis assumes a world claim when its conclusion, after any `∀` and `→`, applies one, as
+`∀ t, t ∈ trials → C t` assumes `C`; the Checks of `C` count for it. A headline's preconditions are
+its hypotheses that assume no world claim. When one mentions a hole or a foreign function, no kill
+shows that some input meets it, so state a witness that one does: `∃` the inputs the preconditions
+use, in headline order, of the conjunction of the preconditions, with the holes kept, marked
+`@[witness headline]`. If the headline assumes world claims that mention no input, the witness
+assumes them first. The audit reads a headline with the `Prop`-valued definitions of CoreSpec and
+WorldSpec unfolded, except world claims, so the hypotheses and inputs of such a definition are the
+headline's.
 
 Once exactly one module is named `Solution`, `lake build` records a hash of each of these files but
 `Solution.lean`, and of every other module whose role is CoreSpec or WorldSpec, in `owned.lock` when

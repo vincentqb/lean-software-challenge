@@ -256,6 +256,8 @@ structure Assumption where
   statement : String
   checks : Nat
   unused : Bool := false
+  checkStatement : String := statement
+  checkVariables : Array String := #[]
 
 structure Unmatched where
   premise : String
@@ -333,11 +335,16 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (writ
     let mut oneInstance := true
     for ((binder, pattern), index) in (binders.zip patterns).zipIdx do
       let statement ← Meta.inferType binder
-      let claim := statement.getAppFn.constName
+      let claim := conclusionHead statement
       unless ← Meta.isProp statement do oneInstance := false
       if isWorldClaim env claim then
-        let expected ← Meta.inferType pattern
+        let (_, _, expected) ← Meta.forallMetaTelescope (← Meta.inferType pattern)
         let shown := toString (← Meta.ppExpr statement)
+        let (checkStatement, checkVariables) ← Meta.forallTelescope statement fun peeled conclusion => do
+          let chosen ← peeled.filterMapM fun bound => do
+            if ← Meta.isProp (← Meta.inferType bound) then return none
+            return some (toString (← bound.fvarId!.getUserName))
+          return (toString (← Meta.ppExpr conclusion), chosen)
         let mut checks := 0
         for found in evidence.filter (·.claim == claim) do
           match ← matchWithin budget expected found.statement with
@@ -345,11 +352,13 @@ def headline (project : Project) (evidence : Array Evidence) (name : Name) (writ
           | some false => pure ()
           | none =>
             let module := (env.getModuleIdxFor? found.source).map (env.header.modules[·.toNat]!.module)
-            unmatched := unmatched.push { premise := shown, module, line := found.line }
+            unmatched := unmatched.push { premise := checkStatement, module, line := found.line }
         let unused := record.any (·.contains (index, false))
         match assumptions.findIdx? (·.statement == shown) with
         | some known => assumptions := assumptions.modify known fun a => { a with unused := a.unused && unused }
-        | none => assumptions := assumptions.push { claim, statement := shown, checks, unused }
+        | none =>
+          assumptions := assumptions.push
+            { claim, statement := shown, checks, unused, checkStatement, checkVariables }
       else if !statement.hasFVar && (← Meta.isProp statement) then
         unnamed := unnamed.push (toString (← Meta.ppExpr statement))
     return { name, assumptions, unnamed, unmatched, proved := prover.isSome, oneInstance,
@@ -399,7 +408,7 @@ def preconditionsOf (project : Project) (replaceable : NameSet) (headline : Name
     for binder in binders do
       let statement ← Meta.inferType binder
       if !(← Meta.isProp statement) then inputs := inputs.push binder
-      else if isWorldClaim env statement.getAppFn.constName then
+      else if isWorldClaim env (conclusionHead statement) then
         unless statement.hasFVar do premises := premises.push statement
       else preconditions := preconditions.push statement
     if preconditions.isEmpty then return none
@@ -1242,9 +1251,11 @@ def pending (facts : Facts) : Array String := Id.run do
         a Check of it. Restate that Check with the arguments of the premise, as `Check {unmatched.premise} …`, \
         {lintNext}."
     for assumption in line.assumptions.filter (·.checks == 0) do
+      let chosen := if assumption.checkVariables.isEmpty then ""
+        else s!", with a value of your choice in place of {" and ".intercalate assumption.checkVariables.toList}"
       items := items.push s!"{here line.name}: {line.name} assumes the world claim {assumption.statement}, which no \
-        Check tests against the real foreign code. Add `Check {assumption.statement} := do …`, or \
-        `Check {assumption.statement} : <an instance it implies>`, to {facts.worldFile}, {lintNext}."
+        Check tests against the real foreign code. Add `Check {assumption.checkStatement} := do …`, or \
+        `Check {assumption.checkStatement} : <an instance it implies>`, to {facts.worldFile}{chosen}, {lintNext}."
   for (name, dir) in facts.hidden do
     items := items.push s!"lakefile.lean: the comparator's sandbox hides package {name} at {dir}, because it mounts \
       empty directories over /home, /root, /run, /tmp, and /var, so `lake comparator` cannot build the solution. \

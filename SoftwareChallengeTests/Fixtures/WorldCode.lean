@@ -51,4 +51,16 @@ theorem succ_at_leaves (h : SuccAt (leafSum 30 1)) : nativeSucc (leafSum 30 1) =
 
 Check SuccAt 0 : nativeSucc 0 = 0 + 1
 
+theorem succ_everywhere (h : ∀ n, SuccAt n) : nativeSucc 1 = 1 + 1 := h 1
+
+theorem succ_on_positives (h : ∀ n, n > 0 → SuccAt n) : nativeSucc 1 = 1 + 1 := h 1 (by decide)
+
+theorem succ_everywhere_ignored (_h : ∀ n, SuccAt n) : 1 = 1 := rfl
+
+theorem unchecked_everywhere (h : ∀ n, UncheckedAt n) : wrongSucc 0 = 0 := h 0
+
+theorem unchecked_on_positives (h : ∀ n, n > 0 → UncheckedAt n) : wrongSucc 1 = 1 := h 1 (by decide)
+
+theorem bounded_under_claim (n : Nat) (_h : ∀ m, m > 0 → SuccAt m) (small : n < 5) : n < 6 := by omega
+
 end SoftwareChallengeTests.Fixtures

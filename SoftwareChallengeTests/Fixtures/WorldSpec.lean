@@ -26,6 +26,9 @@ WorldClaim ClockAdvances (now : Nat → Nat) := ∀ t, t ≤ now t
 /-- The successor of n is n + 1. Another result for n falsifies it. -/
 WorldClaim SuccAt (n : Nat) := nativeSucc n = n + 1
 
+/-- The wrong successor of n is n. A result other than n falsifies it. -/
+WorldClaim UncheckedAt (n : Nat) := wrongSucc n = n
+
 /-- The function returns its argument. Any other result falsifies it. -/
 WorldClaim Identity (f : Nat → Nat) := ∀ n, f n = n
 

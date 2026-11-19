@@ -282,6 +282,30 @@ run_cmd Elab.Command.liftTermElabM do
   unless contains (Audit.describe toString ignored) "assumes SoftwareChallengeTests.Fixtures.SuccAgrees \
       (2 checks, unused by the proof)" && !contains (Audit.describe toString correct) "unused" do
     throwError "The report misstated an unused premise: {Audit.describe toString ignored}"
+  let everywhere ← analysed evidence (fixture `succ_everywhere)
+  let positives ← analysed evidence (fixture `succ_on_positives)
+  unless [everywhere, positives].all fun line => line.assumptions.map (·.claim) == #[fixture `SuccAt] &&
+      line.assumptions.map (·.checks) == #[1] && line.unnamed.isEmpty do
+    throwError "A world claim under ∀ or → was not read as an assumption with its Checks: \
+      {everywhere.assumptions.map (·.checks)} {positives.assumptions.map (·.checks)} {everywhere.unnamed}"
+  unless contains (Audit.describe toString positives) "assumes SoftwareChallengeTests.Fixtures.SuccAt (1 check)" do
+    throwError "The report misstated a world claim under →: {Audit.describe toString positives}"
+  let quantifiedIgnored ← analysed evidence (fixture `succ_everywhere_ignored)
+  unless quantifiedIgnored.assumptions.map (·.unused) == #[true] && everywhere.assumptions.map (·.unused) == #[false] do
+    throwError "The premise linter misread which proofs use a world claim under ∀"
+  let quantifiedUnchecked ← #[fixture `unchecked_everywhere, fixture `unchecked_on_positives].mapM fun name =>
+    analysed evidence name
+  unless quantifiedUnchecked.all (·.assumptions.map (·.checks) == #[0]) do
+    throwError "A Check of another claim counted for a world claim under ∀"
+  let quantifiedPending := Audit.pending { headlines := quantifiedUnchecked }
+  for name in ["unchecked_everywhere", "unchecked_on_positives"] do
+    expect quantifiedPending name "UncheckedAt n := do …`, or `Check Fixtures.UncheckedAt n : <an instance it implies>`"
+    expect quantifiedPending name "with a value of your choice in place of n"
+  let some bounded ← Audit.preconditionsOf project {} (fixture `bounded_under_claim)
+      (← getConstInfo (fixture `bounded_under_claim)).type
+    | throwError "The precondition of a headline with a world claim under → was not read"
+  unless bounded.premises.length == 1 && bounded.preconditions.length == 1 do
+    throwError "A world claim under → was read as a precondition: {bounded.expected}"
   let unlinted ← analysed evidence countdownTerminates
   unless unlinted.unlinted == some (fixture `Fixpoint) && world.unlinted.isNone do
     throwError "A headline proved without the premise linter was not found: {unlinted.unlinted}"
