@@ -128,7 +128,7 @@ def stepArgs (pkg : Package) (prepared : Prepared) (step : String) (args : Array
   return #["--run", runner.toString, step, (stepDir pkg / "lake.json").toString] ++ args
 
 def inputsTrace (pkg : Package) (prepared : Prepared) : JobM BuildTrace := do
-  let files ← prepared.inputs.mapM fun (path : String) => do
+  let files ← (prepared.inputs ++ prepared.importers.map (·.relLeanFile.toString)).mapM fun (path : String) => do
     if ← (pkg.dir / path).pathExists then computeTrace (TextFilePath.mk (pkg.dir / path))
     else pure (BuildTrace.ofHash (pureHash path) s!"absent {path}")
   return mixTraceArray (files.push (.ofHash (pureHash prepared.text) "lake.json"))
@@ -146,13 +146,16 @@ def record (pkg : Package) (step : String) (prepared : Prepared) (args : JobM (A
   if ← (← readTraceFile traceFile).replayIfUpToDate (stepDir pkg / s!"{step}.status") before then return
   buildAction before traceFile do
     let stepped ← stepArgs pkg prepared step (← args)
-    let out ← IO.Process.output { cmd := (← getLean).toString, args := stepped, cwd := pkg.dir, env := ← getAugmentedEnv }
+    let lean := (← getLean).toString
+    let out ← IO.Process.output { cmd := lean, args := stepped, cwd := pkg.dir, env := ← getAugmentedEnv }
     let code ← statusOf pkg step
     let missing := if ← (stepDir pkg / s!"{step}.status").pathExists then "" else s!"\n`lean --run {runner} {step}` \
       exited {out.exitCode} without recording a result, so the step did not judge the package. Fix the errors above \
-      in software_challenge, then run `lake build`."
-    let shown := (if step == "lint" then "\n" else "") ++ out.stdout ++ out.stderr ++ missing
-    unless shown.trimAscii.isEmpty do if code == 0 || code == 2 then logInfo shown else logError shown
+      in software_challenge, then run `{if step == "lint" then "lake lint" else "lake build"}`."
+    let shown := out.stdout ++ out.stderr ++ missing
+    IO.FS.writeFile (stepDir pkg / s!"{step}.out") shown
+    unless shown.trimAscii.isEmpty do
+      if code == 0 || code == 2 then logInfo ((if step == "lint" then "\n" else "") ++ shown) else logError shown
   let after := mixTrace deps (← inputsTrace pkg prepared)
   if (← statusOf pkg step) == 3 then IO.FS.removeFile traceFile
   else if after.hash != before.hash then
@@ -180,7 +183,8 @@ def compiled (pkg : Package) (challenge : Lake.Module) : JobM (Array String) := 
 package_facet softwareChallengeStatement pkg : Unit := do
   let prepared ← prepare pkg pkg.testDriverArgs
   let steps ← stepsJob
-  unless prepared.importers.isEmpty do return ← steps.mapM fun _ => record pkg "importer" prepared (pure #["statement"])
+  unless prepared.importers.isEmpty do
+    return ← steps.mapM fun _ => record pkg "statement" prepared (pure #["importers"])
   let some challenge := prepared.challenge? | steps.mapM fun _ => record pkg "statement" prepared
   let arts ← (← (← challenge.imports.fetch).await).mapM fun mod => do return (← mod.leanArts.fetch).map fun _ => ()
   (steps.mix (Job.mixArray arts)).mapM fun _ => record pkg "statement" prepared (compiled pkg challenge)
@@ -188,7 +192,8 @@ package_facet softwareChallengeStatement pkg : Unit := do
 package_facet softwareChallenge pkg : Unit := do
   let prepared ← prepare pkg pkg.testDriverArgs
   let steps ← stepsJob
-  unless prepared.importers.isEmpty do return ← steps.mapM fun _ => record pkg "importer" prepared (pure #["lint"])
+  unless prepared.importers.isEmpty do
+    return ← steps.mapM fun _ => record pkg "lint" prepared (pure #["importers"])
   let arts ← (prepared.catalog ++ prepared.challenge?.toArray).mapM fun mod => do
     return (← mod.leanArts.fetch).map fun _ => ()
   (steps.mix (Job.mixArray arts)).mapM fun _ => record pkg "lint" prepared
@@ -219,7 +224,8 @@ def gateInputs : String → List System.FilePath
 
 def gateRun (pkg : Package) (run : String) : FetchM (Job Unit) := do
   let (some gate, some grade, some library) := (pkg.findLeanExe? `«lsc-gate», pkg.findLeanExe? `grade,
-    pkg.findLeanLib? `SoftwareChallenge) | error "lakefile.lean lacks lsc-gate, grade or SoftwareChallenge"
+    pkg.findLeanLib? `SoftwareChallenge) | error s!"lakefile.lean declares no lean_exe «lsc-gate», lean_exe «grade» \
+      or lean_lib «SoftwareChallenge», so no real run can start. Restore them, then run `lake build {run}Run`."
   let inputs ← (gateInputs run).toArray.mapM fun dir => return (← inputDir (pkg.dir / dir) true fun path =>
     !path.components.contains ".lake" && path.fileName != some "comparator.json").map fun _ => ()
   let deps := #[(← gate.exe.fetch).map (fun _ => ()), (← grade.exe.fetch).map (fun _ => ()),

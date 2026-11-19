@@ -27,18 +27,22 @@ def importers (lakeFile : System.FilePath) : IO UInt32 := do
     "lake lint" .lint)
   return 1
 
-def textLintSection (part : String) : Bool :=
-  part.startsWith "-- Text linter diagnostics" || part.startsWith "Text linter diagnostics"
+def withoutTextLints (lines : List String) : List String :=
+  let (kept, _) := lines.foldl (init := ([], false)) fun (kept, skipping) line =>
+    if line.startsWith "-- Text linter diagnostics" then (kept, true)
+    else if skipping && !line.startsWith "-- " then (kept, true)
+    else (line :: kept, false)
+  kept.reverse
 
 def environmentLinters (lake : LakeFacts) (lakeCommand : String) (targets : List String) : IO Bool := do
   let builtin ← IO.Process.output
     { cmd := lakeCommand, args := #["lint", "--builtin-only"] ++ targets.toArray, cwd := lake.packageDir }
-  let sections := (builtin.stdout.splitOn "\n-- ").filter (!textLintSection ·)
-  IO.print ("\n-- ".intercalate sections)
+  let shown := withoutTextLints (builtin.stdout.splitOn "\n")
+  IO.print ("\n".intercalate shown)
   IO.eprint builtin.stderr
   (← IO.getStdout).flush
   return builtin.exitCode == 0 || !(builtin.stderr.contains "error" ||
-    sections.any fun part => part.startsWith "Found " || part.contains "error:")
+    shown.any fun line => line.startsWith "-- Found " || line.contains "error:")
 
 def drive (lakeFile : System.FilePath) (targets : List String) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .lint
@@ -47,10 +51,13 @@ def drive (lakeFile : System.FilePath) (targets : List String) : IO UInt32 := do
   let ran := (lakeFile.parent.getD ".") / "lint.ran"
   if ← ran.pathExists then IO.FS.removeFile ran
   discard <| (← IO.Process.spawn
-    { cmd := lakeCommand, args := #["build", ":softwareChallenge"], cwd := lake.packageDir }).wait
+    { cmd := lakeCommand, args := #["build", "--log-level=error", ":softwareChallenge"], cwd := lake.packageDir }).wait
   let status := (lakeFile.parent.getD ".") / "lint.status"
-  let code ← if (← ran.pathExists) && (← status.pathExists) then
-      pure (((← IO.FS.readFile status).trimAscii.toString.toNat?).getD 3).toUInt32
+  let code ← if (← ran.pathExists) && (← status.pathExists) then do
+      let code := (((← IO.FS.readFile status).trimAscii.toString.toNat?).getD 3).toUInt32
+      let report := (lakeFile.parent.getD ".") / "lint.out"
+      if (code == 0 || code == 2) && (← report.pathExists) then IO.print (← IO.FS.readFile report)
+      pure code
     else do
       IO.eprintln "lake lint could not build the package's modules, as printed above, so the audit did not run. Fix \
         each error above; when the linker reports a `multiple definition`, two modules define the same name, or two \

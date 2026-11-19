@@ -41,6 +41,13 @@ def unrun (dir : System.FilePath) : String :=
   s!"{dir / "Checks.lean"}:1: the Checks runner did not start, as `lake lean` printed above, so no Check ran. Fix the \
     errors it reports in the package's modules, then run `lake test`."
 
+def crashed (ran : Checks.Ran) (output : IO.Process.Output) : Checks.Ran :=
+  let native := ((output.stdout ++ output.stderr).splitOn "\n").find?
+    (·.contains "Could not find native implementation of external declaration")
+  match native, ran.finished with
+  | some line, false => { ran with outcomes := ran.declared.map fun check => { check, elapsed := 0, error? := some line } }
+  | _, _ => ran
+
 def run (lakeFile : System.FilePath) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .test
   let dir := lakeFile.parent.getD "."
@@ -48,7 +55,7 @@ def run (lakeFile : System.FilePath) : IO UInt32 := do
   unless ran?.any (·.finished) do
     IO.print output.stdout
     IO.eprint output.stderr
-  let some ran := ran? | do IO.eprintln (unrun dir); return 1
+  let some ran := ran?.map (crashed · output) | do IO.eprintln (unrun dir); return 1
   let ownTests ← lake.ownTests.mapM (runOwnTest lake)
   let result := SoftwareChallenge.Test.run {
     declaredChecks := ran.declared
