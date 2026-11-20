@@ -87,10 +87,13 @@ def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Probl
   let mut problems := #[]
   for headline in challenge.headlines do
     unless challenge.kills.any (·.2 == headline) do
+      let type ← typeOf headline
+      let fix ← if type.getUsedConstants.any challenge.holes.contains then
+          pure s!"Add `@[kills {headline}] theorem {headline.getString!}_rejects : \
+            {← killTemplate challenge.holes type} := by sorry`, with each ?wrong_ a wrong closed term"
+        else pure s!"State {headline} about a hole, since a kill replaces holes, or make it a lemma of an owned module"
       problems := problems.push (← problem .kill headline s!"headline {headline} has no kill"
-        "so nothing shows that it rejects a wrong implementation"
-        s!"Add `@[kills {headline}] theorem {headline.getString!}_rejects : \
-          {← killTemplate challenge.holes (← typeOf headline)} := by sorry`, with each ?wrong_ a wrong closed term")
+        "so nothing shows that it rejects a wrong implementation" fix)
   for (kill, headline) in challenge.kills do
     let rejects := challenge.headlines.contains headline &&
       Shape.rejects challenge.holes.contains (Shape.ofExpr (← typeOf headline)) (Shape.ofExpr (← typeOf kill))

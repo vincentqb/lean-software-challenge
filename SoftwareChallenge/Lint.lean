@@ -47,8 +47,8 @@ def declaredAs : ConstantInfo → String
 def standing (plan : Plan) (permitted : Array Name) (stated : Stated) : MetaM (Option Problem) := do
   let name := stated.info.name
   let some found := (← getEnv).find? name | return some (lintProblem .pending stated.place
-    s!"{stated.kind} {name} is not in {plan.solution} or a module it imports"
-    "so the comparator cannot find it there" s!"State it there as {stated.place} does, with a proof or definition")
+    s!"{stated.kind} {name} is not in {plan.solution} or a module it imports" "so the comparator cannot check it"
+    s!"Declare {name} : `{← shown stated.info.type}` there, as {stated.place} states it")
   let place ← plan.place name
   if declaredAs found != declaredAs stated.info || found.levelParams != stated.info.levelParams ||
       Shape.ofExpr found.type != Shape.ofExpr stated.info.type then
@@ -60,8 +60,11 @@ def standing (plan : Plan) (permitted : Array Name) (stated : Stated) : MetaM (O
   if axioms.contains ``sorryAx then
     return some (lintProblem .pending place s!"{stated.kind} {name} uses sorry" "so it is not proved yet"
       "Replace each sorry it relies on with a proof or a definition")
-  return (axioms.find? (!permitted.contains ·)).map fun used => lintProblem .axiomUsed place
-    s!"{stated.kind} {name} uses the axiom {used}" "which comparator.json does not permit, so the comparator rejects it"
+  let allowed := if stated.kind == "consistency theorem" then standardAxioms else permitted
+  return (axioms.find? (!allowed.contains ·)).map fun used => lintProblem .axiomUsed place
+    s!"{stated.kind} {name} uses the axiom {used}"
+    (if permitted.contains used then "so it does not show that the world claims can hold without assuming them"
+      else "which comparator.json does not permit, so the comparator rejects it")
     s!"Prove it without {used}, which `#print axioms {name}` traces"
 
 def purity (plan : Plan) (challenge : Challenge) (checked : NameSet) (hole : Name) : MetaM (Array Problem × NameSet) := do
