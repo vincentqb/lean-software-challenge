@@ -5,6 +5,7 @@
   `SoftwareChallengeReadTests/`.
 - In `Examples/ConstantFolding/`, do not edit `Challenge.lean`, `owned.lock`,
   `ConstantFolding/CoreSpec.lean`, or `ConstantFolding/WorldSpec.lean`; propose changes instead.
+- LSC assumes well-intentioned agents, so its rules and reviews target honest mistakes, not forgery.
 - Give every rule a fixture it rejects.
 - Validate with `lake build && lake lint && lake test`, and run `lake test -- full` after landing.
 - Every message names the declaration, file, and line, says why in one clause, gives the exact fix,
