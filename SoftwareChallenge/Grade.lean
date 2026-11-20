@@ -83,17 +83,19 @@ def quoted (word : String) : String := "'" ++ word.replace "'" "'\\''" ++ "'"
 
 def sourceOf (module : Name) : String := "/".intercalate (module.components.map toString) ++ ".lean"
 
-partial def importClosure (base : FilePath) (file : String) (seen : Array String) : IO (Array String) := do
+partial def importClosure (base : FilePath) (fileOf : Name → String) (file : String) (seen : Array String) :
+    IO (Array String) := do
   if seen.contains file then return seen
   let header ← parseImports' (← IO.FS.readFile (base / file)) file
   header.imports.foldlM (init := seen.push file) fun seen dependency => do
-    let path := sourceOf dependency.module
-    if ← (base / path).pathExists then importClosure base path seen else return seen
+    let path := fileOf dependency.module
+    if ← (base / path).pathExists then importClosure base fileOf path seen else return seen
 
-def ownedPaths (base : FilePath) (challenge : String) : IO (Array String) := do
+def ownedPaths (base : FilePath) (challenge : String) (sources : Array (Name × String)) : IO (Array String) := do
   let configs ← #["lakefile.lean", "lakefile.toml", "lake-manifest.json", "lean-toolchain"].filterM
     fun (file : String) => (base / file).pathExists
-  return configs ++ (← importClosure base challenge #[])
+  let fileOf := fun (module : Name) => ((sources.find? (·.1 == module)).map (·.2)).getD (sourceOf module)
+  return configs ++ (← importClosure base fileOf challenge #[])
 
 structure Context where
   lake : String
@@ -141,6 +143,7 @@ structure BaseFacts where
   config : String
   solution : String
   challenge : String
+  sources : Array (Name × String)
   targets : Nat
   dependencies : Array Dependency
 
@@ -173,6 +176,8 @@ def statementStage (context : Context) : Judge BaseFacts := do
     let facts : Except String BaseFacts := do
       return { config := config.compress, solution := ← config.getObjValAs? String "solution_module"
                challenge := ← (← described.getObjVal? "challenge").getObjValAs? String "file"
+               sources := ← (← described.getObjValAs? (Array Json) "modules").mapM fun source => do
+                 return ((← source.getObjValAs? String "module").toName, ← source.getObjValAs? String "file")
                targets := (← config.getObjValAs? (Array Json) "theorem_names").size
                dependencies := ← (← described.getObjValAs? (Array Json) "packages").mapM Dependency.parse }
     match facts with
@@ -183,13 +188,13 @@ def statementStage (context : Context) : Judge BaseFacts := do
   | .error problem, _ | _, .error problem => stop .statement .cannotJudge s!"cannot judge: {problem}, so grade has \
       no statement to compare {context.candidate} with. Run `lake build` in {base}, {context.again}."
 
-def ownedStage (context : Context) (challenge : String) : Judge String := do
+def ownedStage (context : Context) (facts : BaseFacts) : Judge String := do
   let base := context.base
   let candidate := context.candidate
   let gitFails := s!"cannot judge: `git diff {candidate}` fails in {base}, as printed above, so grade cannot compare \
     the owned files. Fix what git reports, {context.again}."
   let packagePrefix := firstLine (← output "git" #["rev-parse", "--show-prefix"] base).stdout
-  let owned := (← ownedPaths base challenge).map fun path =>
+  let owned := (← ownedPaths base facts.challenge facts.sources).map fun path =>
     ":(top,literal)" ++ "/".intercalate (components packagePrefix ++ components path)
   let differ := fun (revisions : Array String) => run "git" (#["diff", "--quiet"] ++ revisions ++ #["--"] ++ owned) base
   match ← differ #[candidate] with
@@ -214,7 +219,7 @@ def ownedStage (context : Context) (challenge : String) : Judge String := do
   let files := (names.stdout.splitOn "\n").filter (!·.isEmpty)
   let restore := " ".intercalate (files.map fun file => quoted s!":(top,literal){file}")
   let changed : Problem := {
-    rule := .owned, place := s!"{files.headD challenge}:1", next := s!"lake exe grade {candidate}"
+    rule := .owned, place := s!"{files.headD facts.challenge}:1", next := s!"lake exe grade {candidate}"
     what := s!"{candidate} changes the owned files {", ".intercalate files}"
     why := s!"which Challenge.lean and its imports state, so {candidate} solves another challenge"
     fix := s!"Restore them on {candidate} (`git checkout {candidate} && git restore --source={context.baseRef} \
@@ -292,7 +297,7 @@ def judge (context : Context) (passed : IO.Ref (Array Observation)) : Judge Unit
   accept .commit s!"{context.candidate} is a commit of the repository at {context.base}"
   let facts ← guarded context .statement (statementStage context)
   accept .statement s!"comparator.json states {facts.targets} theorems"
-  let packagePrefix ← guarded context .owned (ownedStage context facts.challenge)
+  let packagePrefix ← guarded context .owned (ownedStage context facts)
   accept .owned "the owned files are unchanged"
   guarded context .dependencies (dependenciesStage context facts)
   accept .dependencies s!"the comparator's sandbox sees all {facts.dependencies.size} dependencies"
