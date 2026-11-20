@@ -30,18 +30,39 @@ def isLocalHole (env : Environment) (name : Name) : Bool :=
 
 def replaceableHere (env : Environment) (name : Name) : Bool := isLocalHole env name || isForeign env name
 
-private def abbreviates (name : Name) : MetaM Bool := do
+private def hiddenDefinition? (env : Environment) (name : Name) : IO (Option DefinitionVal) := do
+  let some index := env.getModuleIdxFor? name | return none
+  try
+    let olean ← findOLean env.header.moduleNames[index.toNat]!
+    let parts ← readModuleDataParts #[olean, olean.addExtension "server", olean.addExtension "private"]
+    let some (data, _) := parts.back? | return none
+    return (data.constNames.zip data.constants).findSome? fun
+      | (found, .defnInfo info) => if found == name then some info else none
+      | _ => none
+  catch _ => return none
+
+private def definitionOf? (name : Name) : MetaM (Option DefinitionVal) := do
   let env ← getEnv
-  let some (.defnInfo info) := env.find? name | return false
-  unless !isWorldClaim env name && roleOf env name matches .coreSpec | .worldSpec do return false
-  forallTelescopeReducing info.type fun _ result => return (← whnf result).isProp
+  match env.find? name with
+  | some (.defnInfo info) => return some info
+  | some (.axiomInfo _) => hiddenDefinition? env name
+  | _ => return none
+
+private def abbreviation? (name : Name) : MetaM (Option DefinitionVal) := do
+  let env ← getEnv
+  unless !isWorldClaim env name && roleOf env name matches .coreSpec | .worldSpec do return none
+  let some info ← definitionOf? name | return none
+  unless ← forallTelescopeReducing info.type fun _ result => return (← whnf result).isProp do return none
+  return some info
 
 partial def unfolded (type : Expr) : MetaM Expr :=
   forallTelescope type fun binders body => do
     let body := body.consumeMData
-    let .const name _ := body.getAppFn | return type
-    unless ← abbreviates name do return type
-    let some expanded ← delta? body (· == name) | return type
+    let .const name levels := body.getAppFn | return type
+    let some info ← abbreviation? name | return type
+    unless info.levelParams.length == levels.length do return type
+    let expanded := (info.value.instantiateLevelParams info.levelParams levels).betaRev body.getAppRevArgs
+      (useZeta := true)
     mkForallFVars binders (← unfolded expanded)
 
 def summarize (replaceable : Name → Bool) (binders : Array Expr) : MetaM (Array Binder) := do

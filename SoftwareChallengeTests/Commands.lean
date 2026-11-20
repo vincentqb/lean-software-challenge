@@ -50,6 +50,12 @@ theorem double_listed_applies_holds : type_of% WitnessChallenge.double_listed_ap
 theorem succ_hits_one_everywhere_applies_holds : type_of% WitnessChallenge.succ_hits_one_everywhere_applies :=
   fun everywhere => ⟨0, everywhere 0⟩
 
+#guard_expr type_of% WitnessChallenge.double_hidden_applies =ₐ
+  ∃ n : Nat, ∃ n_1 : Nat, WitnessChallenge.double n < WitnessChallenge.double n + 1 ∧ 0 ≤ WitnessChallenge.double n_1
+
+theorem double_hidden_applies_holds : type_of% WitnessChallenge.double_hidden_applies :=
+  ⟨0, 0, Nat.lt_add_one _, Nat.zero_le _⟩
+
 meta section
 
 open Lean SoftwareChallenge

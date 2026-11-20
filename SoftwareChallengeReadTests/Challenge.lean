@@ -80,13 +80,16 @@ run_cmd Elab.Command.liftCoreM do
     (`succ_hits_one, "SoftwareChallengeTests.Fixtures.SuccAgrees SoftwareChallengeTests.Fixtures.nativeSucc → ∃ n, \
       SoftwareChallengeTests.Fixtures.nativeSucc n = 1", 39),
     (`double_negative_vanishes, "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 0", 52),
+    (`double_nonnegative_vanishes, "∃ n, 0 ≤ SoftwareChallengeTests.Fixtures.WitnessChallenge.double n", 57),
     (`double_zero_fin, "∃ n inst, SoftwareChallengeTests.Fixtures.WitnessChallenge.double ↑0 = 0", 67),
     (`double_first, "∃ n h, ↑⟨0, h⟩ = 0", 72), (`double_fin, "∃ i, True", 77),
     (`double_under_claim, "(∀ (m : Nat), m > 0 → SoftwareChallengeTests.Fixtures.SuccAt m) → ∃ n, \
       SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 5", 81),
     (`double_at, "∃ n, SoftwareChallengeTests.Fixtures.SuccAt n ∧ \
       SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 1", 86),
-    (`double_hidden, "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4", 96)]
+    (`double_hidden, "∃ n n_1, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double n + 1 ∧ 0 ≤ \
+      SoftwareChallengeTests.Fixtures.WitnessChallenge.double n_1", 96)]
   let conjoined := [(`succ_vanishes, "∃ f n, SoftwareChallengeTests.Fixtures.SuccAgrees f ∧ \
       f (SoftwareChallengeTests.Fixtures.WitnessChallenge.double n) = 0", 112),
     (`double_listed, "∃ listed, SoftwareChallengeTests.Fixtures.SuccAgreesOn listed ∧ \
@@ -108,10 +111,10 @@ run_cmd Elab.Command.liftCoreM do
   check (challenge.witnesses.all fun witness => witness.target.enclosingNamespace == fixture `WitnessChallenge &&
       (witness.target.signature.isEmpty == witness.derived))
     "a witness's namespace or signature was misread"
-  check ((Statement.witnessErrors challenge).filter (· matches .witnessMisstated ..) ==
-      #[.witnessMisstated (member `double_hidden_applies) (member `double_hidden)])
-    s!"a derived witness but double_hidden's, whose conclusion hides a precondition in a definition the challenge \
-      cannot unfold, states other than Witness.build: {repr (Statement.witnessErrors challenge)}"
+  check (Statement.witnessErrors challenge ==
+      #[.witnessPredeclared (member `double_odd_applies) (member `double_odd)])
+    s!"a derived witness states other than Witness.build, or a headline lacks one: \
+      {repr (Statement.witnessErrors challenge)}"
   check (Statement.unprovableErrors challenge ==
       #[.witnessUnprovable (member `succ_hits_one_at) 2 (fixture `nativeSucc) 1])
     s!"a precondition about nativeSucc that only an input claim constrains was misjudged: \
@@ -159,15 +162,14 @@ run_cmd Elab.Command.liftCoreM do
       #[fixture `SuccAgrees]) "a world claim a WorldSpec definition wraps was not read as assumed"
   check (challenge.claims.contains (fixture `SuccAgrees) && challenge.claims.contains (fixture `SuccAt))
     "the world claims of the challenge's environment were misread"
-  let hidden ← headline challenge (member `double_nonnegative_vanishes)
-  check (Telescope.needsWitness (hidden.binders challenge) &&
-      !challenge.witnesses.any (·.headline == hidden.target.constant.name) &&
-      hidden.witness? == some "∃ n, 0 ≤ SoftwareChallengeTests.Fixtures.WitnessChallenge.double n")
-    "a precondition that a hidden definition holds was not read as needing a witness that no kill derived"
-  check ((← headline challenge (member `double_hidden)).witness? == some ("∃ n n_1, \
-      SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4 ∧ 0 ≤ \
-      SoftwareChallengeTests.Fixtures.WitnessChallenge.double n_1"))
-    "the witness a hidden definition calls for was misread"
+  for name in [`double_nonnegative_vanishes, `double_hidden] do
+    let hidden ← headline challenge (member name)
+    check (Telescope.needsWitness (hidden.binders challenge) && challenge.witnesses.any fun witness =>
+        witness.headline == hidden.target.constant.name && witness.derived &&
+          witness.target.constant.type == hidden.expectedWitness challenge &&
+          hidden.witness? == some witness.target.rendered)
+      s!"the kill of {name} did not derive the witness Witness.build calls for, with the precondition that \
+        NonnegativeVanishes hides, though Fixtures.CoreSpec does not expose it"
   check (challenge.replaceable == #[member `double, fixture `wrongSucc, fixture `nativeSucc])
     s!"the replaceable constants, the holes and the WorldSpec foreign functions, were misread: {challenge.replaceable}"
   check ((← headline challenge (member `succ_hits_one)).killTemplate? == some "¬(SoftwareChallengeTests.Fixtures.\
