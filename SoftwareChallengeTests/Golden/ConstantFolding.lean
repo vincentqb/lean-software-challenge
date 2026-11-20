@@ -7664,6 +7664,9 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                   meaning := SoftwareChallenge.Shape.forallE
                                                                (SoftwareChallenge.Shape.const `Nat [])
                                                                (SoftwareChallenge.Shape.const `Nat []),
+                                                  expanded := SoftwareChallenge.Shape.forallE
+                                                                (SoftwareChallenge.Shape.const `Nat [])
+                                                                (SoftwareChallenge.Shape.const `Nat []),
                                                   prop := false,
                                                   shown := "Nat → Nat",
                                                   conclusion := "Nat",
@@ -7673,6 +7676,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                 { name := "e",
                                                   type := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   meaning := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
+                                                  expanded := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   prop := false,
                                                   shown := "ConstantFolding.Expr",
                                                   conclusion := "ConstantFolding.Expr",
@@ -8036,6 +8040,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                   telescope := [{ name := "e",
                                                   type := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   meaning := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
+                                                  expanded := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   prop := false,
                                                   shown := "ConstantFolding.Expr",
                                                   conclusion := "ConstantFolding.Expr",
@@ -8071,6 +8076,20 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                                      [])
                                                                    (SoftwareChallenge.Shape.bvar 0)))
                                                                (SoftwareChallenge.Shape.const `Bool.true []),
+                                                  expanded := SoftwareChallenge.Shape.app
+                                                                (SoftwareChallenge.Shape.app
+                                                                  (SoftwareChallenge.Shape.app
+                                                                    (SoftwareChallenge.Shape.const
+                                                                      `Eq
+                                                                      [SoftwareChallenge.Universe.succ
+                                                                         (SoftwareChallenge.Universe.zero)])
+                                                                    (SoftwareChallenge.Shape.const `Bool []))
+                                                                  (SoftwareChallenge.Shape.app
+                                                                    (SoftwareChallenge.Shape.const
+                                                                      `ConstantFolding.closed
+                                                                      [])
+                                                                    (SoftwareChallenge.Shape.bvar 0)))
+                                                                (SoftwareChallenge.Shape.const `Bool.true []),
                                                   prop := true,
                                                   shown := "ConstantFolding.closed e = true",
                                                   conclusion := "ConstantFolding.closed e = true",
@@ -8376,6 +8395,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                   telescope := [{ name := "e",
                                                   type := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   meaning := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
+                                                  expanded := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   prop := false,
                                                   shown := "ConstantFolding.Expr",
                                                   conclusion := "ConstantFolding.Expr",
@@ -8690,6 +8710,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                   telescope := [{ name := "e",
                                                   type := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   meaning := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
+                                                  expanded := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   prop := false,
                                                   shown := "ConstantFolding.Expr",
                                                   conclusion := "ConstantFolding.Expr",
@@ -9029,6 +9050,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                   telescope := [{ name := "n",
                                                   type := SoftwareChallenge.Shape.const `Nat [],
                                                   meaning := SoftwareChallenge.Shape.const `Nat [],
+                                                  expanded := SoftwareChallenge.Shape.const `Nat [],
                                                   prop := false,
                                                   shown := "Nat",
                                                   conclusion := "Nat",
@@ -9038,6 +9060,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                 { name := "m",
                                                   type := SoftwareChallenge.Shape.const `Nat [],
                                                   meaning := SoftwareChallenge.Shape.const `Nat [],
+                                                  expanded := SoftwareChallenge.Shape.const `Nat [],
                                                   prop := false,
                                                   shown := "Nat",
                                                   conclusion := "Nat",
@@ -9091,6 +9114,30 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                                    `ConstantFolding.Expr.lit
                                                                    [])
                                                                  (SoftwareChallenge.Shape.bvar 0)),
+                                                  expanded := SoftwareChallenge.Shape.app
+                                                                (SoftwareChallenge.Shape.app
+                                                                  (SoftwareChallenge.Shape.app
+                                                                    (SoftwareChallenge.Shape.const
+                                                                      `Eq
+                                                                      [SoftwareChallenge.Universe.succ
+                                                                         (SoftwareChallenge.Universe.zero)])
+                                                                    (SoftwareChallenge.Shape.const
+                                                                      `ConstantFolding.Expr
+                                                                      []))
+                                                                  (SoftwareChallenge.Shape.app
+                                                                    (SoftwareChallenge.Shape.const
+                                                                      `ConstantFolding.fold
+                                                                      [])
+                                                                    (SoftwareChallenge.Shape.app
+                                                                      (SoftwareChallenge.Shape.const
+                                                                        `ConstantFolding.Expr.lit
+                                                                        [])
+                                                                      (SoftwareChallenge.Shape.bvar 1))))
+                                                                (SoftwareChallenge.Shape.app
+                                                                  (SoftwareChallenge.Shape.const
+                                                                    `ConstantFolding.Expr.lit
+                                                                    [])
+                                                                  (SoftwareChallenge.Shape.bvar 0)),
                                                   prop := true,
                                                   shown := "ConstantFolding.fold (ConstantFolding.Expr.lit n) = ConstantFolding.Expr.lit m",
                                                   conclusion := "ConstantFolding.fold (ConstantFolding.Expr.lit n) = ConstantFolding.Expr.lit m",
@@ -9491,6 +9538,50 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                                (SoftwareChallenge.Shape.const
                                                                  `ConstantFolding.nativeAdd
                                                                  []),
+                                                  expanded := SoftwareChallenge.Shape.forallE
+                                                                (SoftwareChallenge.Shape.const `Nat [])
+                                                                (SoftwareChallenge.Shape.forallE
+                                                                  (SoftwareChallenge.Shape.const `Nat [])
+                                                                  (SoftwareChallenge.Shape.app
+                                                                    (SoftwareChallenge.Shape.app
+                                                                      (SoftwareChallenge.Shape.app
+                                                                        (SoftwareChallenge.Shape.const
+                                                                          `Eq
+                                                                          [SoftwareChallenge.Universe.succ
+                                                                             (SoftwareChallenge.Universe.zero)])
+                                                                        (SoftwareChallenge.Shape.const `Nat []))
+                                                                      (SoftwareChallenge.Shape.app
+                                                                        (SoftwareChallenge.Shape.app
+                                                                          (SoftwareChallenge.Shape.const
+                                                                            `ConstantFolding.nativeAdd
+                                                                            [])
+                                                                          (SoftwareChallenge.Shape.bvar 1))
+                                                                        (SoftwareChallenge.Shape.bvar 0)))
+                                                                    (SoftwareChallenge.Shape.app
+                                                                      (SoftwareChallenge.Shape.app
+                                                                        (SoftwareChallenge.Shape.app
+                                                                          (SoftwareChallenge.Shape.app
+                                                                            (SoftwareChallenge.Shape.app
+                                                                              (SoftwareChallenge.Shape.app
+                                                                                (SoftwareChallenge.Shape.const
+                                                                                  `HAdd.hAdd
+                                                                                  [SoftwareChallenge.Universe.zero,
+                                                                                   SoftwareChallenge.Universe.zero,
+                                                                                   SoftwareChallenge.Universe.zero])
+                                                                                (SoftwareChallenge.Shape.const `Nat []))
+                                                                              (SoftwareChallenge.Shape.const `Nat []))
+                                                                            (SoftwareChallenge.Shape.const `Nat []))
+                                                                          (SoftwareChallenge.Shape.app
+                                                                            (SoftwareChallenge.Shape.app
+                                                                              (SoftwareChallenge.Shape.const
+                                                                                `instHAdd
+                                                                                [SoftwareChallenge.Universe.zero])
+                                                                              (SoftwareChallenge.Shape.const `Nat []))
+                                                                            (SoftwareChallenge.Shape.const
+                                                                              `instAddNat
+                                                                              [])))
+                                                                        (SoftwareChallenge.Shape.bvar 1))
+                                                                      (SoftwareChallenge.Shape.bvar 0)))),
                                                   prop := true,
                                                   shown := "ConstantFolding.AddAgrees ConstantFolding.nativeAdd",
                                                   conclusion := "ConstantFolding.AddAgrees ConstantFolding.nativeAdd",
@@ -9499,6 +9590,7 @@ def constantFolding : SoftwareChallenge.Facts :=
                                                 { name := "e",
                                                   type := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   meaning := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
+                                                  expanded := SoftwareChallenge.Shape.const `ConstantFolding.Expr [],
                                                   prop := false,
                                                   shown := "ConstantFolding.Expr",
                                                   conclusion := "ConstantFolding.Expr",
