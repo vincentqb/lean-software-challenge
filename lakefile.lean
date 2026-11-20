@@ -31,7 +31,7 @@ lean_lib «SoftwareChallengeReadFixtures» where
   globs := #[.submodules `SoftwareChallengeReadTests.Fixtures]
 
 lean_lib «SoftwareChallengeReadTests» where
-  needs := #[`@/SoftwareChallengeFixtures:leanArts, `@/SoftwareChallengeReadFixtures:leanArts]
+  needs := #[`@/SoftwareChallengeFixtures, `@/SoftwareChallengeReadFixtures]
 
 lean_exe «grade» where root := `SoftwareChallenge.Steps.Grade
 
@@ -143,12 +143,12 @@ def record (pkg : Package) (step : String) (prepared : Prepared) (args : Array S
 def stepsJob : FetchM (Job Unit) := do
   let some steps ← findModule? `SoftwareChallenge.Steps | error "SoftwareChallenge.Steps is not in the workspace, so \
     no step can run. Require software_challenge in lakefile.lean, then run `lake build`."
-  return (← steps.leanArts.fetch).map fun _ => ()
+  return (← steps.irArts.fetch).map fun _ => ()
 
 def stepJob (pkg : Package) (step : String) (prepared : Prepared) (mods : Array Lake.Module) (args : Array String) :
     FetchM (Job Unit) := do
   let (mods, args) := if prepared.importers.isEmpty then (mods, args) else (#[], #["importers"])
-  let arts ← mods.mapM fun mod => return (← mod.leanArts.fetch).map fun _ => ()
+  let arts ← mods.mapM fun mod => return (← mod.irArts.fetch).map fun _ => ()
   ((← stepsJob).mix (Job.mixArray arts)).mapM fun _ => record pkg step prepared args
 
 package_facet softwareChallengeStatement pkg : Unit := do
@@ -196,7 +196,7 @@ def gateRun (pkg : Package) (run : String) (dir : System.FilePath) : FetchM (Job
   let files ← inputDir (pkg.dir / dir) true fun path =>
     !path.components.contains ".lake" && path.fileName != some "comparator.json"
   let deps := (((← «lsc-gate».fetch).mix (← grade.fetch)).mix ((← «SoftwareChallenge».fetch).mix files)).mix
-    (← read.leanArts.fetch)
+    (← read.irArts.fetch)
   deps.mapM fun _ => do
     addLeanTrace
     for file in [pkg.configFile, pkg.manifestFile, pkg.dir / "lean-toolchain", runner] do
