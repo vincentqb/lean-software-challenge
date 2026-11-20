@@ -3,6 +3,7 @@ import Lake.Load.Manifest
 open Lean Lake DSL
 
 package «software_challenge» where
+  testDriver := "test"
   builtinLint := true
   leanOptions := #[⟨`autoImplicit, false⟩, ⟨`linter.all, true⟩, ⟨`linter.missingDocs, false⟩]
 
@@ -13,6 +14,8 @@ lean_lib «SoftwareChallenge» where
 
 @[default_target]
 lean_exe «grade» where root := `SoftwareChallenge.Grade
+
+lean_lib «SoftwareChallengeTests» where globs := #[.andSubmodules `SoftwareChallengeTests]
 
 def runner : System.FilePath := __dir__ / "SoftwareChallengeRun.lean"
 
@@ -80,3 +83,12 @@ script lint do
     let built ← (roots.push challenge).mapM fun mod => return (← mod.olean.fetch).map fun _ => ()
     return ((← stepsJob).mix (Job.mixArray built)).map fun _ => plan
   (← IO.Process.spawn (← stepProcess pkg "lint" plan (← getLean) (← getAugmentedEnv))).wait
+
+script test do
+  let pkg ← getRootPackage
+  runBuild do
+    let some suite ← findModule? `SoftwareChallengeTests.Suite | error "SoftwareChallengeTests.Suite is missing"
+    let some run ← findModule? `SoftwareChallengeRun | error "SoftwareChallengeRun is missing"
+    return (((← suite.irArts.fetch).mix (← run.irArts.fetch)).mix (← stepsJob)).mix ((← grade.fetch).map fun _ => ())
+  (← IO.Process.spawn { cmd := (← getLean).toString, args := #["--run", (pkg.dir / "SoftwareChallengeTests.lean").toString]
+                        cwd := pkg.dir, env := ← getAugmentedEnv }).wait
