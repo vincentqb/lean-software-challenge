@@ -3,6 +3,7 @@ module
 meta import SoftwareChallenge.Steps.Schedule
 meta import SoftwareChallenge.Steps.Replay
 meta import SoftwareChallenge.Steps.Test
+meta import SoftwareChallenge.Steps.Lint
 
 meta section
 
@@ -58,5 +59,17 @@ def twoExes : SoftwareChallenge.LakeFacts :=
   #[#[`App.CoreCode, `App.WorldCode], #[`App.Tool]]
 
 #guard (Test.checkGroups { twoExes with defaultExeRoots := #[`App.WorldCode] }).size == 1
+
+def twoTops : Array (Name × NameSet) := Lint.firstLinted #[
+  (`App.Solution, #[`App.Solution, `App.Proofs, `App.CoreCode, `Init]),
+  (`App.Extra, #[`App.Extra, `App.Proofs, `App.CoreCode, `Init])]
+
+#guard twoTops.map (·.1) == #[`App.Solution, `App.Extra]
+
+#guard twoTops.map (·.2.size) == #[3, 1]
+
+#guard twoTops.all fun (top, linted) => linted.contains top
+
+#guard (twoTops.filter (·.2.contains `App.Proofs)).map (·.1) == #[`App.Solution]
 
 end SoftwareChallengeTests.Steps
