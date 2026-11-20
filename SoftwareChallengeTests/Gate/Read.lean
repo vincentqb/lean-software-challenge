@@ -16,7 +16,7 @@ def source (module : Name) : SourceFact :=
 def casesLake (dir : String) (modules : Array Name) : LakeFacts :=
   { packageDir := dir, configFiles := #["lakefile.lean"], modules := modules.map source,
     challengeCandidates := #[source `Challenge], defaultExeRoots := #[], packages := #[], defaultTargets := #[`Cases],
-    builtinLint := none, testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
+    testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
     testDriverArgsPlace := { file := "lakefile.lean", line := 1 }, ownTests := #[],
     inputs := #["owned.lock", "comparator.json"] }
 

@@ -52,7 +52,7 @@ def twoExes : SoftwareChallenge.LakeFacts :=
     modules := #[⟨`App.CoreCode, "App/CoreCode.lean"⟩, ⟨`App.Tool, "App/Tool.lean"⟩,
       ⟨`App.WorldCode, "App/WorldCode.lean"⟩],
     challengeCandidates := #[], defaultExeRoots := #[`App.Tool, `App.WorldCode], packages := #[],
-    defaultTargets := #[`statement], builtinLint := none, testDriverArgs := #[],
+    defaultTargets := #[`statement], testDriverArgs := #[],
     testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 #guard (Test.checkGroups twoExes).map (·.map (·.module)) ==

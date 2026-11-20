@@ -388,13 +388,8 @@ def lintDriverSetup (lake : LakeFacts) : Array Setup :=
 def testDriverSetup (lake : LakeFacts) : Array Setup :=
   if lake.testDriver = auditTestDriver then #[] else #[.testDriver lake.testDriver]
 
-def builtinLintSetup (lake : LakeFacts) : Array Setup :=
-  match lake.builtinLint with
-  | some place => #[.builtinLint place]
-  | none => #[]
-
 def setupOf (lake : LakeFacts) : Array Setup :=
-  lintDriverSetup lake ++ testDriverSetup lake ++ builtinLintSetup lake
+  lintDriverSetup lake ++ testDriverSetup lake
 
 def run (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts) : Result :=
   let setup := setupOf lake

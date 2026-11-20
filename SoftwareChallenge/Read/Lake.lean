@@ -31,7 +31,6 @@ structure LakeConfig where
   defaultExeRoots : Array Name
   packages : Array PackageFact
   defaultTargets : Array Name
-  builtinLint : Bool
   lintDriver : String
   testDriver : String
   testDriverArgs : Array String
@@ -62,7 +61,6 @@ def LakeConfig.facts (lake : LakeConfig) (config : String) : LakeFacts :=
     challengeCandidates := lake.challengeCandidates, defaultExeRoots := lake.defaultExeRoots
     packages := lake.packages.map fun package => { package with configured := lexical package.configured }
     defaultTargets := lake.defaultTargets, lintDriver := lake.lintDriver, testDriver := lake.testDriver
-    builtinLint := if lake.builtinLint then some (place (·.contains "builtinLint")) else none
     testDriverArgs := lake.testDriverArgs, testDriverArgsPlace := place (·.contains "testDriverArgs")
     ownTests := lake.ownTests.map fun test => { name := test.name, kind := test.kind, place := place test.declaredIn }
     inputs := lake.inputs }

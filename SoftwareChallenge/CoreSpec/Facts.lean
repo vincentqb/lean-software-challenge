@@ -50,7 +50,6 @@ structure LakeFacts where
   defaultExeRoots : Array Name
   packages : Array PackageFact
   defaultTargets : Array Name
-  builtinLint : Option Place
   lintDriver : String := auditLintDriver
   testDriver : String := auditTestDriver
   testDriverArgs : Array String

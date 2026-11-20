@@ -59,7 +59,6 @@ inductive Error where
 inductive Setup where
   | lintDriver (found : String)
   | testDriver (found : String)
-  | builtinLint (place : Place)
   deriving BEq, Repr
 
 structure Writes where
@@ -151,6 +150,5 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
   lockCurrent : files.lock = .missing ∨ files.LockCurrent
   lintDriven : lake.lintDriver = auditLintDriver := by rfl
   testDriven : lake.testDriver = auditTestDriver := by rfl
-  builtinLintOff : lake.builtinLint = none := by rfl
 
 end SoftwareChallenge

@@ -82,9 +82,9 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
   let text := Json.pretty <| Json.mkObj [("packageDir", dir.toString), ("configFiles", toJson configs),
     ("modules", toJson (catalog.map source)), ("defaultExeRoots", toJson exeRoots), ("packages", toJson packages),
     ("challengeCandidates", toJson (candidates.filterMap (pkg.findModule? · |>.map source))),
-    ("defaultTargets", toJson pkg.defaultTargets), ("builtinLint", pkg.config.builtinLint? == some true),
-    ("lintDriver", pkg.lintDriver), ("testDriver", pkg.testDriver), ("testDriverArgs", toJson testArgs),
-    ("ownTests", toJson ownTests), ("inputs", toJson inputs)]
+    ("defaultTargets", toJson pkg.defaultTargets), ("lintDriver", pkg.lintDriver),
+    ("testDriver", pkg.testDriver), ("testDriverArgs", toJson testArgs), ("ownTests", toJson ownTests),
+    ("inputs", toJson inputs)]
   return { text, inputs, challenge?, catalog, owned, importers }
 
 def stepDir (pkg : Package) : System.FilePath := pkg.buildDir / "softwareChallenge"

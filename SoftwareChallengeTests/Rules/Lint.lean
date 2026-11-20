@@ -314,10 +314,6 @@ def importsTheChallenge : Facts := withSolution fun solution => { solution with
 
 #guard rejects importsTheChallenge (· matches .importsChallenge { module := `App.Solution, .. })
 
-def builtinLinted : Facts := withLake ({ · with builtinLint := some ⟨"lakefile.lean", 5⟩ })
-
-#guard rejects builtinLinted (· matches .builtinLintOn ⟨"lakefile.lean", 5⟩)
-
 def unreadableProof : Facts :=
   foundIn `App.Solution `App.fold_correct fun found => { found with constant := { found.constant with value? := none } }
 

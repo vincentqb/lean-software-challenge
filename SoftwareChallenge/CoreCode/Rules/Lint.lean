@@ -157,18 +157,13 @@ def challengeImports (facts : Facts) : Array Error :=
   facts.solution.imports.filterMap fun line =>
     if line.fact.name ≠ facts.challenge.module then none else some (.importsChallenge line)
 
-def builtinLintErrors (facts : Facts) : Array Error :=
-  match facts.lake.builtinLint with
-  | some place => #[.builtinLintOn place]
-  | none => #[]
-
 def errorsOf (facts : Facts) : Array Error :=
   unauditedModules facts ++ unauditedExeRoots facts ++ violations facts ++ duplicates facts ++
     holesOutsideCode facts ++ noncomputableHoles facts ++ fixpointsWithoutTerminates facts ++ notFixpoints facts ++
     mainOutsidePrograms facts ++ misplacedClaims facts ++ unreadableProofs facts ++ editableMetaImports facts ++
-    sorries facts ++ unlintedModules facts ++ lintWarnings facts ++ builtinLintErrors facts ++
-    challengeImports facts ++ solutionErrors facts ++ targetErrors facts ++ unreadOwnedFiles facts ++
-    lockErrors facts ++ comparatorErrors facts
+    sorries facts ++ unlintedModules facts ++ lintWarnings facts ++ challengeImports facts ++
+    solutionErrors facts ++ targetErrors facts ++ unreadOwnedFiles facts ++ lockErrors facts ++
+    comparatorErrors facts
 
 def drifted (facts : Facts) : Bool :=
   match facts.files.lock with

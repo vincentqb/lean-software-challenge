@@ -372,6 +372,34 @@ def presents (context : Context) (reference : Task (Option (List String))) (conf
       unchanged template's lists {targetsOf config}, so the statement step names the targets of {changed} \
       differently. {fix}, then run `{next}`."
 
+def builtinLinted : Presentation :=
+  { name := "builtinLint := true and fold_idempotent unproved", edits := [
+      ("lakefile.lean", replacing "package «constant_folding» where\n"
+        "package «constant_folding» where\n  builtinLint := true\n"),
+      (solutionFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  \
+        fold_eq_self_of_normal (fold e) (normal_fold e)\n\n" "")] }
+
+def unusedHypothesis : List Edit :=
+  [(solutionFile, appending "\ntheorem ConstantFolding.self_eq (n : Nat) (h : n = n) : n = n := rfl\n")]
+
+def builtinLintKeepsCodes (context : Context) : Trial Unit := do
+  let dir := presentationDir context builtinLinted
+  succeed (← context.lakeIn dir #["build"]) s!"the template with {builtinLinted.name} does not build"
+    s!"Fix what the output below reports, or the edits of builtinLinted in {source}" next
+  let pending ← context.lakeIn dir #["lint"]
+  unless pending.code == 2 do
+    throwThe String s!"`lake lint` exited {pending.code} in {dir}, expected 2, so a package that sets `builtinLint := \
+      true` and leaves only fold_idempotent unproved is not reported as pending. Make the lint driver report each \
+      finding of Lake's builtin lint printed below and exit 2 when only pending items remain, then run `{next}`.\n\
+      {pending.tail}"
+  applyEdits dir source next unusedHypothesis
+  let warned ← context.lakeIn dir #["lint"]
+  unless warned.code == 1 && warned.output.contains "Lean's linter linter.unusedVariables" do
+    throwThe String s!"`lake lint` exited {warned.code} in {dir}, expected 1 with lint's report of the unused \
+      hypothesis h of ConstantFolding.self_eq in {solutionFile}, so a package that sets `builtinLint := true` passes \
+      a warning of Lean's linters. Make the lint step refuse each warning of Lean's linters, then run `{next}`.\n\
+      {warned.tail}"
+
 def run (context : Context) : IO (Array Outcome) := do
   let dir := context.root / "template"
   let (setup, recorded?) ← attempt "build writes owned.lock and comparator.json in a fresh copy" next
@@ -379,6 +407,8 @@ def run (context : Context) : IO (Array Outcome) := do
   let some recorded := recorded? | return #[setup]
   let staged ← presentations.toArray.mapM fun presentation =>
     return (presentation, ← attempt s!"{presentation.name}: the copy is staged" next (stage context dir presentation))
+  let (builtinStaging, builtinStaged?) ← attempt s!"{builtinLinted.name}: the copy is staged" next
+    (stage context dir builtinLinted)
   let idled ← check "a second build is idle and rewrites neither file" next (idle context dir recorded)
   let linted ← IO.asTask (prio := .dedicated) (attempt "lint accepts the template" next (lintAccepts context dir))
   let reference := linted.map fun result => match result with
@@ -391,6 +421,9 @@ def run (context : Context) : IO (Array Outcome) := do
       | some _, some config => check name next (presents context reference config presentation)
       | none, _ => pure staging
       | _, none => pure (skipped name "the template's comparator.json is unreadable")
+  let builtin ← IO.asTask (prio := .dedicated) <| if builtinStaged?.isSome then
+      check s!"{builtinLinted.name}: lint exits 2, and 1 once Lean's linters warn" next (builtinLintKeepsCodes context)
+    else pure builtinStaging
   let mut outcomes := #[setup, idled, (← IO.ofExcept linted.get).1]
   for (name, action) in [
       (s!"test runs and passes the template's {checkCount} Checks, which call nativeAdd from its extern_lib",
@@ -398,7 +431,7 @@ def run (context : Context) : IO (Array Outcome) := do
       ("an owner who drops fold_normalizes' kill fails the build with the kill to write",
         ownerDropsKill context dir)] do
     outcomes := outcomes.push (← check name next action)
-  return outcomes ++ (← IO.ofExcept presented.get)
+  return outcomes ++ (← IO.ofExcept presented.get) ++ #[← IO.ofExcept builtin.get]
 
 end SoftwareChallengeTests.Gate.TemplateRun
 

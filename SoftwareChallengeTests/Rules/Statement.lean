@@ -93,7 +93,7 @@ def baseLake : LakeFacts :=
     modules := #[⟨`App.CoreSpec, "App/CoreSpec.lean"⟩, ⟨`App.CoreCode, "App/CoreCode.lean"⟩,
       ⟨`App.Solution, "App/Solution.lean"⟩],
     challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], defaultExeRoots := #[], packages := #[],
-    defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
+    defaultTargets := #[`statement], testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
     testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 def baseChallenge : ChallengeFacts :=
@@ -638,8 +638,6 @@ end
 #guard setupOf { baseLake with lintDriver := "" } == #[.lintDriver ""]
 
 #guard setupOf { baseLake with testDriver := "" } == #[.testDriver ""]
-
-#guard setupOf { baseLake with builtinLint := some ⟨"lakefile.lean", 5⟩ } == #[.builtinLint ⟨"lakefile.lean", 5⟩]
 
 #guard refuses (.witnessMisstated `App.double_even_applies `App.double_even) (challenge := misstatedWitness)
 

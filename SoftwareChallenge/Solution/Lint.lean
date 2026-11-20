@@ -161,12 +161,6 @@ theorem challengeImports_eq_empty_iff (facts : Facts) : challengeImports facts =
     ∀ line ∈ facts.solution.imports, line.fact.name ≠ facts.challenge.module :=
   filterMap_ite_eq_empty
 
-theorem builtinLintErrors_eq_empty_iff (facts : Facts) : builtinLintErrors facts = #[] ↔
-    facts.lake.builtinLint = none := by
-  unfold builtinLintErrors
-  cases facts.lake.builtinLint <;> simp
-
-
 private theorem firstModules_spec (declarations : List DeclarationFact) (init : Std.HashMap Name Name) :
     let result := declarations.foldl (fun first fact =>
       if first.contains fact.name then first else first.insert fact.name fact.module) init
@@ -373,24 +367,24 @@ theorem errorsOf_eq_empty_iff (facts : Facts) : errorsOf facts = #[] ↔ Lint.Cl
     noncomputableHoles_eq_empty_iff, fixpointsWithoutTerminates_eq_empty_iff, notFixpoints_eq_empty_iff,
     mainOutsidePrograms_eq_empty_iff, misplacedClaims_eq_empty_iff, unreadableProofs_eq_empty_iff,
     editableMetaImports_eq_empty_iff, sorries_eq_empty_iff, unlintedModules_eq_empty_iff,
-    lintWarnings_eq_empty_iff, builtinLintErrors_eq_empty_iff, challengeImports_eq_empty_iff,
+    lintWarnings_eq_empty_iff, challengeImports_eq_empty_iff,
     solutionErrors_eq_empty_iff, targetErrors_eq_empty_iff, unreadOwnedFiles_eq_empty_iff,
     lockErrors_eq_empty_iff, comparatorErrors_eq_empty_iff, and_assoc]
   constructor
   · rintro ⟨modulesAudited, exeRootsAudited, admitted, declaredOnce, holesInCode, holesCompiled,
       fixpointsTerminate, fixpointsDeclared, mainInWorldCode, claimsDeclared, proofsReadable, specMetaImportsOwned,
-      noSorry, lintersCover, lintersPass, builtinLintOff, challengeUnimported, oneSolution, statementTarget,
-      ownedDigested, lockCurrent, comparatorCurrent⟩
+      noSorry, lintersCover, lintersPass, challengeUnimported, oneSolution, statementTarget, ownedDigested,
+      lockCurrent, comparatorCurrent⟩
     exact ⟨modulesAudited, exeRootsAudited, lintersCover, lintersPass, noSorry, admitted, specMetaImportsOwned,
       declaredOnce, holesInCode, holesCompiled, mainInWorldCode, fixpointsDeclared, fixpointsTerminate,
       claimsDeclared, proofsReadable, ownedDigested, lockCurrent, comparatorCurrent, oneSolution, statementTarget,
-      challengeUnimported, builtinLintOff⟩
+      challengeUnimported⟩
   · intro clean
     exact ⟨clean.modulesAudited, clean.exeRootsAudited, clean.admitted, clean.declaredOnce, clean.holesInCode,
       clean.holesCompiled, clean.fixpointsTerminate, clean.fixpointsDeclared, clean.mainInWorldCode,
       clean.claimsDeclared, clean.proofsReadable, clean.specMetaImportsOwned, clean.noSorry, clean.lintersCover,
-      clean.lintersPass, clean.builtinLintOff, clean.challengeUnimported, clean.oneSolution, clean.statementTarget,
-      clean.ownedDigested, clean.lockCurrent, clean.comparatorCurrent⟩
+      clean.lintersPass, clean.challengeUnimported, clean.oneSolution, clean.statementTarget, clean.ownedDigested,
+      clean.lockCurrent, clean.comparatorCurrent⟩
 
 theorem pendingOf_eq_empty_iff (facts : Facts) : pendingOf facts = #[] ↔
     (∀ headline ∈ facts.challenge.headlines, facts.solution.Holds headline.target) ∧
@@ -483,7 +477,7 @@ theorem Lint.run_code_ne_zero_iff (facts : Facts) :
 private def killLake : LakeFacts :=
   { packageDir := "/work", configFiles := #["lakefile.lean"],
     modules := #[⟨`App.Solution, "App/Solution.lean"⟩], challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩],
-    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge",
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], testDriver := "software_challenge/test_challenge",
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 private def killChallenge : ChallengeFacts :=
@@ -556,7 +550,6 @@ private theorem killComplete : Lint.Complete killFacts where
   oneSolution := killOneSolution
   statementTarget := by simp [killFacts, killLake]
   challengeUnimported := by simp [killFacts, killSolution]
-  builtinLintOff := rfl
   headlinesProved := by simp [killFacts, killChallenge]
   holesDefined := by simp [killFacts, killChallenge]
   killsProved := by simp [killFacts, killChallenge]
@@ -566,18 +559,18 @@ private theorem killComplete : Lint.Complete killFacts where
   checksDecided := by simp [killFacts, killSolution]
   dependenciesVisible := by simp [killFacts, killLake]
 
-private def builtinLinted : Facts :=
-  { killFacts with lake := { killLake with builtinLint := some ⟨"lakefile.lean", 5⟩ } }
+private def targetless : Facts :=
+  { killFacts with lake := { killLake with defaultTargets := #[] } }
 
-private theorem builtinLinted_unclean : ¬ Lint.Clean builtinLinted := fun clean => by
-  have off := clean.builtinLintOff
-  simp [builtinLinted] at off
+private theorem targetless_unclean : ¬ Lint.Clean targetless := fun clean => by
+  have target := clean.statementTarget
+  simp [targetless] at target
 
 theorem Lint.run_code_eq_zero_iff_rejects_accepting :
     ¬ ∀ (facts : Facts),
       ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 0 } : Lint.Result))
         facts).code = 0 ↔ Lint.Complete facts := fun holds =>
-  builtinLinted_unclean ((holds builtinLinted).mp rfl).toClean
+  targetless_unclean ((holds targetless).mp rfl).toClean
 
 theorem Lint.run_code_eq_zero_iff_rejects_refusing :
     ¬ ∀ (facts : Facts),
@@ -589,7 +582,7 @@ theorem Lint.run_code_ne_one_iff_rejects_accepting :
     ¬ ∀ (facts : Facts),
       ((fun (_ : Facts) => ({ errors := #[], pending := #[], report := #[], code := 0 } : Lint.Result))
         facts).code ≠ 1 ↔ Lint.Clean facts := fun holds =>
-  builtinLinted_unclean ((holds builtinLinted).mp (by decide))
+  targetless_unclean ((holds targetless).mp (by decide))
 
 theorem Lint.run_code_ne_one_iff_rejects_refusing :
     ¬ ∀ (facts : Facts),

@@ -355,12 +355,6 @@ def Setup.message (lake : LakeFacts) : Setup → Message
       why := "so `lake test` does not run the Checks, and a world claim nothing tests goes unreported"
       fix := s!"Set `testDriver := \"{auditTestDriver}\"` in the package block of {lakefile lake}, and {relock}"
       next := .build }
-  | .builtinLint place =>
-    { place := atLine place.file place.line
-      what := s!"the package block of {lakefile lake} sets `builtinLint := true`"
-      why := s!"but `lake lint` already runs Lean's linters through {auditLintDriver}, so they would run twice"
-      fix := s!"Remove that line from {lakefile lake}, and {relock}"
-      next := .build }
 
 def claimWritten (claim : Name) : String :=
   match claim with

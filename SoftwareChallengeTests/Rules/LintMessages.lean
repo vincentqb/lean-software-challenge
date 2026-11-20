@@ -47,8 +47,7 @@ def errorSamples : Array Lint.Error :=
     .comparatorStale #[`App.old] #[`App.fold_correct_rejects] (some `B.Solution) (some `App.Solution),
     .comparatorUnreadable "expected a JSON object", .noStatementTarget, .solutionModule #[],
     .solutionModule #[`App.Solution, `Other.Solution],
-    .importsChallenge challengeLine,
-    .builtinLintOn ⟨"lakefile.lean", 5⟩, .proofUnreadable `App.fold_correct `App.Solution]
+    .importsChallenge challengeLine, .proofUnreadable `App.fold_correct `App.Solution]
 
 def standingSamples : Array Standing :=
   #[.holds `App.Solution, .unsound `App.Solution, .absent, .outside `App.Proofs false, .outside `App.Proofs true,
@@ -195,8 +194,6 @@ def pendingSays (facts : Facts) (found : Lint.Pending) (fragments : List String)
   ["App/Solution.lean:5: App.Solution imports Challenge, whose holes share names with the solution's definitions",
     "Replace `import Challenge` at App/Solution.lean:5 with imports of the CoreSpec and WorldSpec modules \
       App.Solution uses, such as `public import App.CoreSpec`"]
-#guard errorSays complete (.builtinLintOn ⟨"lakefile.lean", 5⟩)
-  ["lakefile.lean:5: the package block sets `builtinLint := true`", "delete owned.lock and run `lake build`"]
 #guard errorSays complete (.proofUnreadable `App.fold_correct `App.Solution)
   ["App/Solution.lean:10: the proof of App.fold_correct in App.Solution cannot be read"]
 

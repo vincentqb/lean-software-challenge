@@ -115,7 +115,7 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.codeInClosure `App.CoreCode, reachedThrough, baseLake)]
 
 def setupSamples : List Setup :=
-  [.lintDriver "", .lintDriver "other/lint", .testDriver "", .testDriver "other/test", .builtinLint ⟨"lakefile.lean", 4⟩]
+  [.lintDriver "", .lintDriver "other/lint", .testDriver "", .testDriver "other/test"]
 
 def messageOf (sample : Error × ChallengeFacts × LakeFacts) : Message :=
   sample.1.message sample.2.2 baseFiles sample.2.1

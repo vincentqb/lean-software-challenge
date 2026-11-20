@@ -19,7 +19,7 @@ def lakeOf (modules : Array Name) (challenge? : Option Name := none) (inputs : A
     packageDir := (← IO.currentDir).toString, configFiles := #["lakefile.lean"]
     modules := modules.map fun module => ⟨module, sourcePath module⟩
     challengeCandidates := (challenge?.map fun module => #[⟨module, sourcePath module⟩]).getD #[]
-    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge"
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], testDriver := "software_challenge/test_challenge"
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs }
 
 def readChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do

@@ -28,8 +28,7 @@ open SoftwareChallenge SoftwareChallengeTests.Rules.LintFacts SoftwareChallengeT
 def lintRejecting : List Facts := [unbuiltRoot, unreadModule, unlinted, specImportsCode, legacy, codeImportsWorld,
   unplaced, unsafeCode, sorryInLemma, blamed, holeInSolution, noncomputableHole, fixpointHole, terminating, twice,
   sorryOnly, mainInCode, claimInCode, rawClaim, warned, unreadSpec, edited, lockless, oldLock, noComparator,
-  garbledComparator, staleComparator, targetless, noSolution, twoSolutions, importsTheChallenge, builtinLinted,
-  unreadableProof]
+  garbledComparator, staleComparator, targetless, noSolution, twoSolutions, importsTheChallenge, unreadableProof]
 
 def lintPending : List Facts := [missing `App.fold_correct, unimplemented, outside, withAuxiliary, mainless,
   restatedAs ({ · with kind := .defined .safe }), restatedAs ({ · with levels := [`u] }),
@@ -74,8 +73,7 @@ def statementRejecting : List (LakeFacts × FileFacts × ChallengeFacts) := [
   (baseLake, { baseFiles with lock := .unreadable "expected an object" }, baseChallenge)]
 
 def setupRejecting : List LakeFacts :=
-  [{ baseLake with lintDriver := "" }, { baseLake with testDriver := "" },
-    { baseLake with builtinLint := some ⟨"lakefile.lean", 4⟩ }]
+  [{ baseLake with lintDriver := "" }, { baseLake with testDriver := "" }]
 
 def reportedSetup (lake : LakeFacts) : List Statement.Setup :=
   (Statement.run lake baseFiles baseChallenge).setup.toList

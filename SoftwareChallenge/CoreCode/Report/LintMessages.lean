@@ -718,13 +718,6 @@ def Error.message (facts : Facts) : Error → Message
     match ownedModule? facts importing.module with
     | some owner => { withOwner (some owner) message message.fix with next := .lint }
     | none => message
-  | .builtinLintOn place =>
-    let lakefile := lakefileOf facts
-    { place := { place with line := max 1 place.line }, what := "the package block sets `builtinLint := true`"
-      why := "but `lake lint` already runs Lean's linters through software_challenge/lint_challenge, so they would \
-        run twice"
-      fix := s!"Remove that line; {lakefile} is owned, so then delete owned.lock and run `lake build` to re-record it"
-      next := .lint }
   | .proofUnreadable target module =>
     { place := foundPlace facts module target, what := s!"the proof of {target} in {module} cannot be read"
       why := "so lint cannot tell which world claims it uses or which headlines it follows from, as when a build \

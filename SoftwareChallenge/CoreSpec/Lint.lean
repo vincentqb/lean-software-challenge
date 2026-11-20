@@ -46,7 +46,6 @@ inductive Error where
   | noStatementTarget
   | solutionModule (found : Array Name)
   | importsChallenge (importing : ImportLine)
-  | builtinLintOn (place : Place)
   | proofUnreadable (target module : Name)
   deriving BEq, Repr
 
@@ -124,7 +123,6 @@ structure Lint.Clean (facts : Facts) : Prop where
   oneSolution : facts.lake.OneSolution
   statementTarget : `statement ∈ facts.lake.defaultTargets
   challengeUnimported : ∀ line ∈ facts.solution.imports, line.fact.name ≠ facts.challenge.module
-  builtinLintOff : facts.lake.builtinLint = none
 
 structure Lint.Complete (facts : Facts) : Prop extends Lint.Clean facts where
   headlinesProved : ∀ headline ∈ facts.challenge.headlines, facts.solution.Holds headline.target

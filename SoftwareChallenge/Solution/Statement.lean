@@ -784,17 +784,16 @@ theorem errors_eq_empty {lake : LakeFacts} {files : FileFacts} {challenge : Chal
   · simp [found, isEmpty_eq_false found, findings, setupErrors]
 
 theorem setupOf_eq_empty {lake : LakeFacts} :
-    setupOf lake = #[] ↔ lake.lintDriver = auditLintDriver ∧ lake.testDriver = auditTestDriver ∧
-      lake.builtinLint = none := by
-  unfold setupOf lintDriverSetup testDriverSetup builtinLintSetup
+    setupOf lake = #[] ↔ lake.lintDriver = auditLintDriver ∧ lake.testDriver = auditTestDriver := by
+  unfold setupOf lintDriverSetup testDriverSetup
   by_cases driven : lake.lintDriver = auditLintDriver <;> by_cases tested : lake.testDriver = auditTestDriver <;>
-    cases linted : lake.builtinLint <;> simp [driven, tested]
+    simp [driven, tested]
 
 theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
     setupOf lake = #[] ∧ errors lake files challenge = #[] ↔ Complete lake files challenge := by
   rw [setupOf_eq_empty, errors_eq_empty]
   constructor
-  · rintro ⟨⟨driven, tested, unlinted⟩, locking, found⟩
+  · rintro ⟨⟨driven, tested⟩, locking, found⟩
     obtain ⟨digestedOwned, current⟩ := lockingErrors_eq_empty.mp locking
     simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
       Array.append_eq_empty_iff, and_assoc] at found
@@ -842,10 +841,9 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
       ownedDigested := digestedOwned
       lockCurrent := current
       lintDriven := driven
-      testDriven := tested
-      builtinLintOff := unlinted }
+      testDriven := tested }
   · intro complete
-    refine ⟨⟨complete.lintDriven, complete.testDriven, complete.builtinLintOff⟩, ?_, ?_⟩
+    refine ⟨⟨complete.lintDriven, complete.testDriven⟩, ?_, ?_⟩
     · exact lockingErrors_eq_empty.mpr ⟨complete.ownedDigested, complete.lockCurrent⟩
     · simp only [findings, setupErrors, ownershipErrors, ownerErrors, meaningErrors, statedErrors,
         Array.append_eq_empty_iff, and_assoc]
@@ -902,7 +900,7 @@ theorem Statement.run_code_ne_zero_iff (lake : LakeFacts) (files : FileFacts) (c
 private def acceptedLake : LakeFacts :=
   { packageDir := "", configFiles := #[], modules := #[⟨`Solution, "Solution.lean"⟩],
     challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩], defaultExeRoots := #[], packages := #[],
-    defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
+    defaultTargets := #[`statement], testDriver := "software_challenge/test_challenge", testDriverArgs := #[],
     testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 private def acceptedFiles : FileFacts :=
@@ -959,7 +957,6 @@ private theorem accepted : Statement.Complete acceptedLake acceptedFiles accepte
       exact ⟨⟨"Solution.lean", "1"⟩, by simp [acceptedFiles], filed⟩
   lockCurrent := .inl rfl
   lintDriven := rfl
-  builtinLintOff := rfl
 
 theorem Statement.run_code_eq_zero_iff_rejects_accepting :
     ¬ ∀ (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeFacts),

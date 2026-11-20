@@ -11,7 +11,7 @@ open Lean SoftwareChallenge
 def completeLake : LakeFacts :=
   { packageDir := "/work", configFiles := #["lakefile.lean"],
     modules := #[⟨`App.Solution, "App/Solution.lean"⟩], challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩],
-    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge",
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], testDriver := "software_challenge/test_challenge",
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 def completeChallenge : ChallengeFacts :=
@@ -127,7 +127,6 @@ theorem lintComplete : Lint.Complete completeFacts where
   oneSolution := completeOneSolution
   statementTarget := by simp [completeFacts, completeLake]
   challengeUnimported := by simp [completeFacts, completeSolution]
-  builtinLintOff := rfl
   headlinesProved := by simp [completeFacts, completeChallenge]
   holesDefined := by simp [completeFacts, completeChallenge]
   killsProved := by simp [completeFacts, completeChallenge]

@@ -69,7 +69,7 @@ def lake : LakeFacts :=
       source `App.Solution "App/Solution.lean"],
     challengeCandidates := #[source `Challenge "Challenge.lean"], defaultExeRoots := #[`App.WorldCode],
     packages := #[dependency],
-    defaultTargets := #[`App, `statement], builtinLint := none, testDriver := "software_challenge/test_challenge",
+    defaultTargets := #[`App, `statement], testDriver := "software_challenge/test_challenge",
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs := #[] }
 
 def runtime (name : Name) (line : Nat) : ImportFact := { name, comptime := false, line }

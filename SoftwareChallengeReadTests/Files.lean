@@ -21,7 +21,7 @@ def scratch : IO System.FilePath := do
 def lakeIn (dir : System.FilePath) (inputs : Array String) : LakeFacts :=
   { packageDir := dir.toString, configFiles := #["lakefile.lean"]
     modules := #[⟨`App.CoreCode, "App/CoreCode.lean"⟩], challengeCandidates := #[⟨`Challenge, "Challenge.lean"⟩]
-    defaultExeRoots := #[], packages := #[], defaultTargets := #[], builtinLint := none, testDriver := "software_challenge/test_challenge"
+    defaultExeRoots := #[], packages := #[], defaultTargets := #[], testDriver := "software_challenge/test_challenge"
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs }
 
 run_cmd Elab.Command.liftCoreM do
