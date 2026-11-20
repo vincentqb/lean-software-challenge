@@ -95,9 +95,6 @@ def terminates (env : Environment) (name : Name) : Bool :=
 def fixpoint (env : Environment) (name : Name) : Bool :=
   (Elab.PartialFixpoint.eqnInfoExt.find? env name).isSome
 
-def derivedInstance (env : Environment) (name : Name) : Bool :=
-  (Compiler.isUnsafeRecName? name).any fun source => Meta.isInstanceCore env source.getPrefix
-
 def computational (info : ConstantInfo) : MetaM Bool := do
   unless info matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _ do return false
   if ← isProp info.type then return false
@@ -129,15 +126,14 @@ def declarationFact (reachesIO : Std.HashSet Name) (terminating : Array Name) (m
   let env ← getEnv
   let ranges := rangesIn env module.index info.name
   let isComputational ← computational info
+  let copy := Compiler.isUnsafeRecName? info.name
   return {
     name := info.name
     module := module.name
     line := (ranges.map (·.range.pos.line)).getD 0
     computational := isComputational
     isUnsafe := info.isUnsafe
-    isPartial := info.isPartial && !(ranges.isNone && (derivedInstance env info.name ||
-      (Compiler.isUnsafeRecName? info.name).any fun source =>
-        terminates env source || terminating.contains source && fixpoint env source))
+    isPartial := info.isPartial
     external := isExtern env info.name
     unfoldable := info matches .defnInfo _
     replaced := (Compiler.getImplementedBy? env info.name).isSome
@@ -145,7 +141,12 @@ def declarationFact (reachesIO : Std.HashSet Name) (terminating : Array Name) (m
     effects := isComputational && info.type.getUsedConstants.any reachesIO.contains
     debug := info.getUsedConstantsAsSet.any fun used => used.isAtomic && "dbg".isPrefixOf used.toString
     axioms := ← ownAxioms info
-    written := ranges.isSome }
+    written := ranges.isSome
+    copyOf := copy
+    copyOfInstanceMethod := copy.any fun source => Meta.isInstanceCore env source.getPrefix
+    copyOfTotal := copy.any (terminates env)
+    copyOfFixpoint := copy.any (fixpoint env)
+    copyOfTerminated := copy.any terminating.contains }
 
 def blameOf (env : Environment) (fact : DeclarationFact) (own : ConstantInfo) (axiomName : Name) :
     AxiomWalk AxiomBlame := do
@@ -177,14 +178,6 @@ def placesOf (env : Environment) (modules : Array CatalogModule) : Array Declara
       { name := info.name, place := { file := module.file, line := ranges.range.pos.line }
         written := textAt module.source ranges.selectionRange
         firstLine := lineAt module.source ranges.range.pos.line }
-
-def derivedPartial (env : Environment) (info : ConstantInfo) : Bool :=
-  info.isPartial && derivedInstance env info.name &&
-    (Compiler.isUnsafeRecName? info.name).any fun source => !terminates env source
-
-def derivedPartialsOf (env : Environment) (modules : Array CatalogModule) : Array (Name × Name) :=
-  modules.flatMap fun module =>
-    (module.data.constants.filter (derivedPartial env)).map (·.name, module.name)
 
 structure InventoryFacts where
   inventory : Inventory

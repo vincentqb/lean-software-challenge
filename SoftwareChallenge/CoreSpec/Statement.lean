@@ -136,10 +136,12 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
     headline.target.constant.name = termination.headline → headline.target.constant.type.Mentions termination.definition
   ownedAdmitted : lake.project.Admits (challenge.owned.inventory.restrictedTo challenge.owns)
   specImportsOwned : ∀ fact ∈ challenge.owned.inventory.modules, (Role.ofName fact.name).Owned →
-    ∀ dependency ∈ fact.imports, lake.Builds dependency.name → challenge.Owns dependency.name
+    ∀ dependency ∈ fact.imports, dependency.comptime = true → lake.Builds dependency.name →
+      challenge.Owns dependency.name
   ownedClaimsDeclared : ∀ registration ∈ challenge.owned.registrations, challenge.Owns registration.module →
     registration.home? = some registration.module ∧ lake.project.role? registration.module = some .worldSpec
-  ownedDerivedTotal : ∀ derived ∈ challenge.owned.derivedPartials, ¬ challenge.Owns derived.2
+  ownedDerivedTotal : ∀ fact ∈ challenge.owned.inventory.declarations, fact.derivedPartial = true →
+    ¬ challenge.Owns fact.module
   ownedDigested : ∀ path, lake.Owned challenge path → files.Digested path
   lockCurrent : files.lock = .missing ∨ files.LockCurrent
   lintDriven : lake.lintDriver = auditLintDriver := by rfl

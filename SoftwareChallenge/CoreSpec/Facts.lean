@@ -175,7 +175,6 @@ structure OwnedFacts where
   imports : Array ImportLine := #[]
   blames : Array AxiomBlame := #[]
   registrations : Array RegistrationFact := #[]
-  derivedPartials : Array (Name × Name) := #[]
   places : Array DeclarationPlace := #[]
   parents : Array (Name × Name) := #[]
   deriving BEq, Repr, Inhabited

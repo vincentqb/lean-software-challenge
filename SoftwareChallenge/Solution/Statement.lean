@@ -636,8 +636,8 @@ theorem ownedViolationErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeF
 
 theorem specImportErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts} :
     specImportErrors lake challenge = #[] ↔ ∀ fact ∈ challenge.owned.inventory.modules,
-      (Role.ofName fact.name).Owned → ∀ dependency ∈ fact.imports, lake.Builds dependency.name →
-        challenge.Owns dependency.name := by
+      (Role.ofName fact.name).Owned → ∀ dependency ∈ fact.imports, dependency.comptime = true →
+        lake.Builds dependency.name → challenge.Owns dependency.name := by
   simp only [specImportErrors, Array.flatMap_eq_empty_iff]
   refine forall₂_congr fun fact _ => ?_
   by_cases spec : specRole fact.name = true
@@ -645,7 +645,8 @@ theorem specImportErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts
     simp only [spec, ite_true, Array.filterMap_eq_empty_iff, owned, true_implies]
     refine forall₂_congr fun dependency _ => ?_
     rw [← builds_eq_true, ← ownsModule_eq_true]
-    cases builds lake dependency.name <;> cases ownsModule challenge dependency.name <;> simp
+    cases dependency.comptime <;> cases builds lake dependency.name <;> cases ownsModule challenge dependency.name <;>
+      simp
   · have notOwned : ¬ (Role.ofName fact.name).Owned := fun owned => spec (specRole_eq_true.mpr owned)
     simp [spec, notOwned]
 
@@ -664,11 +665,12 @@ theorem ownedClaimErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts
   cases ownsModule challenge registration.module <;> cases claimDeclared lake registration <;> simp
 
 theorem derivedPartialErrors_eq_empty {challenge : ChallengeFacts} :
-    derivedPartialErrors challenge = #[] ↔ ∀ derived ∈ challenge.owned.derivedPartials, ¬ challenge.Owns derived.2 := by
+    derivedPartialErrors challenge = #[] ↔ ∀ fact ∈ challenge.owned.inventory.declarations,
+      fact.derivedPartial = true → ¬ challenge.Owns fact.module := by
   simp only [derivedPartialErrors, Array.filterMap_eq_empty_iff]
-  refine forall₂_congr fun ⟨declaration, module⟩ _ => ?_
+  refine forall₂_congr fun fact _ => ?_
   rw [← ownsModule_eq_true]
-  cases ownsModule challenge module <;> simp
+  cases fact.derivedPartial <;> cases ownsModule challenge fact.module <;> simp
 
 theorem ite_empty {condition : Bool} {error : Error} :
     (if condition = true then #[] else #[error]) = #[] ↔ condition = true := by

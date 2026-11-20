@@ -117,7 +117,6 @@ def ownedFacts (lake : LakeFacts) (challenge : Name) (imported : Imported) (next
       imports := modules.flatMap (·.imports)
       blames := read.blames
       registrations := registrationsOf env modules
-      derivedPartials := derivedPartialsOf env modules
       places := placesOf env modules
       parents := parentsOf env modules }
 

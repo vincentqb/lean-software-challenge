@@ -18,9 +18,11 @@ run_cmd Elab.Command.liftCoreM do
   check (owned.inventory.modules.map (·.name) == #[`CoreSpec, `CoreSpec.Derived, `WorldSpec, `CoreCode].map fixture)
     s!"the statement step did not read every CoreSpec and WorldSpec module and the challenge's package imports: \
       {owned.inventory.modules.map (·.name)}"
-  check (owned.derivedPartials == #[(fixture `instBEqForest.beq._unsafe_rec, fixture `CoreSpec.Derived)])
+  let derived := owned.inventory.declarations.filterMap fun fact =>
+    if fact.derivedPartial then some (fact.name, fact.module) else none
+  check (derived == #[(fixture `instBEqForest.beq._unsafe_rec, fixture `CoreSpec.Derived)])
     s!"the partial instances that deriving generates, and only those that do not recurse structurally, were \
-      misread: {owned.derivedPartials}"
+      misread: {derived}"
   check (Statement.derivedPartialErrors challenge ==
       #[.derivedPartial (fixture `instBEqForest.beq._unsafe_rec) (fixture `CoreSpec.Derived)])
     "a partial instance that deriving generates in a CoreSpec module was not reported to the owner"

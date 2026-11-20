@@ -27,6 +27,10 @@ def impureIn (module : Name) : DeclarationFact :=
 def externIn (module : Name) : DeclarationFact :=
   { pureIn module with external := true, unfoldable := false, effects := true }
 
+def copyIn (module : Name) : DeclarationFact :=
+  { pureIn module with name := module ++ `pure._unsafe_rec, isPartial := true, written := false,
+                       copyOf := some (module ++ `pure) }
+
 def ofModules (facts : Array ModuleFact) : Inventory := { modules := facts, declarations := #[] }
 
 def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #[], declarations := facts }
@@ -65,6 +69,26 @@ def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #
   #[.impure `W.pure .worldCode [.«unsafe», .extern, .implementedBy]]
 
 #guard layered.violations (ofDeclarations #[impureIn `T]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ pureIn `C with isPartial := true }]) ==
+  #[.impure `C.pure .coreCode [.«partial»]]
+
+#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfInstanceMethod := true }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ copyIn `S with copyOfInstanceMethod := true }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfTotal := true }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfFixpoint := true, copyOfTerminated := true }]) ==
+  #[]
+
+#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfFixpoint := true }]) ==
+  #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
+
+#guard layered.violations (ofDeclarations #[copyIn `C]) == #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
+
+#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfInstanceMethod := true, written := true }]) ==
+  #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
 
 #guard layered.violations (ofDeclarations #[{ impureIn `C with computational := false }]) == #[]
 

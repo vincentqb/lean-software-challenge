@@ -36,7 +36,22 @@ structure DeclarationFact where
   debug : Bool
   axioms : Array Name
   written : Bool := true
+  copyOf : Option Name := none
+  copyOfInstanceMethod : Bool := false
+  copyOfTotal : Bool := false
+  copyOfFixpoint : Bool := false
+  copyOfTerminated : Bool := false
   deriving DecidableEq, Repr, Inhabited
+
+def DeclarationFact.compilerCopy (fact : DeclarationFact) : Bool :=
+  !fact.written && fact.copyOf.isSome &&
+    (fact.copyOfInstanceMethod || fact.copyOfTotal || fact.copyOfFixpoint && fact.copyOfTerminated)
+
+def DeclarationFact.countsAsPartial (fact : DeclarationFact) : Bool :=
+  fact.isPartial && !fact.compilerCopy
+
+def DeclarationFact.derivedPartial (fact : DeclarationFact) : Bool :=
+  fact.isPartial && fact.copyOfInstanceMethod && !fact.copyOfTotal
 
 structure Inventory where
   modules : Array ModuleFact
@@ -70,10 +85,10 @@ inductive Violation where
 
 def DeclarationFact.Allowed (fact : DeclarationFact) : Role → Prop
   | .coreSpec | .coreCode =>
-    fact.isUnsafe = false ∧ fact.isPartial = false ∧ fact.external = false ∧ fact.replaced = false ∧
+    fact.isUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.external = false ∧ fact.replaced = false ∧
       fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false
   | .worldSpec =>
-    fact.isUnsafe = false ∧ fact.isPartial = false ∧ fact.replaced = false ∧ fact.initializes = false ∧
+    fact.isUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.replaced = false ∧ fact.initializes = false ∧
       fact.debug = false ∧ (fact.external = true → fact.unfoldable = false) ∧
       (fact.external = false → fact.effects = false)
   | .worldCode => fact.isUnsafe = false ∧ fact.external = false ∧ fact.replaced = false

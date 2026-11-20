@@ -256,7 +256,7 @@ theorem impureSpec_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec) :
     simp [Project.role?, LakeFacts.project, impureSpecLake, completeLake, impureSpec, spec] at classified
     exact classified.symm
   subst placed
-  simp [DeclarationFact.Allowed, impureSpec] at allowed
+  simp [DeclarationFact.Allowed, DeclarationFact.countsAsPartial, DeclarationFact.compilerCopy, impureSpec] at allowed
 
 def misplacedClaim : RegistrationFact :=
   { claim := `App.CoreSpec.Agrees, module := `App.CoreSpec, home? := some `App.CoreSpec,
@@ -271,13 +271,16 @@ theorem misplacedClaim_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec)
     (Or.inr (Or.inl spec))
   simp [Project.role?, LakeFacts.project, impureSpecLake, completeLake, misplacedClaim, spec] at declared
 
-def derivedInstance : Name × Name := (`App.CoreSpec.instBEqTree, `App.CoreSpec)
+def derivedInstance : DeclarationFact :=
+  { impureSpec with name := `App.CoreSpec.instBEqTree, written := false, copyOf := some `App.CoreSpec.instBEqTree.beq,
+                    copyOfInstanceMethod := true }
 
-def derivedChallenge : ChallengeFacts := { completeChallenge with owned := { derivedPartials := #[derivedInstance] } }
+def derivedChallenge : ChallengeFacts :=
+  { completeChallenge with owned := { inventory := ⟨#[specModuleFact #[]], #[derivedInstance]⟩ } }
 
 theorem derived_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec) :
     ¬ Statement.Complete impureSpecLake completeFiles derivedChallenge := fun complete =>
-  complete.ownedDerivedTotal derivedInstance (by simp [derivedChallenge]) (Or.inr (Or.inl spec))
+  complete.ownedDerivedTotal derivedInstance (by simp [derivedChallenge]) rfl (Or.inr (Or.inl spec))
 
 def editableSpecImport : ChallengeFacts :=
   { completeChallenge with
@@ -288,7 +291,7 @@ theorem editableSpecImport_incomplete (spec : Role.ofName `App.CoreSpec = .coreS
     ¬ Statement.Complete tacticLake completeFiles editableSpecImport := fun complete => by
   have owned := complete.specImportsOwned (specModuleFact #[{ name := `App.Tactic, comptime := true, line := 3 }])
     (by simp [editableSpecImport]) (Or.inl spec) { name := `App.Tactic, comptime := true, line := 3 }
-    (by simp [specModuleFact])
+    (by simp [specModuleFact]) rfl
     ⟨⟨`App.Tactic, "App/Tactic.lean"⟩, by simp [tacticLake, completeLake], rfl⟩
   rcases owned with closed | owned
   · simp [editableSpecImport, completeChallenge] at closed

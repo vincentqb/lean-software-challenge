@@ -324,9 +324,19 @@ def ownedClaimUnregistered : ChallengeFacts := withOwned { registrations := #[cl
 
 def ownedClaimHome : ChallengeFacts := withOwned { registrations := #[claimIn `App.WorldSpec (some `App.WorldSpec)] }
 
-def derivedSpec : ChallengeFacts := withOwned { derivedPartials := #[(`App.CoreSpec.instBEqTree, `App.CoreSpec)] }
+def derivedCopyIn (module : Name) : DeclarationFact :=
+  { declarationIn module (module ++ `instBEqTree) with
+    isPartial := true, written := false, copyOf := some (module ++ `instBEqTree.beq), copyOfInstanceMethod := true }
 
-def derivedCode : ChallengeFacts := withOwned { derivedPartials := #[(`App.CoreCode.instBEqTree, `App.CoreCode)] }
+def derivedSpec : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[derivedCopyIn `App.CoreSpec]⟩ }
+
+def derivedCode : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreCode], #[derivedCopyIn `App.CoreCode]⟩ }
+
+def totalCopySpec : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec],
+    #[{ derivedCopyIn `App.CoreSpec with copyOfTotal := true }]⟩ }
 
 def reachedThrough : ChallengeFacts :=
   { codeReached with
@@ -527,6 +537,8 @@ end
 
 #guard refuses (.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)) (challenge := ownedLayering)
 
+#guard errorsOf (challenge := ownedLayering) == #[.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)]
+
 #guard refuses (.specImport `App.CoreSpec codeMetaImport) (challenge := specImportsCode)
 
 #guard errorsOf (challenge := specImportsCode) == #[.specImport `App.CoreSpec codeMetaImport]
@@ -542,7 +554,11 @@ end
 
 #guard refuses (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec) (challenge := derivedSpec)
 
+#guard errorsOf (challenge := derivedSpec) == #[.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec]
+
 #guard errorsOf (challenge := derivedCode) == #[]
+
+#guard errorsOf (challenge := totalCopySpec) == #[]
 
 #guard refuses (.privateAuxiliary `App.double_even (privateName "proof_1")) (challenge := privateAuxiliary)
 

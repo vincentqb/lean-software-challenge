@@ -193,7 +193,7 @@ def specImportErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Err
   challenge.owned.inventory.modules.flatMap fun fact =>
     if specRole fact.name then
       fact.imports.filterMap fun dependency =>
-        if builds lake dependency.name && !ownsModule challenge dependency.name then
+        if dependency.comptime && builds lake dependency.name && !ownsModule challenge dependency.name then
           some (.specImport fact.name dependency)
         else none
     else #[]
@@ -207,8 +207,9 @@ def ownedClaimErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Err
     else none
 
 def derivedPartialErrors (challenge : ChallengeFacts) : Array Error :=
-  challenge.owned.derivedPartials.filterMap fun (declaration, module) =>
-    if ownsModule challenge module then some (.derivedPartial declaration module) else none
+  challenge.owned.inventory.declarations.filterMap fun fact =>
+    if fact.derivedPartial && ownsModule challenge fact.module then some (.derivedPartial fact.name fact.module)
+    else none
 
 def ownerErrors (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
   ownedViolationErrors lake challenge ++ specImportErrors lake challenge ++ ownedClaimErrors lake challenge ++

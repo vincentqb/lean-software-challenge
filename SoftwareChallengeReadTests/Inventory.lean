@@ -48,15 +48,25 @@ run_cmd Elab.Command.liftCoreM do
       (`Fixpoint.countdown._unsafe_rec, `Fixpoint), (`instBEqRose.beq._unsafe_rec, `CoreCode.Derived),
       (`instBEqForest.beq._unsafe_rec, `CoreSpec.Derived)] do
     let some info := env.find? (fixture name) | throwError "{name} is not in the environment"
-    check (info.isPartial && !(← facts inventory (fixture name) (fixture module)).isPartial)
+    let copy ← facts inventory (fixture name) (fixture module)
+    check (info.isPartial && copy.isPartial && !copy.written && copy.copyOf.isSome && !copy.countsAsPartial)
       s!"{name}, which well-founded, structural, terminating partial_fixpoint or derived recursion compiles, was \
-        read as partial"
-  check (← facts inventory (fixture `Fixpoint.spin._unsafe_rec) (fixture `Fixpoint)).isPartial
+        read as a hand-written partial: {repr copy}"
+  check (← facts inventory (fixture `Fixpoint.spin._unsafe_rec) (fixture `Fixpoint)).countsAsPartial
     "a partial_fixpoint that no @[terminates] covers was not partial"
   let terminatesNothing ← runIn env (inventoryFacts modules #[])
   let uncovered :=
     declarationNamed? terminatesNothing.inventory (fixture `Fixpoint) (fixture `Fixpoint.countdown._unsafe_rec)
-  check (uncovered.any (·.isPartial)) "a partial_fixpoint was exempt though no @[terminates] covers it"
+  check (uncovered.any (·.countsAsPartial)) "a partial_fixpoint was exempt though no @[terminates] covers it"
+  let rose ← facts inventory (fixture `instBEqRose.beq._unsafe_rec) (fixture `CoreCode.Derived)
+  check (rose.copyOf == some (fixture `instBEqRose.beq) && rose.copyOfInstanceMethod)
+    s!"a derived instance's compiled copy was misread: {repr rose}"
+  let halved ← facts inventory (fixture `halve._unsafe_rec) (fixture `CoreCode)
+  check (halved.copyOf == some (fixture `halve) && halved.copyOfTotal && !halved.copyOfInstanceMethod)
+    s!"a well-founded function's compiled copy was misread: {repr halved}"
+  let countdown ← facts inventory (fixture `Fixpoint.countdown._unsafe_rec) (fixture `Fixpoint)
+  check (countdown.copyOfFixpoint && countdown.copyOfTerminated)
+    s!"a covered partial_fixpoint's compiled copy was misread: {repr countdown}"
   let bound ← facts inventory (rejected `bound)
   let foreign ← facts inventory (rejected `foreign)
   check (bound.external && bound.unfoldable && foreign.external && !foreign.unfoldable)
