@@ -1,6 +1,7 @@
 module
 
 public import ConstantFolding.Expr
+public import ConstantFolding.Native
 meta import SoftwareChallenge
 
 public section
@@ -15,10 +16,6 @@ Not claimed: anything about the native adder beyond `addAgrees`.
 -/
 
 namespace ConstantFolding
-
-@[extern "lean_nat_add"] opaque nativeAdd : @& Nat → @& Nat → Nat
-
-axiom addAgrees : ∀ a b, nativeAdd a b = a + b
 
 @[consistent] theorem addAgrees_consistent :
     ∃ (nativeAdd : Nat → Nat → Nat), ∀ (a b : Nat), nativeAdd a b = a + b := by
