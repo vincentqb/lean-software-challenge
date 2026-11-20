@@ -17,7 +17,11 @@ require software_challenge from git "https://github.com/vincentqb/lean-software-
 lean_lib «ConstantFolding» where
   roots := #[`ConstantFolding.Solution]
   globs := #[.submodules `ConstantFolding]
-  precompileModules := true
+
+extern_lib «native» pkg := do
+  let some adder ← findModule? `ConstantFolding.WorldSpec.NativeAdd
+    | error "ConstantFolding.WorldSpec.NativeAdd is not a module of the package, so no library holds nativeAdd's code"
+  buildStaticLib (pkg.staticLibDir / nameToStaticLib "native") #[← adder.oExport.fetch]
 
 @[default_target]
 lean_exe «constant_folding» where
