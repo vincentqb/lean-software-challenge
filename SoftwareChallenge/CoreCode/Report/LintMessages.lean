@@ -2,6 +2,7 @@ module
 
 public import SoftwareChallenge.CoreCode.Report.Message
 public import SoftwareChallenge.CoreCode.Rules.Standing
+public import SoftwareChallenge.CoreCode.Rules.Statement
 public import Lean.PrivateName
 
 public section
@@ -54,6 +55,13 @@ def Reason.cure (reason : Reason) (name : Name) : String :=
   | .io => s!"move {name} to a WorldCode module"
   | .debug => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
   | .unfoldableExtern => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
+
+def HeadlineFact.lawOver (headline : HeadlineFact) (challenge : ChallengeFacts) (claim : Nat) : String :=
+  let binders := headline.binders challenge
+  let named := (Telescope.close binders binders.length (((binders[claim]?).map (·.refers)).getD [])).filterMap
+    fun index => (headline.telescope[index]?).map fun binder => s!"({binder.name} : {binder.shown})"
+  let statement := ((headline.telescope[claim]?).map (·.shown)).getD ""
+  if named.isEmpty then statement else s!"∀ {" ".intercalate named}, {statement}"
 
 namespace Lint
 
@@ -164,6 +172,12 @@ private def signatureOf (facts : Facts) (name : Name) : String :=
     if target.signature.isEmpty then s!"{keywordOf facts name} {written} : {target.rendered}"
     else s!"{keywordOf facts name} {written} {target.signature}"
   | none => s!"{keywordOf facts name} {name}"
+
+private def foreignClaimOf? (facts : Facts) (witness : Name) : Option (HeadlineFact × Nat × Name) := do
+  let derived ← facts.challenge.witnesses.find? (·.target.constant.name == witness)
+  let headline ← facts.challenge.headlines.find? (·.target.constant.name == derived.headline)
+  (facts.challenge.replaceable.toList.filter (Statement.isForeignFunction facts.challenge)).findSome? fun foreign =>
+    (Statement.unpremisedClaim? facts.challenge headline foreign).map (headline, ·, foreign)
 
 private def purposeOf (facts : Facts) (name : Name) : String :=
   match facts.challenge.kills.find? (·.target.constant.name == name),
@@ -712,6 +726,17 @@ private def claimShown (facts : Facts) (use : ClaimUse) : String :=
   | some binder => if binder.shown.isEmpty then use.statement else binder.shown
   | none => use.statement
 
+private def unprovableNote (facts : Facts) (name : Name) : String × String :=
+  match foreignClaimOf? facts name with
+  | some (headline, claim, foreign) =>
+    let shown := ((headline.telescope[claim]?).map (·.shown)).getD ""
+    (s!", and may have no proof: it conjoins `{shown}`, a world claim about what the opaque foreign function \
+        {foreign} returns at a witnessed input, which a proof cannot establish",
+      s!"; if no proof can show `{shown}`, state that claim in {facts.challenge.file} as a law about {foreign} that \
+        names no input, such as `{headline.lawOver facts.challenge claim}`, which then becomes a premise of {name}, \
+        {relock}")
+  | none => ("", "")
+
 def Pending.message (facts : Facts) : Pending → Message
   | .standing name current =>
     let here := hereOf facts name
@@ -724,10 +749,11 @@ def Pending.message (facts : Facts) : Pending → Message
         why := "so the facts lint read disagree with each other"
         fix := s!"Build {module} again with `lake build {module}`", next := .lint }
     | .unsound module =>
+      let (note, restated) := unprovableNote facts name
       { place := foundPlace facts module name, what := s!"{what} is proved in {module} with an axiom the comparator \
-          does not permit"
+          does not permit{note}"
         why := "so its proof is not checked"
-        fix := s!"Prove {name} with only {standardAxiomList}", next := .lint }
+        fix := s!"Prove {name} with only {standardAxiomList}{restated}", next := .lint }
     | .absent =>
       if hole then
         { place := here, what := s!"hole {name} is not implemented yet", why := purposeOf facts name
@@ -735,8 +761,10 @@ def Pending.message (facts : Facts) : Pending → Message
             IO{space}"
           next := .lint }
       else
-        { place := here, what := s!"{name} is not proved yet", why := purposeOf facts name
-          fix := s!"Add `{signatureOf facts name} := …`, with a proof, to {solutionFile facts}{space}", next := .lint }
+        let (note, restated) := unprovableNote facts name
+        { place := here, what := s!"{name} is not proved yet{note}", why := purposeOf facts name
+          fix := s!"Add `{signatureOf facts name} := …`, with a proof, to {solutionFile facts}{space}{restated}"
+          next := .lint }
     | .outside module importsSolution =>
       let file := fileOf facts module
       let solution := solutionName facts

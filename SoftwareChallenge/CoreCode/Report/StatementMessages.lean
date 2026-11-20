@@ -350,13 +350,6 @@ def Setup.message (lake : LakeFacts) : Setup → Message
       fix := s!"Remove that line from {lakefile lake}, and {relock}"
       next := .build }
 
-def lawOver (challenge : ChallengeFacts) (headline : HeadlineFact) (claim : Nat) : String :=
-  let binders := headline.binders challenge
-  let named := (Telescope.close binders binders.length (((binders[claim]?).map (·.refers)).getD [])).filterMap
-    fun index => (headline.telescope[index]?).map fun binder => s!"({binder.name} : {binder.shown})"
-  let statement := ((headline.telescope[claim]?).map (·.shown)).getD ""
-  if named.isEmpty then statement else s!"∀ {" ".intercalate named}, {statement}"
-
 def claimWritten (claim : Name) : String :=
   match claim with
   | .str _ last => last
@@ -578,7 +571,7 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
     let witness := suffixed challenge headline "_applies"
     let telescope := ((headline? challenge headline).map (·.telescope)).getD []
     let shownAt := fun (index : Nat) => ((telescope[index]?).map (·.shown)).getD s!"hypothesis {index + 1}"
-    let law := ((headline? challenge headline).map (lawOver challenge · claim)).getD (shownAt claim)
+    let law := ((headline? challenge headline).map (·.lawOver challenge claim)).getD (shownAt claim)
     { place := placeOf challenge headline
       what := s!"{headline} assumes `{shownAt precondition}`, which mentions the foreign function {foreign}, and \
         every world claim it assumes about {foreign}, such as `{shownAt claim}`, names an input"

@@ -346,6 +346,68 @@ def underTrials : BinderFact :=
   ["lakefile.lean:1: the comparator's sandbox hides package software_challenge at /tmp/software_challenge",
     "require software_challenge from git", "run `lake update software_challenge`"]
 
+def nat : Shape := .const ``Nat []
+
+def natEqual (left right : Shape) : Shape := .app (.app (.app (.const ``Eq [.succ .zero]) nat) left) right
+
+def succAt (term : Shape) : Shape := .app (.const `App.SuccAt []) term
+
+def succAtBinder : BinderFact :=
+  { binderOf "c" (succAt (.bvar 0)) true "App.SuccAt n" with
+    expanded := natEqual (.app (.const `App.nativeSucc []) (.bvar 0)) (.app (.const ``Nat.succ []) (.bvar 0)) }
+
+def succLawBinder : BinderFact :=
+  { binderOf "c" (.forallE nat (succAt (.bvar 0))) true "∀ (m : Nat), App.SuccAt m" with
+    expanded := .forallE nat
+      (natEqual (.app (.const `App.nativeSucc []) (.bvar 0)) (.app (.const ``Nat.succ []) (.bvar 0))) }
+
+def foldsToOne (input : Nat) : BinderFact :=
+  binderOf "h" (.app (.app (.app (.const ``Eq [.succ .zero]) expr)
+    (.app (.const `App.fold []) (.app (.const `App.Expr.lit []) (.bvar input)))) (.app (.const `App.Expr.lit []) (.natLit 1)))
+    true "fold (.lit n) = .lit 1"
+
+def succWitnessed (telescope : List BinderFact) (rendered : String) : Facts :=
+  withChallenge fun challenge => { challenge with
+    headlines := challenge.headlines.push
+      { target := target `App.fold_succ .proved (.sort .zero) 13 "fold_succ" "" "", telescope, killTemplate? := none
+        witness? := some rendered }
+    witnesses := #[{ headline := `App.fold_succ, derived := true
+                     target := target `App.fold_succ_applies .proved (.sort .zero) 15 "fold_succ_applies" "" rendered }]
+    replaceable := #[`App.fold, `App.nativeSucc], claims := #[`App.AddAgrees, `App.SuccAt] }
+
+def succAtWitnessed : Facts :=
+  succWitnessed [binderOf "n" nat false "Nat", succAtBinder, foldsToOne 1] "∃ n, SuccAt n ∧ fold (.lit n) = .lit 1"
+
+def succLawWitnessed : Facts :=
+  succWitnessed [succLawBinder, binderOf "n" nat false "Nat", foldsToOne 0]
+    "(∀ (m : Nat), SuccAt m) → ∃ n, fold (.lit n) = .lit 1"
+
+#guard (pendingOf succAtWitnessed).any (· matches .standing `App.fold_succ_applies .absent)
+
+#guard follows ((Lint.Pending.standing `App.fold_succ_applies .absent).message succAtWitnessed)
+
+#guard pendingSays succAtWitnessed (.standing `App.fold_succ_applies .absent)
+  ["Challenge.lean:15: App.fold_succ_applies is not proved yet, and may have no proof: it conjoins `App.SuccAt n`, a \
+    world claim about what the opaque foreign function App.nativeSucc returns at a witnessed input, which a proof \
+    cannot establish, so nothing shows that some input meets the preconditions of App.fold_succ",
+    "Add `theorem fold_succ_applies : ∃ n, SuccAt n ∧ fold (.lit n) = .lit 1 := …`, with a proof, to \
+      App/Solution.lean, inside `namespace App`; if no proof can show `App.SuccAt n`, state that claim in \
+      Challenge.lean as a law about App.nativeSucc that names no input, such as `∀ (n : Nat), App.SuccAt n`, which \
+      then becomes a premise of App.fold_succ_applies, then delete owned.lock and run `lake build`, then run \
+      `lake lint`."]
+
+#guard pendingSays succLawWitnessed (.standing `App.fold_succ_applies .absent)
+  ["App.fold_succ_applies is not proved yet, so nothing shows that some input meets the preconditions of \
+    App.fold_succ"]
+
+#guard !pendingSays succLawWitnessed (.standing `App.fold_succ_applies .absent) ["may have no proof"]
+
+#guard pendingSays succAtWitnessed (.standing `App.fold_succ_applies (.unsound `App.Solution))
+  ["App.fold_succ_applies is proved in App.Solution with an axiom the comparator does not permit, and may have no \
+    proof: it conjoins `App.SuccAt n`",
+    "Prove App.fold_succ_applies with only propext, Classical.choice, and Quot.sound; if no proof can show \
+      `App.SuccAt n`, state that claim in Challenge.lean as a law about App.nativeSucc that names no input"]
+
 end
 
 end SoftwareChallengeTests.Rules.LintMessages
