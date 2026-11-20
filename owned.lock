@@ -1,7 +1,7 @@
 {
   "lakefile.lean": "16219686156718471845",
   "lake-manifest.json": "7994980052932455075",
-  "lean-toolchain": "14208040065456890848",
+  "lean-toolchain": "6421944472842839407",
   "SoftwareChallengeStatement/Challenge.lean": "6270303150396533162",
   "SoftwareChallenge/Commands/Extensions.lean": "16594120768024651404",
   "SoftwareChallenge/Commands/WorldClaim.lean": "12089482548766129759",

@@ -1,7 +1,7 @@
 {
   "lakefile.lean": "2039090844909430832",
   "lake-manifest.json": "6702374515529786219",
-  "lean-toolchain": "14208040065456890848",
+  "lean-toolchain": "6421944472842839407",
   "Challenge.lean": "10893701323569286302",
   "ConstantFolding/CoreSpec.lean": "10290627780235857702",
   "ConstantFolding/WorldSpec/NativeAdd.lean": "17325190266616538131",
