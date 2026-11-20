@@ -1,14 +1,15 @@
 # Working on Lean Software Challenge
 
-- The specification is Lean: `SoftwareChallenge/CoreSpec/`, the headlines of
-  `SoftwareChallengeStatement/Challenge.lean`, and the fixtures in `SoftwareChallengeTests/` and
-  `SoftwareChallengeReadTests/`.
-- In `Examples/ConstantFolding/`, do not edit `Challenge.lean`, `owned.lock`,
-  `ConstantFolding/CoreSpec.lean`, or `ConstantFolding/WorldSpec.lean`; propose changes instead.
+- LSC guarantees five theorems about an accepted package and nothing else: T1 proved, T2 runs as
+  proved, T3 assumptions named and tested, T4 meaningful, T5 statement fixed. Every line of the
+  library serves one of them.
 - LSC assumes well-intentioned agents, so its rules and reviews target honest mistakes, not forgery.
-- Give every rule a fixture it rejects.
-- Validate with `lake build && lake lint && lake test`, and run `lake test -- full` after landing.
-- Every message names the declaration, file, and line, says why in one clause, gives the exact fix,
-  and the command to run next.
-- Names and structure carry the meaning: no comments or doc comments in Lean code, except each
-  challenge's statement of what is and is not claimed.
+- In `Examples/ConstantFolding/`, do not edit `Challenge.lean` or `ConstantFolding/Expr.lean`;
+  propose changes instead.
+- Every rule is a constructor of `SoftwareChallenge.Rule` with exactly one fixture in
+  `SoftwareChallengeTests/Fixtures.lean`, which it rejects with its message.
+- Validate with `lake build && lake lint && lake test`.
+- Every message names the declaration, file, and line, says why it matters in one clause, gives the
+  exact fix, and the command to run next.
+- Names and structure carry the meaning: no comments or doc comments in Lean code, except the
+  challenge's module doc.
