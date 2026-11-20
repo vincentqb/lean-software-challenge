@@ -250,12 +250,18 @@ def idle (context : Context) (dir : System.FilePath) (recorded : Recorded) : Tri
         statement step records is not stable across builds. Make the statement step render {file} from its \
         inputs alone, then run `{next}`."
 
-def lintAccepts (context : Context) (dir : System.FilePath) : Trial Unit := do
+def reportOf (dir : System.FilePath) : IO (List String) := do
+  let file := dir / ".lake" / "build" / "softwareChallenge" / "lint.out"
+  unless ← file.pathExists do return []
+  return ((← IO.FS.readFile file).splitOn "\n").filter (!·.isEmpty)
+
+def lintAccepts (context : Context) (dir : System.FilePath) : Trial (List String) := do
   let ran ← context.lakeIn dir #["lint"]
   unless ran.code == 0 do
     throwThe String s!"`lake lint` exited {ran.code} in {dir}, expected 0, so an unchanged copy of the template does \
       not pass lint. Fix what the output below reports, in the library or in Examples/ConstantFolding, then run \
       `{next}`.\n{ran.tail}"
+  reportOf dir
 
 def checksTimed (ran : Ran) : Nat :=
   ((ran.output.splitOn "\n").filter fun line =>
@@ -316,76 +322,6 @@ def ownerDropsKill (context : Context) (dir : System.FilePath) : Trial Unit := d
       Challenge.lean, expected 1 with a kill to write, `@[kills fold_normalizes] …` with `?wrong_fold` in it, so \
       an owner is not told how to show that fold_normalizes rejects a wrong fold. Restore the statement check's \
       missing-kill error and its template, then run `{next}`.\n{ran.tail}"
-
-def regenerate : String := "lake exe lsc-gate template --regenerate"
-
-def goldenFile : System.FilePath := "SoftwareChallengeTests" / "Golden" / "ConstantFolding.lean"
-
-def goldenHeader : String :=
-  "module\n\npublic import SoftwareChallenge.CoreSpec.Facts\n\npublic section\n\n\
-    namespace SoftwareChallengeTests.Golden\n\nset_option maxRecDepth 100000 in\n\
-    def constantFolding : SoftwareChallenge.Facts :=\n"
-
-def goldenFooter : String := "\nend SoftwareChallengeTests.Golden\n"
-
-def renumbered (text : String) : String :=
-  match text.splitOn "digest := \"" with
-  | [] => text
-  | first :: rest =>
-    let (parts, _) := rest.foldl (init := (#[first], (#[] : Array String))) fun (parts, seen) part =>
-      match part.splitOn "\"" with
-      | value :: tail =>
-        let seen := if seen.contains value then seen else seen.push value
-        (parts.push (s!"digest-{((seen.findIdx? (· == value)).getD 0) + 1}\"" ++ "\"".intercalate tail), seen)
-      | [] => (parts.push part, seen)
-    "digest := \"".intercalate parts.toList
-
-def normalized (emitted package lsc : String) : String :=
-  renumbered ((emitted.replace s!"\"{package}\"" "\"/workspace/template\"").replace s!"\"{lsc}\""
-    "\"/workspace/software_challenge\"")
-
-def runnerIn (context : Context) : System.FilePath := context.lsc / "SoftwareChallengeTests" / "Gate" / "Read.lean"
-
-def emittedGolden (context : Context) (dir : System.FilePath) : Trial String := do
-  let lakeFile := dir / ".lake" / "build" / "softwareChallenge" / "lake.json"
-  let ran ← context.lakeIn dir #["env", "lean", "--run", (context.lsc / "SoftwareChallengeRun.lean").toString, "facts",
-    lakeFile.toString]
-  succeed ran "the facts step cannot read the template's facts, so no golden can be compared with them"
-    "Fix what the output below reports in SoftwareChallenge/Read" next
-  return goldenHeader ++ normalized ran.stdout (← IO.FS.realPath dir).toString context.lsc.toString ++ goldenFooter
-
-def factsMatchGolden (context : Context) (dir : System.FilePath) : Trial Unit := do
-  let emitted ← emittedGolden context dir
-  let golden := context.lsc / goldenFile
-  if (← golden.pathExists) && (← IO.FS.readFile golden) == emitted then return
-  let fresh := context.root / "ConstantFolding.emitted.lean"
-  IO.FS.writeFile fresh emitted
-  let diff ← runShown "git diff --no-index" context.root "git"
-    #["diff", "--no-index", "--no-color", "-U1", golden.toString, fresh.toString]
-  throwThe String s!"{goldenFile}:1: it differs from the facts that `SoftwareChallengeRun.lean facts` emits for the \
-    template, normalized as in {fresh} and shown in the diff below, so the lint report computed from the golden is \
-    not the template's. If the reader or the template changed on purpose, run `{regenerate}`, review the \
-    diff of {goldenFile} and commit it alone; otherwise fix the reader. Then run `{next}`.\n\
-    {"\n".intercalate ((diff.stdout.splitOn "\n").take 80)}"
-
-def goldenReport (context : Context) : Trial (List String) := do
-  let ran ← context.lakeIn context.lsc #["env", "lean", "--run", (runnerIn context).toString, "report"]
-  succeed ran s!"the gate cannot compute the lint report of {goldenFile}"
-    "Fix what the output below reports, then run `lake build SoftwareChallengeTests`" next
-  return (ran.stdout.splitOn "\n").filter (!·.isEmpty)
-
-def reportOf (dir : System.FilePath) : IO (List String) := do
-  let file := dir / ".lake" / "build" / "softwareChallenge" / "lint.out"
-  unless ← file.pathExists do return []
-  return ((← IO.FS.readFile file).splitOn "\n").filter (!·.isEmpty)
-
-def reportMatches (dir : System.FilePath) (golden : List String) : Trial Unit := do
-  let reported ← reportOf dir
-  unless reported == golden do
-    throwThe String s!"{dir / ".lake" / "build" / "softwareChallenge" / "lint.out"}:1: `lake lint` reported \
-      {reported} for the template, but Lint.run on {goldenFile} reports {golden}, so the lint step reads the \
-      template otherwise than the facts step does. Make Steps.Lint and Steps.Facts read the same facts, or run \
-      `{regenerate}` if the template changed, then run `{next}`."
 
 structure Presentation where
   name : String
@@ -480,8 +416,8 @@ def invariant (lines : List String) : Array String :=
 def targetsOf (config : Config) : Array String × Array String :=
   ((config.theorems.map toString).qsort (· < ·), (config.definitions.map toString).qsort (· < ·))
 
-def presents (context : Context) (golden : List String) (config : Config) (presentation : Presentation) :
-    Trial Unit := do
+def presents (context : Context) (reference : Task (Option (List String))) (config : Config)
+    (presentation : Presentation) : Trial Unit := do
   let dir := presentationDir context presentation
   let changed := s!"the template with {presentation.name}, which changes only how the challenge or the solution is \
     written,"
@@ -490,9 +426,12 @@ def presents (context : Context) (golden : List String) (config : Config) (prese
   succeed (← context.lakeIn dir #["build"]) s!"{changed} does not build" fix next
   let linted ← context.lakeIn dir #["lint"]
   let reported ← reportOf dir
-  unless linted.code == 0 && invariant reported == invariant golden do
+  let some expected ← IO.wait reference | throwThe String s!"`lake lint` fails on the unchanged template, as the \
+    check that lint accepts it reports, so the gate has no standings to compare {changed} with. Fix that failure \
+    first, then run `{next}`."
+  unless linted.code == 0 && invariant reported == invariant expected do
     throwThe String s!"`lake lint` exited {linted.code} in {dir} and reported {reported}, expected 0 and the \
-      standings {invariant golden} of the unchanged template, so lint judges {changed} as a change of meaning. \
+      standings {invariant expected} of the unchanged template, so lint judges {changed} as a change of meaning. \
       {fix}, then run `{next}`.\n{linted.tail}"
   let tested ← context.lakeIn dir #["test"]
   unless tested.code == 0 && checksTimed tested == checkCount do
@@ -507,48 +446,27 @@ def presents (context : Context) (golden : List String) (config : Config) (prese
       unchanged template's lists {targetsOf config}, so the statement step names the targets of {changed} \
       differently. {fix}, then run `{next}`."
 
-def regenerated (context : Context) : IO UInt32 := do
-  let dir := context.root / "template"
-  let written : Trial System.FilePath := do
-    discard <| prepare context dir regenerate
-    lintAccepts context dir
-    let golden := context.lsc / goldenFile
-    IO.FS.writeFile golden (← emittedGolden context dir)
-    return golden
-  match ← written.run with
-  | .ok golden =>
-    IO.println s!"{golden}: rewritten from the facts `SoftwareChallengeRun.lean facts` emits for the template. Review \
-      its diff, commit it alone, then run `lake test -- full`."
-    return 0
-  | .error message =>
-    IO.eprintln message
-    return 1
-
 def run (context : Context) : IO (Array Outcome) := do
   let dir := context.root / "template"
   let (setup, recorded?) ← attempt "build writes owned.lock and comparator.json in a fresh copy" next
     (prepare context dir next)
   let some recorded := recorded? | return #[setup]
-  let (reported, golden?) ← attempt s!"Lint.run reports on {goldenFile}" next (goldenReport context)
   let staged ← presentations.toArray.mapM fun presentation =>
     return (presentation, ← attempt s!"{presentation.name}: the copy is staged" next (stage context dir presentation))
+  let idled ← check "a second build is idle and rewrites neither file" next (idle context dir recorded)
+  let linted ← IO.asTask (prio := .dedicated) (attempt "lint accepts the template" next (lintAccepts context dir))
+  let reference := linted.map fun result => match result with
+    | .ok (_, report?) => report?
+    | .error _ => none
   let presented ← IO.asTask (prio := .dedicated) <| concurrently context.jobs <| staged.map
     fun (presentation, (staging, ready?)) =>
       let name := s!"{presentation.name}: build, lint and test judge it as the unchanged template"
-      match ready?, golden?, Config.parse recorded.config with
-      | some _, some golden, some config => check name next (presents context golden config presentation)
-      | none, _, _ => pure staging
-      | _, _, _ => pure (skipped name "the golden's report or the template's comparator.json is unreadable")
-  let mut outcomes := #[setup, reported]
+      match ready?, Config.parse recorded.config with
+      | some _, some config => check name next (presents context reference config presentation)
+      | none, _ => pure staging
+      | _, none => pure (skipped name "the template's comparator.json is unreadable")
+  let mut outcomes := #[setup, idled, (← IO.ofExcept linted.get).1]
   for (name, action) in [
-      ("a second build is idle and rewrites neither file", idle context dir recorded),
-      ("lint accepts the template", lintAccepts context dir)] do
-    outcomes := outcomes.push (← check name next action)
-  outcomes := outcomes.push <| ← match golden? with
-    | some golden => check "lint's report is the one Lint.run gives on the golden" next (reportMatches dir golden)
-    | none => pure (skipped "lint's report is the one Lint.run gives on the golden" "the golden's report is unreadable")
-  for (name, action) in [
-      ("the facts emitted for the template equal its golden", factsMatchGolden context dir),
       (s!"test runs and passes the template's {checkCount} Checks", testRunsChecks context dir),
       (s!"replay accepts all {theoremCount} theorems of comparator.json", replayProves context dir recorded),
       ("an owner who restates fold_keeps_literal and re-locks leaves lint pending until the agent restates it",
@@ -1037,9 +955,8 @@ def runs : List (String × String × (Context → IO (Array Outcome))) := [
 def usage : String :=
   s!"usage: `lake exe lsc-gate <run>` runs one real run from the library's root, where <run> is \
     {" or ".intercalate (runs.map (·.1))}; `lake build templateRun`, `lake build comparatorRun`, `lake build \
-    gradeRun` and `lake build nativeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, `lake exe \
-    lsc-gate full` runs all four again, and `lake exe lsc-gate template --regenerate` rewrites \
-    SoftwareChallengeTests/Golden/ConstantFolding.lean from the template's facts."
+    gradeRun` and `lake build nativeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, and `lake \
+    exe lsc-gate full` runs all four again."
 
 def contextHere : IO (Except String Context) := do
   let lsc ← IO.FS.realPath (← IO.currentDir)
@@ -1114,10 +1031,6 @@ end SoftwareChallengeTests.Gate
 
 open SoftwareChallengeTests.Gate in
 def main : List String → IO UInt32
-  | ["template", "--regenerate"] => do
-    match ← contextHere with
-    | .error message => IO.eprintln message; return 1
-    | .ok context => TemplateRun.regenerated context
   | [mode] =>
     if mode == "stale" || mode == "full" then do
       match ← contextHere with

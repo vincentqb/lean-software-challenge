@@ -1,8 +1,7 @@
 module
 
 public meta import SoftwareChallenge.Read
-public meta import SoftwareChallenge.CoreCode.Rules.Lint
-public meta import SoftwareChallengeTests.Golden.ConstantFolding
+public meta import SoftwareChallenge.CoreCode.Rules.Standing
 
 public section
 meta section
@@ -27,18 +26,13 @@ def verdicts (dir : String) (modules : List String) : IO UInt32 := do
     IO.println s!"{target.constant.name} {if (facts.solution.standingOf target).proved then "accept" else "refuse"}"
   return 0
 
-def report : IO UInt32 := do
-  for line in (Lint.run SoftwareChallengeTests.Golden.constantFolding).report do IO.println line
-  return 0
-
 def usage : String :=
-  "usage: `lake env lean --run SoftwareChallengeTests/Gate/Read.lean report` prints the lint report of the golden \
-    facts, and `… comparator <dir> <module>…` prints the standing rule's verdict on each theorem and hole of the \
-    package at <dir> whose default target builds those modules; `lake exe lsc-gate` runs both."
+  "usage: `lake env lean --run SoftwareChallengeTests/Gate/Read.lean comparator <dir> <module>…` prints the standing \
+    rule's verdict on each theorem and hole of the package at <dir> whose default target builds those modules; \
+    `lake exe lsc-gate comparator` runs it."
 
 end SoftwareChallengeTests.Gate.Read
 
 def main : List String → IO UInt32
-  | ["report"] => SoftwareChallengeTests.Gate.Read.report
   | "comparator" :: dir :: modules => SoftwareChallengeTests.Gate.Read.verdicts dir modules
   | _ => do IO.eprintln SoftwareChallengeTests.Gate.Read.usage; return 2

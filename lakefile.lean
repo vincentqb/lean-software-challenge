@@ -19,8 +19,7 @@ lean_lib «SoftwareChallengeStatement» where
 lean_lib «SoftwareChallengeTests» where
   roots := #[]
   globs := #[`Support, `Coverage, `Commands, `Complete, `Format, `Grade, `Graph, `Layering, `Match, `Steps,
-    `Gate.Read].map (.one <| `SoftwareChallengeTests ++ ·) ++ #[.submodules `SoftwareChallengeTests.Rules,
-      .submodules `SoftwareChallengeTests.Golden]
+    `Gate.Read].map (.one <| `SoftwareChallengeTests ++ ·) ++ #[.submodules `SoftwareChallengeTests.Rules]
 
 lean_lib «SoftwareChallengeFixtures» where
   roots := #[]

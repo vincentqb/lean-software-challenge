@@ -4,7 +4,6 @@ public meta import SoftwareChallenge.Steps.Statement
 public meta import SoftwareChallenge.Steps.Lint
 public meta import SoftwareChallenge.Steps.Test
 public meta import SoftwareChallenge.Steps.Replay
-public meta import SoftwareChallenge.Steps.Facts
 
 public section
 meta section
@@ -12,8 +11,8 @@ meta section
 namespace SoftwareChallenge.Steps
 
 def usage : String :=
-  "usage: `lean --run SoftwareChallengeRun.lean <step> <lake.json>`, where <step> is statement, lint, test, replay, \
-    facts or drive, and test also takes <native.json>; the lakefile of software_challenge runs it from `lake build`, \
+  "usage: `lean --run SoftwareChallengeRun.lean <step> <lake.json>`, where <step> is statement, lint, test, replay \
+    or drive, and test also takes <native.json>; the lakefile of software_challenge runs it from `lake build`, \
     `lake lint` and `lake test`."
 
 def dispatch (step : String) (lakeFile : System.FilePath) (args : List String) : IO UInt32 :=
@@ -25,7 +24,6 @@ def dispatch (step : String) (lakeFile : System.FilePath) (args : List String) :
   | "drive", _ => Lint.drive lakeFile
   | "test", [nativeFile] => Test.run lakeFile nativeFile
   | "replay", _ => Replay.run lakeFile
-  | "facts", _ => Facts.run lakeFile
   | _, _ => do IO.eprintln usage; return 3
 
 def run : List String → IO UInt32
