@@ -238,6 +238,15 @@ end
 #guard mentions (renderedIn (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«partial»])) placedImpure)
   "App/CoreSpec.lean:12: App.CoreSpec.Loop uses `partial` in App.CoreSpec (CoreSpec)"
 
+#guard renderedIn (.ownedViolation (.impure `App.CoreSpec.Side.right .coreSpec [.implementedBy])) replacedSpec ==
+  "App/CoreSpec.lean:14: App.CoreSpec.Side.right uses `@[implemented_by]` in App.CoreSpec (CoreSpec), but CoreSpec \
+    code must be pure and total, so that the proofs are about the code that runs, and App.CoreSpec is owned, so no \
+    edit to the editable files fixes it. Remove `@[implemented_by]` from App.CoreSpec.Side.right in \
+    App/CoreSpec.lean, and delete owned.lock if there is one, then run `lake build`."
+
+#guard mentions (renderedIn (.ownedViolation (.impure `App.CoreSpec.Side.rec .coreSpec [.implementedBy])) replacedSpec)
+  "App/CoreSpec.lean:12: App.CoreSpec.Side.rec uses `@[implemented_by]` in App.CoreSpec (CoreSpec)"
+
 #guard mentions (renderedIn (.ownedViolation (.impure `App.CoreSpec.initFn .coreSpec [.initializer, .io]))
   ownedInitializer) "App/CoreSpec.lean:9: App.CoreSpec.initFn runs IO when the program starts"
 

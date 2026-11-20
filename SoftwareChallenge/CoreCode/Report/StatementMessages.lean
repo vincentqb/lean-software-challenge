@@ -227,16 +227,27 @@ def ownerOnly (module : Name) : String :=
 def ownedModuleOf (challenge : ChallengeFacts) (declaration : Name) : Name :=
   ((challenge.owned.inventory.declarations.find? (·.name == declaration)).map (·.module)).getD .anonymous
 
-def ownedAnchor (lake : LakeFacts) (challenge : ChallengeFacts) (module declaration : Name) : Option DeclarationPlace :=
+def ownedPlaced? (lake : LakeFacts) (challenge : ChallengeFacts) (module name : Name) : Option DeclarationPlace :=
   let file := fileOf lake module
-  let placed := fun (candidate : Name) => challenge.owned.places.find? fun found =>
-    found.name == candidate && found.place.file == file
+  challenge.owned.places.find? fun found => found.name == name && found.place.file == file
+
+def ownedAnchor (lake : LakeFacts) (challenge : ChallengeFacts) (module declaration : Name) : Option DeclarationPlace :=
+  let placed := ownedPlaced? lake challenge module
   placed (Lint.anchorIn challenge.owned.parents (placed · |>.isSome) declaration)
+
+def ownedSubject (lake : LakeFacts) (challenge : ChallengeFacts) (module declaration : Name) (reasons : List Reason) :
+    Name :=
+  Lint.subjectIn challenge.owned.parents (ownedPlaced? lake challenge module · |>.isSome) reasons declaration
 
 def ownedPlace (lake : LakeFacts) (challenge : ChallengeFacts) (module declaration : Name) : Place :=
   match ownedAnchor lake challenge module declaration with
   | some found => atLine found.place.file found.place.line
   | none => atLine (fileOf lake module) 1
+
+def ownedSubjectPlace (lake : LakeFacts) (challenge : ChallengeFacts) (module subject : Name) : Place :=
+  match ownedPlaced? lake challenge module subject with
+  | some found => atLine found.place.file found.place.line
+  | none => ownedPlace lake challenge module subject
 
 def ownedShown (lake : LakeFacts) (challenge : ChallengeFacts) (module declaration : Name) : Name :=
   match ownedAnchor lake challenge module declaration with
@@ -290,8 +301,9 @@ def ownedImpureMessage (lake : LakeFacts) (challenge : ChallengeFacts) (declarat
     (reasons : List Reason) : Message :=
   let module := ownedModuleOf challenge declaration
   let file := fileOf lake module
-  let place := ownedPlace lake challenge module declaration
-  let shown := ownedShown lake challenge module declaration
+  let subject := ownedSubject lake challenge module declaration reasons
+  let place := ownedSubjectPlace lake challenge module subject
+  let shown := Lint.shownName subject
   if reasons.contains .initializer || Lint.isInitializer declaration then
     { place, what := s!"{shown} runs IO when the program starts, in {module} ({role})"
       why := s!"but {role} code {role.purity}, and {ownerOnly module}"

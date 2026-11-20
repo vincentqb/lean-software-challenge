@@ -57,6 +57,10 @@ def Reason.cure (reason : Reason) (name : Name) : String :=
   | .debug => s!"remove the `dbg_trace` or `dbgTraceIfShared` call from {name}"
   | .unfoldableExtern => s!"declare {name} as `@[extern \"…\"] opaque`, with no body"
 
+def Reason.isAttribute : Reason → Bool
+  | .extern | .implementedBy | .unfoldableExtern => true
+  | .«unsafe» | .«partial» | .initializer | .io | .debug => false
+
 def HeadlineFact.lawOver (headline : HeadlineFact) (challenge : ChallengeFacts) (claim : Nat) : String :=
   let binders := headline.binders challenge
   let named := (Telescope.close binders binders.length (((binders[claim]?).map (·.refers)).getD [])).filterMap
@@ -129,13 +133,24 @@ def anchorIn (parents : Array (Name × Name)) (placed : Name → Bool) (name : N
   let written := settled parents (ownerOf (settled parents name))
   ((written :: prefixes written ++ [ownerOf name, name]).find? placed).getD name
 
+def subjectIn (parents : Array (Name × Name)) (placed : Name → Bool) (reasons : List Reason) (name : Name) : Name :=
+  if reasons.any Reason.isAttribute then name else anchorIn parents placed name
+
 def anchorOf (facts : Facts) (module name : Name) : Name :=
   anchorIn facts.solution.parents (fun candidate => (placeIn? facts module candidate).isSome) name
+
+def subjectOf (facts : Facts) (module name : Name) (reasons : List Reason) : Name :=
+  subjectIn facts.solution.parents (fun candidate => (placeIn? facts module candidate).isSome) reasons name
 
 def declarationPlace (facts : Facts) (module name : Name) : Place :=
   match placeIn? facts module (anchorOf facts module name) with
   | some found => { found.place with line := max 1 found.place.line }
   | none => ⟨fileOf facts module, 1⟩
+
+def subjectPlace (facts : Facts) (module subject : Name) : Place :=
+  match placeIn? facts module subject with
+  | some found => { found.place with line := max 1 found.place.line }
+  | none => declarationPlace facts module subject
 
 private def shownPlace (place : Place) : String := s!"{place.file}:{place.line}"
 
@@ -411,7 +426,7 @@ private def impureMessage (facts : Facts) (declaration : Name) (role : Role) (re
   let module := (moduleOf? facts declaration).getD .anonymous
   let file := fileOf facts module
   let anchor := anchorOf facts module declaration
-  let place := declarationPlace facts module declaration
+  let place := subjectPlace facts module declaration
   let shown := shownName declaration
   let site := located facts module
   let owner? := ownedModule? facts module

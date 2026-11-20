@@ -189,15 +189,15 @@ def addReasons (added : List Reason) : Error → Error
 def groupImpure (facts : Facts) (errors : Array Error) : Array Error :=
   errors.foldl (init := #[]) fun kept error => match error with
     | .violation (.impure declaration role reasons) =>
-      let anchor := anchorOf facts ((moduleOf? facts declaration).getD .anonymous) declaration
-      match kept.findIdx? (impureOf? · == some anchor) with
+      let subject := subjectOf facts ((moduleOf? facts declaration).getD .anonymous) declaration reasons
+      match kept.findIdx? (impureOf? · == some subject) with
       | some index => kept.modify index (addReasons reasons)
-      | none => kept.push (.violation (.impure anchor role reasons))
+      | none => kept.push (.violation (.impure subject role reasons))
     | other => kept.push other
 
 def impurePlace? (facts : Facts) : Error → Option (Name × Place)
   | .violation (.impure declaration _ _) =>
-    some (declaration, declarationPlace facts ((moduleOf? facts declaration).getD .anonymous) declaration)
+    some (declaration, subjectPlace facts ((moduleOf? facts declaration).getD .anonymous) declaration)
   | _ => none
 
 def sorryPlace? (facts : Facts) (error : Error) : Option Place :=

@@ -137,6 +137,24 @@ def parentedConstructor : Facts :=
 #guard contains (rendered parentedConstructor) "App/CoreCode.lean:30: App.Loop uses `unsafe` in App.CoreCode (CoreCode)"
 #guard Lint.settled #[(`App.Loop.mk.inner, `App.Loop.mk), (`App.Loop.mk, `App.Loop)] `App.Loop.mk.inner == `App.Loop
 
+def replacedConstructor : Facts := withSolution fun solution => { solution with
+  inventory := { solution.inventory with declarations := solution.inventory.declarations ++
+    #[declaration `App.Loop `App.CoreCode 30 false,
+      { declaration `App.Loop.mk `App.CoreCode 31 false with replaced := true },
+      { declaration `App.Loop.rec `App.CoreCode 0 false with replaced := true }] },
+  places := solution.places ++ #[placeOf `App.Loop "App/CoreCode.lean" 30 "Loop",
+    placeOf `App.Loop.mk "App/CoreCode.lean" 31 "mk"]
+  parents := #[(`App.Loop.mk, `App.Loop), (`App.Loop.rec, `App.Loop)] }
+
+#guard impureErrors replacedConstructor == #[.violation (.impure `App.Loop.mk .coreCode [.implementedBy]),
+  .violation (.impure `App.Loop.rec .coreCode [.implementedBy])]
+#guard contains (rendered replacedConstructor)
+  "App/CoreCode.lean:31: App.Loop.mk uses `@[implemented_by]` in App.CoreCode (CoreCode), but CoreCode code must be \
+    pure and total, so that the proofs are about the code that runs. Remove `@[implemented_by]` from App.Loop.mk"
+#guard contains (rendered replacedConstructor)
+  "App/CoreCode.lean:30: App.Loop.rec uses `@[implemented_by]` in App.CoreCode (CoreCode)"
+#guard contains (rendered replacedConstructor) "Remove `@[implemented_by]` from App.Loop.rec"
+
 def hygienic : Name := Lean.addMacroScope `App.CoreCode `App.initFn 12
 
 def initialized : Facts := withSolution fun solution => { solution with
