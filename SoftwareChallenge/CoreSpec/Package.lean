@@ -41,6 +41,12 @@ structure DeclarationFact where
   copyOfTotal : Bool := false
   copyOfFixpoint : Bool := false
   copyOfTerminated : Bool := false
+  readsTag : Bool := false
+  indexOf : Option Name := none
+  indexedConstructors : Nat := 0
+  indexedBuiltin : Bool := false
+  implementationTyped : Bool := false
+  implementationReadsTag : Bool := false
   deriving Repr
 
 def DeclarationFact.compilerCopy (fact : DeclarationFact) : Bool :=
@@ -49,6 +55,19 @@ def DeclarationFact.compilerCopy (fact : DeclarationFact) : Bool :=
 
 def DeclarationFact.countsAsPartial (fact : DeclarationFact) : Bool :=
   fact.isPartial && !fact.compilerCopy
+
+def DeclarationFact.generatedTagRead (fact : DeclarationFact) : Bool :=
+  !fact.written && fact.readsTag
+
+def DeclarationFact.generatedConstructorIndex (fact : DeclarationFact) : Bool :=
+  !fact.written && fact.indexOf.isSome && fact.indexedConstructors != 1 && !fact.indexedBuiltin &&
+    fact.implementationTyped && fact.implementationReadsTag
+
+def DeclarationFact.countsAsUnsafe (fact : DeclarationFact) : Bool :=
+  fact.isUnsafe && !fact.generatedTagRead
+
+def DeclarationFact.countsAsReplaced (fact : DeclarationFact) : Bool :=
+  fact.replaced && !fact.generatedConstructorIndex
 
 def DeclarationFact.derivedPartial (fact : DeclarationFact) : Bool :=
   fact.isPartial && fact.copyOfInstanceMethod && !fact.copyOfTotal
@@ -84,13 +103,13 @@ inductive Violation where
 
 def DeclarationFact.Allowed (fact : DeclarationFact) : Role → Prop
   | .coreSpec | .coreCode =>
-    fact.isUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.external = false ∧ fact.replaced = false ∧
-      fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false
+    fact.countsAsUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.external = false ∧
+      fact.countsAsReplaced = false ∧ fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false
   | .worldSpec =>
-    fact.isUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.replaced = false ∧ fact.initializes = false ∧
-      fact.debug = false ∧ (fact.external = true → fact.unfoldable = false) ∧
+    fact.countsAsUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.countsAsReplaced = false ∧
+      fact.initializes = false ∧ fact.debug = false ∧ (fact.external = true → fact.unfoldable = false) ∧
       (fact.external = false → fact.effects = false)
-  | .worldCode => fact.isUnsafe = false ∧ fact.external = false ∧ fact.replaced = false
+  | .worldCode => fact.countsAsUnsafe = false ∧ fact.external = false ∧ fact.countsAsReplaced = false
   | .tooling => True
 
 structure Project.Admits (project : Project) (inventory : Inventory) : Prop where

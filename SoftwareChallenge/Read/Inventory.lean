@@ -95,6 +95,23 @@ def terminates (env : Environment) (name : Name) : Bool :=
 def fixpoint (env : Environment) (name : Name) : Bool :=
   (Elab.PartialFixpoint.eqnInfoExt.find? env name).isSome
 
+def readsTag (info : ConstantInfo) : Bool :=
+  info.value?.any fun value =>
+    let body := value.getLambdaBody
+    body.isAppOfArity ``getObjTagNat 2 && body.appArg! == .bvar 0
+
+def indexed? (env : Environment) (info : ConstantInfo) : Option InductiveVal := do
+  let cases := (← info.value?).getLambdaBody
+  let .const casesOn@(.str datatype "casesOn") _ := cases.getAppFn | none
+  let .inductInfo type ← env.find? datatype | none
+  let major := type.numParams + 1 + type.numIndices
+  let alternatives := (cases.getAppArgs.extract (major + 1)).toList
+  guard (cases.getAppNumArgs == major + 1 + type.numCtors && cases.getArg! major == .bvar 0 &&
+    alternatives.zipIdx.all fun (alternative, index) => alternative.getLambdaBody == mkRawNatLit index)
+  let .ok (.defnDecl generated) := mkCasesOnImp env.toKernelEnv datatype | none
+  guard ((env.find? casesOn).bind (·.value?) == some generated.value)
+  return type
+
 def computational (info : ConstantInfo) : MetaM Bool := do
   unless info matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _ do return false
   if ← isProp info.type then return false
@@ -127,6 +144,8 @@ def declarationFact (reachesIO : Std.HashSet Name) (terminating : Array Name) (m
   let ranges := rangesIn env module.index info.name
   let isComputational ← computational info
   let copy := Compiler.isUnsafeRecName? info.name
+  let indexed := indexed? env info
+  let implementation := (Compiler.getImplementedBy? env info.name).bind env.find?
   return {
     name := info.name
     module := module.name
@@ -146,7 +165,14 @@ def declarationFact (reachesIO : Std.HashSet Name) (terminating : Array Name) (m
     copyOfInstanceMethod := copy.any fun source => Meta.isInstanceCore env source.getPrefix
     copyOfTotal := copy.any (terminates env)
     copyOfFixpoint := copy.any (fixpoint env)
-    copyOfTerminated := copy.any terminating.contains }
+    copyOfTerminated := copy.any terminating.contains
+    readsTag := readsTag info
+    indexOf := indexed.map (·.name)
+    indexedConstructors := (indexed.map (·.numCtors)).getD 0
+    indexedBuiltin := indexed.any (Compiler.LCNF.isRuntimeBuiltinType ·.name)
+    implementationTyped := implementation.any fun found =>
+      found.levelParams == info.levelParams && found.type == info.type
+    implementationReadsTag := implementation.any readsTag }
 
 def blameOf (env : Environment) (fact : DeclarationFact) (own : ConstantInfo) (axiomName : Name) :
     AxiomWalk AxiomBlame := do

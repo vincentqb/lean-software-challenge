@@ -31,6 +31,14 @@ def copyIn (module : Name) : DeclarationFact :=
   { pureIn module with name := module ++ `pure._unsafe_rec, isPartial := true, written := false,
                        copyOf := some (module ++ `pure) }
 
+def tagReadIn (module : Name) : DeclarationFact :=
+  { pureIn module with name := module ++ `Side.ctorIdx._impl, isUnsafe := true, written := false, readsTag := true }
+
+def constructorIndexIn (module : Name) : DeclarationFact :=
+  { pureIn module with name := module ++ `Side.ctorIdx, replaced := true, written := false,
+                       indexOf := some (module ++ `Side), indexedConstructors := 2, implementationTyped := true,
+                       implementationReadsTag := true }
+
 def ofModules (facts : Array ModuleFact) : Inventory := { modules := facts, declarations := #[] }
 
 def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #[], declarations := facts }
@@ -89,6 +97,35 @@ def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #
 
 #guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfInstanceMethod := true, written := true }]) ==
   #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
+
+#guard layered.violations
+  (ofDeclarations #[tagReadIn `S, constructorIndexIn `S, tagReadIn `W, constructorIndexIn `W]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ tagReadIn `S with written := true }]) ==
+  #[.impure `S.Side.ctorIdx._impl .coreSpec [.«unsafe»]]
+
+#guard layered.violations (ofDeclarations #[{ tagReadIn `S with readsTag := false }]) ==
+  #[.impure `S.Side.ctorIdx._impl .coreSpec [.«unsafe»]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with written := true }]) ==
+  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexedConstructors := 0 }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexOf := none }]) ==
+  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexedConstructors := 1 }]) ==
+  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with implementationTyped := false }]) ==
+  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexedBuiltin := true }]) ==
+  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with implementationReadsTag := false }]) ==
+  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
 
 #guard layered.violations (ofDeclarations #[{ impureIn `C with computational := false }]) == #[]
 

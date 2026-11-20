@@ -71,7 +71,7 @@ theorem purity_sound_rejects_accepting :
     rfl _ (Array.mem_singleton.mpr rfl)
   simp [Project.role?] at classified
   subst classified
-  simp [DeclarationFact.Allowed] at allowed
+  simp [DeclarationFact.Allowed, DeclarationFact.countsAsUnsafe, DeclarationFact.generatedTagRead] at allowed
 
 theorem purity_sound_applies :
     ∃ (project : Project) (inventory : Inventory) (fact : DeclarationFact),
@@ -82,8 +82,8 @@ theorem purity_sound_applies :
                           isUnsafe := false, isPartial := false, external := false, unfoldable := true,
                           replaced := false, initializes := false, effects := false, debug := false,
                           axioms := #[] }] },
-    _, by simp [Project.violations, DeclarationFact.violations, DeclarationFact.reasons, DeclarationFact.countsAsPartial,
-      Project.role?],
+    _, by simp [Project.violations, DeclarationFact.violations, DeclarationFact.reasons, DeclarationFact.countsAsUnsafe,
+      DeclarationFact.countsAsPartial, DeclarationFact.countsAsReplaced, Project.role?],
     Array.mem_singleton.mpr rfl⟩
 
 end SoftwareChallenge

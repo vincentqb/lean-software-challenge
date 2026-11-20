@@ -21,8 +21,9 @@ def Project.admits (project : Project) (source : Role) (dependency : ImportFact)
     | none => true
 
 def DeclarationFact.reasons (role : Role) (fact : DeclarationFact) : List Reason :=
-  let flags := [(fact.isUnsafe, Reason.«unsafe»), (fact.countsAsPartial, .«partial»), (fact.external, .extern),
-    (fact.replaced, .implementedBy), (fact.initializes, .initializer), (fact.effects, .io), (fact.debug, .debug)]
+  let flags := [(fact.countsAsUnsafe, Reason.«unsafe»), (fact.countsAsPartial, .«partial»),
+    (fact.external, .extern), (fact.countsAsReplaced, .implementedBy), (fact.initializes, .initializer),
+    (fact.effects, .io), (fact.debug, .debug)]
   let raised := fun (allowed : List Reason) =>
     flags.filterMap fun (set, reason) => if set && !allowed.contains reason then some reason else none
   if !fact.computational then [] else match role with
