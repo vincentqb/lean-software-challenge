@@ -17,6 +17,4 @@ structure Problem where
 def Problem.render (problem : Problem) : String :=
   s!"{problem.place}: {problem.what}, {problem.why}. {problem.fix}, then run `{problem.next}`."
 
-def placeOf (file : String) (line : Nat) : String := s!"{file}:{line}"
-
 end SoftwareChallenge

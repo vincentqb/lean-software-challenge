@@ -64,19 +64,21 @@ def standing (plan : Plan) (permitted : Array Name) (stated : Stated) : MetaM (O
     s!"{stated.kind} {name} uses the axiom {used}" "which comparator.json does not permit, so the comparator rejects it"
     s!"Prove it without {used}, which `#print axioms {name}` traces"
 
-def purity (plan : Plan) (challenge : Challenge) (hole : Name) : MetaM (Array Problem) := do
+def purity (plan : Plan) (challenge : Challenge) (checked : NameSet) (hole : Name) : MetaM (Array Problem × NameSet) := do
   let env ← getEnv
-  unless env.contains hole do return #[]
-  let impure ← ((reach plan env #[hole]).toArray.qsort Name.lt).filterMapM fun name => do
+  unless env.contains hole do return (#[], checked)
+  let reached := reach plan env #[hole]
+  let impure ← ((reached.toArray.filter (!checked.contains ·)).qsort Name.lt).filterMapM fun name => do
     let some info := env.find? name | return none
     let some reason := impurity env challenge.foreign info | return none
     unless ← isWritten name do return none
     return some (lintProblem .impure (← plan.place name) s!"{name}, which hole {hole} computes through, is {reason}"
       "so the program does not run the Lean definition that the proofs are about"
       s!"Define {name} in plain Lean, without {reason}")
+  let checked := reached.foldl NameSet.insert checked
   unless (Elab.PartialFixpoint.eqnInfoExt.find? env hole).isSome && !challenge.terminates.any (·.2 == hole) do
-    return impure
-  return impure.push <| lintProblem .fixpoint (← plan.place hole)
+    return (impure, checked)
+  return (·, checked) <| impure.push <| lintProblem .fixpoint (← plan.place hole)
     s!"hole {hole} is a partial_fixpoint without a @[terminates {hole}] headline" "so nothing shows that it returns"
     s!"Define it by structural or well-founded recursion, or have Challenge state a `@[terminates {hole}]` headline"
 
@@ -116,8 +118,10 @@ def lintStep (plan : Plan) : IO UInt32 := do
       (← stated "witness" challenge.witnesses) ++ (← stated "consistency theorem" challenge.consistent) ++
       (← stated "hole" challenge.holes) ++ (← stated "world claim" challenge.claims))
   let (standings, impure) ← inEnv (← importEnv plan.solution) do
-    return (← stated.mapM (standing plan (standardAxioms ++ challenge.claims)),
-      ← challenge.holes.flatMapM (purity plan challenge))
+    let (impure, _) ← challenge.holes.foldlM (init := (#[], {})) fun (impure, checked) hole => do
+      let (found, checked) ← purity plan challenge checked hole
+      return (impure ++ found, checked)
+    return (← stated.mapM (standing plan (standardAxioms ++ challenge.claims)), impure)
   let problems := standings.filterMap id ++ impure ++ (← plan.programs.flatMapM (unreached plan challenge)) ++
     (← untested plan (stated.filter (·.kind == "world claim")))
   let errors := problems.filter (·.rule != .pending)
