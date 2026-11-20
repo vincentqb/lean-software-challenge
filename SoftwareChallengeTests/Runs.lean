@@ -60,8 +60,19 @@ def gradeRun (context : Context) : Check String := do
   let dir := context.dir "grade"
   templateCopy context.lsc dir []
   committed dir [.replace "ConstantFolding/Fold.lean" "end ConstantFolding"
-    "theorem fold_lit (n : Nat) : fold (.lit n) = .lit n := fold_eq_self_of_normal _ rfl\n\nend ConstantFolding"]
-  let graded ← step dir #["exe", "grade", "candidate"] 0 ["accepted: candidate"]
+      "theorem fold_lit (n : Nat) : fold (.lit n) = .lit n := fold_eq_self_of_normal _ rfl\n\nend ConstantFolding",
+    .replace "ConstantFolding/Expr.lean" "end ConstantFolding"
+      "theorem eval_lit (env : Nat → Nat) (n : Nat) : eval env (.lit n) = n := rfl\n\nend ConstantFolding"]
+  let sha := (← gitIn dir #["rev-parse", "candidate"]).output.trimAscii.toString
+  let fixRef := s!"fix-{(← gitIn dir #["rev-parse", "--short", "candidate"]).output.trimAscii}"
+  let refused ← step dir #["exe", "grade", sha] 1
+    [s!"(`git switch -c {fixRef} {sha} && ", s!"then run `lake exe grade {fixRef}`"]
+  for setting in [#["user.name", "lsc-test"], #["user.email", "lsc-test@localhost"], #["commit.gpgsign", "false"]] do
+    discard <| gitIn dir (#["config"] ++ setting)
+  let restore := (((refused.splitOn "(`").getLastD "").splitOn "`)").headD ""
+  let restored ← runIn dir "sh" #["-c", restore]
+  ExceptT.mk (pure (expect restored s!"`{restore}` in {dir}" 0 []))
+  let graded ← step dir #["exe", "grade", fixRef] 0 [s!"accepted: {fixRef}"]
   return ((graded.splitOn "\n").find? (·.startsWith "accepted:")).getD ""
 
 def coverageRun (context : Context) : Check Unit := do

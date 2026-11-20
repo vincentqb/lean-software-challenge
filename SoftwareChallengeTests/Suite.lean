@@ -42,8 +42,8 @@ def run (lsc : System.FilePath) : IO UInt32 := do
   let some (.inductInfo rule) := env.find? ``SoftwareChallenge.Rule | throw (.userError "SoftwareChallenge.Rule is missing")
   let quiet := fun (check : ExceptT String IO Unit) => do check; return ""
   let runs ← IO.asTask (prio := .dedicated) <| pool 6 <|
-    #[timed "grade accepts the template" (gradeRun context), timed "template run" (templateRun context),
-      timed "coverage" (quiet (coverageRun context))] ++
+    #[timed "grade accepts the printed fix of a SHA candidate" (gradeRun context),
+      timed "template run" (templateRun context), timed "coverage" (quiet (coverageRun context))] ++
     fixtures.toArray.map fun fixture =>
       let name := (rule.ctors[fixture.rule.ctorIdx]?.map (·.getString!)).getD "rule"
       timed s!"rule {name}" (quiet (fixtureRun context fixture name))

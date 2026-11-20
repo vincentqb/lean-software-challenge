@@ -103,6 +103,8 @@ structure Context where
   candidate : String
   again : String
   baseRef : String
+  fixRef : String
+  checkoutFix : String
   merge : String
   stamp : String
 
@@ -168,7 +170,7 @@ def statementStage (context : Context) : Judge BaseFacts := do
   unless (← run context.lake #["build", ":softwareChallengeStatement"] base) == 0 do
     stop .statement .cannotJudge s!"cannot judge: the statement check fails in {base}, as printed above, so it \
       states no challenge to grade {context.candidate} against. Fix each error there as it says until `lake build` \
-      passes in {base}, commit, {context.merge}, {context.again}."
+      passes in {base}, commit, {context.merge}."
   let file := base / "comparator.json"
   let plan := stepFile base "statement.json"
   match ← readJson file, ← readJson plan with
@@ -206,23 +208,21 @@ def ownedStage (context : Context) (facts : BaseFacts) : Judge String := do
   | 1 =>
     discard <| run "git" (#["diff", "--stat", "HEAD", "--"] ++ owned) base
     stop .owned .cannotJudge s!"cannot judge: {base} has changes to the owned files listed above that are not \
-      committed, so no commit holds the statement grade would check. Commit them in {base}, {context.merge}, \
-      {context.again}."
+      committed, so no commit holds the statement grade would check. Commit them in {base}, {context.merge}."
   | _ => stop .owned .cannotJudge gitFails
   discard <| run "git" (#["diff", "--stat", candidate, "--"] ++ owned) base
   let mergeBase := firstLine (← output "git" #["merge-base", "HEAD", candidate] base).stdout
   if (← differ #[mergeBase, candidate]) == 0 then
     stop .owned .refuse s!"refused: {context.baseRef} changed the owned files listed above after {candidate} \
-      branched from it, so {candidate} solves an older statement. To grade it against this one, {context.merge}, \
-      {context.again}."
+      branched from it, so {candidate} solves an older statement. To grade it against this one, {context.merge}."
   let names ← output "git" (#["diff", "--name-only", "--no-renames", candidate, "--"] ++ owned) base
   let files := (names.stdout.splitOn "\n").filter (!·.isEmpty)
   let restore := " ".intercalate (files.map fun file => quoted s!":(top,literal){file}")
   let changed : Problem := {
-    rule := .owned, place := s!"{files.headD facts.challenge}:1", next := s!"lake exe grade {candidate}"
+    rule := .owned, place := s!"{files.headD facts.challenge}:1", next := s!"lake exe grade {context.fixRef}"
     what := s!"{candidate} changes the owned files {", ".intercalate files}"
     why := s!"which Challenge.lean and its imports state, so {candidate} solves another challenge"
-    fix := s!"Restore them on {candidate} (`git checkout {candidate} && git restore --source={context.baseRef} \
+    fix := s!"Restore them on {context.fixRef} (`{context.checkoutFix} && git restore --source={context.baseRef} \
       --staged --worktree -- {restore} && git commit -m 'Restore the owned files' && git checkout {context.baseRef}`)" }
   stop .owned .refuse ("refused: " ++ changed.render)
 
@@ -319,11 +319,15 @@ def grade (candidate : String) : IO UInt32 := do
   let branch := firstLine (← output "git" #["rev-parse", "--abbrev-ref", "HEAD"] base).stdout
   let short := firstLine (← output "git" #["rev-parse", "--short", "HEAD"] base).stdout
   let baseRef := if branch == "HEAD" then short else branch
+  let isBranch := (← output "git" #["rev-parse", "--verify", "--quiet", s!"refs/heads/{candidate}"] base).exitCode == 0
+  let shortCandidate := firstLine (← output "git" #["rev-parse", "--short", s!"{candidate}^\{commit}"] base).stdout
+  let fixRef := if isBranch then candidate else s!"fix-{shortCandidate}"
+  let checkoutFix := if isBranch then s!"git checkout {candidate}" else s!"git switch -c {fixRef} {candidate}"
   let context : Context := {
-    lake := (← IO.getEnv "LAKE").getD "lake", base, candidate, baseRef
+    lake := (← IO.getEnv "LAKE").getD "lake", base, candidate, baseRef, fixRef, checkoutFix
     again := s!"then run `lake exe grade {candidate}`"
-    merge := s!"merge {baseRef} into {candidate} (`git checkout {candidate} && git merge {baseRef} && git checkout \
-      {baseRef}`)"
+    merge := s!"merge {baseRef} into {fixRef} (`{checkoutFix} && git merge {baseRef} && git checkout {baseRef}`), \
+      then run `lake exe grade {fixRef}`"
     stamp := s!"{← IO.monoNanosNow}-{← IO.Process.getPID}" }
   let passed ← IO.mkRef #[]
   let outcome ← try (judge context passed).run finally clean context
