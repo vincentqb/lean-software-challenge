@@ -22,7 +22,7 @@ def dispatch (step : String) (lakeFile : System.FilePath) (args : List String) :
   | "lint", ["importers"] => Lint.importers lakeFile
   | "lint", _ => Lint.run lakeFile
   | "drive", _ => Lint.drive lakeFile
-  | "test", _ => Test.run lakeFile
+  | "test", loads => Test.run lakeFile loads.toArray
   | "replay", _ => Replay.run lakeFile
   | "facts", _ => Facts.run lakeFile
   | _, _ => do IO.eprintln usage; return 3

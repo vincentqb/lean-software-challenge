@@ -122,11 +122,15 @@ def nativeMissing : TestFacts :=
 #guard !(Test.run nativeMissing).failures.any (· matches .checkFailed _)
 #guard says (samples[1]!)
   ["lakefile.lean:14: the Checks could not run: they call App.nativeAdd, an `@[extern]` declaration, whose native \
-    code Lean's interpreter finds only in precompiled modules, and the package does not precompile them",
-    "Add `precompileModules := true` to the package's default lean_lib in lakefile.lean, then delete owned.lock and \
-      run `lake build`, then run `lake test`."]
+    code Lean's interpreter finds only in the libraries `lake test` loads, of precompiled modules and of \
+    `extern_lib` targets, and none of them defines its symbol",
+    "Declare in lakefile.lean an `extern_lib` whose static library holds the C function that App.nativeAdd's \
+      `@[extern]` names and the `o.export` facet of its module, the object that defines its symbol, with \
+      App.nativeAdd declared in a module that imports only Lean's own (Init, Std, Lean), since the Checks' process \
+      runs that module's initializer, which calls its imports'; or add `precompileModules := true` to the lean_lib \
+      of its module; then delete owned.lock and run `lake build`, then run `lake test`."]
 #guard !says (samples[1]!) ["Fix the Check"]
-#guard ((Report.test "Challenge.lean" (Test.run nativeMissing)).filter (contains · "precompileModules")).size == 1
+#guard ((Report.test "Challenge.lean" (Test.run nativeMissing)).filter (contains · "extern_lib")).size == 1
 
 end
 

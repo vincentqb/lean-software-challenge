@@ -161,18 +161,23 @@ package_facet softwareChallenge pkg : Unit := do
   let prepared ← prepare pkg pkg.testDriverArgs
   stepJob pkg "lint" prepared (prepared.catalog ++ prepared.challenge?.toArray) #[]
 
-def spawnStep (step : String) (testArgs : Array String) : ScriptM UInt32 := do
+def spawnStep (step : String) (testArgs : Array String) (args : Array String := #[]) : ScriptM UInt32 := do
   let pkg ← getRootPackage
   let prepared ← runBuild do
     let prepared ← prepare pkg testArgs
     return (← stepsJob).map fun _ => prepared
-  discard <| (← IO.Process.spawn { cmd := (← getLean).toString, args := ← stepArgs pkg prepared step #[], cwd := pkg.dir
+  discard <| (← IO.Process.spawn { cmd := (← getLean).toString, args := ← stepArgs pkg prepared step args, cwd := pkg.dir
                                    env := ← getAugmentedEnv }).wait
   statusOf pkg step
 
 script lint_challenge do spawnStep "drive" (← getRootPackage).testDriverArgs
 
-script test_challenge (args) do spawnStep "test" args.toArray
+def loadDynlibs (pkg : Package) : FetchM (Job (Array String)) := do
+  return (Job.collectArray (← pkg.externLibs.mapM (·.dynlib.fetch))).map (·.map (s!"--load-dynlib={·.path}"))
+
+script test_challenge (args) do
+  let loads ← runBuild (loadDynlibs (← getRootPackage))
+  spawnStep "test" args.toArray loads
 
 script replay do spawnStep "replay" (← getRootPackage).testDriverArgs
 
@@ -199,6 +204,8 @@ target templateRun pkg : Unit := gateRun pkg "template" ("Examples" / "ConstantF
 target comparatorRun pkg : Unit := gateRun pkg "comparator" ("SoftwareChallengeTests" / "Comparator")
 
 target gradeRun pkg : Unit := gateRun pkg "grade" ("Examples" / "ConstantFolding")
+
+target nativeRun pkg : Unit := gateRun pkg "native" ("SoftwareChallengeTests" / "Native")
 
 def gate (mode : String) : ScriptM UInt32 := do
   (← IO.Process.spawn { cmd := (← runBuild «lsc-gate».fetch).toString, args := #[mode], cwd := (← getRootPackage).dir

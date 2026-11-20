@@ -953,6 +953,59 @@ def run (context : Context) : IO (Array Outcome) := do
 
 end SoftwareChallengeTests.Gate.GradeRun
 
+namespace SoftwareChallengeTests.Gate.NativeRun
+
+def next : String := "lake build nativeRun"
+
+def source : String := "SoftwareChallengeTests/Gate.lean"
+
+def fixture : System.FilePath := "SoftwareChallengeTests" / "Native"
+
+def checksTimed (ran : Ran) : Nat :=
+  ((ran.output.splitOn "\n").filter fun line =>
+    line.startsWith "Native/WorldCode.lean:" && line.contains " Native.TwiceDoubles ").length
+
+def withoutModuleObject : List Edit := [
+  ("lakefile.lean", replacing "#[← twice.oExport.fetch, native]" "#[native]")]
+
+def loadsNativeCode (context : Context) (dir : System.FilePath) : Trial Unit := do
+  let ran ← context.lakeIn dir #["test"]
+  unless ran.code == 0 && checksTimed ran == 1 do
+    throwThe String s!"`lake test` exited {ran.code} in {dir} and timed {checksTimed ran} Checks of \
+      Native/WorldCode.lean, expected exit 0 and 1 Check, so a Check that calls Native.twice, whose C the \
+      extern_lib of {fixture}/lakefile.lean builds, does not run with that C loaded. Make test_challenge in \
+      lakefile.lean build the dynlib of each extern_lib and pass it to the Checks with `--load-dynlib`, then run \
+      `{next}`.\n{ran.tail}"
+
+def namesMissingSymbol (context : Context) (dir : System.FilePath) : Trial Unit := do
+  applyEdits dir source next withoutModuleObject
+  let ran ← context.lakeIn dir #["test"]
+  let named := ran.output.contains "they call Native.twice, an `@[extern]` declaration" &&
+    ran.output.contains "the `o.export` facet of its module" &&
+    ran.output.contains "declared in a module that imports only Lean's own"
+  unless ran.code == 1 && named do
+    throwThe String s!"`lake test` exited {ran.code} in {dir} after its extern_lib dropped the object of \
+      Native.WorldSpec.Twice, expected 1 with the message that Native.twice's symbol is missing and that the \
+      extern_lib needs the `o.export` facet of a module that imports only Lean's own, so a package whose extern_lib \
+      holds only the C function is not told what its library lacks. Restore the nativeCodeMissing message of \
+      SoftwareChallenge/CoreCode/Report/TestMessages.lean, then run `{next}`.\n{ran.tail}"
+
+def run (context : Context) : IO (Array Outcome) := do
+  let dir := context.root / "native"
+  let (setup, ready?) ← attempt s!"a copy of {fixture} requires this checkout" next do
+    fresh dir
+    copyTree (context.lsc / fixture) dir (· == ".lake")
+    TemplateRun.requireLocally context.lsc dir
+  if ready?.isNone then return #[setup]
+  let mut outcomes := #[setup]
+  for (name, action) in [
+      ("lake test runs a Check that calls the C of an extern_lib", loadsNativeCode context dir),
+      ("lake test names the symbol an extern_lib without the module's object lacks", namesMissingSymbol context dir)] do
+    outcomes := outcomes.push (← check name next action)
+  return outcomes
+
+end SoftwareChallengeTests.Gate.NativeRun
+
 namespace SoftwareChallengeTests.Gate
 
 open SoftwareChallenge
@@ -960,13 +1013,14 @@ open SoftwareChallenge
 def runs : List (String × String × (Context → IO (Array Outcome))) := [
   ("template", "R1, the template", TemplateRun.run),
   ("comparator", "R2, the comparator on SoftwareChallengeTests/Comparator", ComparatorRun.run),
-  ("grade", "R3, real grades with the template as the base", GradeRun.run)]
+  ("grade", "R3, real grades with the template as the base", GradeRun.run),
+  ("native", "R4, Checks that call the C of an extern_lib, on SoftwareChallengeTests/Native", NativeRun.run)]
 
 def usage : String :=
   s!"usage: `lake exe lsc-gate <run>` runs one real run from the library's root, where <run> is \
-    {" or ".intercalate (runs.map (·.1))}; `lake build templateRun`, `lake build comparatorRun` and `lake build \
-    gradeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, `lake exe lsc-gate full` runs all \
-    three again, and `lake exe lsc-gate template --regenerate` rewrites \
+    {" or ".intercalate (runs.map (·.1))}; `lake build templateRun`, `lake build comparatorRun`, `lake build \
+    gradeRun` and `lake build nativeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, `lake exe \
+    lsc-gate full` runs all four again, and `lake exe lsc-gate template --regenerate` rewrites \
     SoftwareChallengeTests/Golden/ConstantFolding.lean from the template's facts."
 
 def contextHere : IO (Except String Context) := do

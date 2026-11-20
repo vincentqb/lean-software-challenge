@@ -27,22 +27,24 @@ def checkGroups (lake : LakeFacts) : Array (Array SourceFact) :=
     let others := roots.filter (·.module != first.module)
     #[lake.modules.filter fun source => !others.any (·.module == source.module)] ++ others.map (#[·])
 
-def runGroup (lake : LakeFacts) (dir : System.FilePath) (index : Nat) (modules : Array SourceFact) :
-    IO (Option Checks.Ran × IO.Process.Output) := do
+def runGroup (lake : LakeFacts) (loads : Array String) (dir : System.FilePath) (index : Nat)
+    (modules : Array SourceFact) : IO (Option Checks.Ran × IO.Process.Output) := do
   let suffix := if index == 0 then "" else toString index
   let runner := dir / s!"Checks{suffix}.lean"
   let out := dir / s!"checks{suffix}.json"
   if ← out.pathExists then IO.FS.removeFile out
   IO.FS.writeFile runner (runnerSource modules out)
-  let output ← IO.Process.output { cmd := ← lakeCommand, args := #["lean", runner.toString], cwd := lake.packageDir }
+  let output ← IO.Process.output { cmd := ← lakeCommand, args := #["lean", runner.toString, "--"] ++ loads
+                                   cwd := lake.packageDir }
   unless ← out.pathExists do return (none, output)
   return ((Json.parse (← IO.FS.readFile out) >>= fromJson?).toOption, output)
 
-def runChecks (lake : LakeFacts) (dir : System.FilePath) : IO (Option Checks.Ran × IO.Process.Output) := do
+def runChecks (lake : LakeFacts) (loads : Array String) (dir : System.FilePath) :
+    IO (Option Checks.Ran × IO.Process.Output) := do
   let mut ran : Checks.Ran := { declared := #[], outcomes := #[], finished := true }
   let mut printed : IO.Process.Output := { exitCode := 0, stdout := "", stderr := "" }
   for (modules, index) in (checkGroups lake).zipIdx do
-    let (result?, output) ← runGroup lake dir index modules
+    let (result?, output) ← runGroup lake loads dir index modules
     printed := { exitCode := max printed.exitCode output.exitCode, stdout := printed.stdout ++ output.stdout
                  stderr := printed.stderr ++ output.stderr }
     let some result := result? | return (none, printed)
@@ -75,10 +77,10 @@ def libraryPlace (lake : LakeFacts) : IO Place := do
   let lines := ((← Read.readInput lake file .test).getD "").splitOn "\n"
   return { file, line := ((lines.findIdx? (·.contains "lean_lib")).map (· + 1)).getD 1 }
 
-def run (lakeFile : System.FilePath) : IO UInt32 := do
+def run (lakeFile : System.FilePath) (loads : Array String) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .test
   let dir := lakeFile.parent.getD "."
-  let (ran?, output) ← runChecks lake dir
+  let (ran?, output) ← runChecks lake loads dir
   unless ran?.any (·.finished) do
     IO.print output.stdout
     IO.eprint output.stderr

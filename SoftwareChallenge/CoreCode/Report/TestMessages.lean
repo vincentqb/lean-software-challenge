@@ -43,10 +43,14 @@ def Failure.message (challengeFile : String) : Failure → Message
     let place := lineOne place
     { place
       what := s!"the Checks could not run: they call {declaration}, an `@[extern]` declaration, whose native code \
-        Lean's interpreter finds only in precompiled modules"
-      why := "and the package does not precompile them"
-      fix := s!"Add `precompileModules := true` to the package's default lean_lib in {place.file}, then delete \
-        owned.lock and run `lake build`"
+        Lean's interpreter finds only in the libraries `lake test` loads, of precompiled modules and of `extern_lib` \
+        targets"
+      why := "and none of them defines its symbol"
+      fix := s!"Declare in {place.file} an `extern_lib` whose static library holds the C function that \
+        {declaration}'s `@[extern]` names and the `o.export` facet of its module, the object that defines its symbol, \
+        with {declaration} declared in a module that imports only Lean's own (Init, Std, Lean), since the Checks' \
+        process runs that module's initializer, which calls its imports'; or add `precompileModules := true` to the \
+        lean_lib of its module; then delete owned.lock and run `lake build`"
       next := .test }
   | .checkNotRun check =>
     let place := lineOne check.place
