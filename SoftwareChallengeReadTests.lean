@@ -9,3 +9,4 @@ import SoftwareChallengeReadTests.Solution
 import SoftwareChallengeReadTests.Owned
 import SoftwareChallengeReadTests.Closure
 import SoftwareChallengeReadTests.Forged
+import SoftwareChallengeReadTests.Attributes

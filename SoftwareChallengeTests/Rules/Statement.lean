@@ -282,6 +282,16 @@ def unsafeSpec : DeclarationFact := { declarationIn `App.CoreSpec `App.CoreSpec.
 def ownedImpure : ChallengeFacts :=
   withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[unsafeSpec]⟩ }
 
+def replacedSpec : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec],
+                #[{ declarationIn `App.CoreSpec `App.CoreSpec.Side.right with computational := false, replaced := true },
+                  { declarationIn `App.CoreSpec `App.CoreSpec.Side.rec with computational := false, replaced := true }]⟩
+              places := #[{ name := `App.CoreSpec.Side, place := ⟨"App/CoreSpec.lean", 12⟩, written := "Side"
+                            firstLine := "inductive Side where" },
+                          { name := `App.CoreSpec.Side.right, place := ⟨"App/CoreSpec.lean", 14⟩, written := "right"
+                            firstLine := "  | right (n : Nat)" }]
+              parents := #[(`App.CoreSpec.Side.right, `App.CoreSpec.Side), (`App.CoreSpec.Side.rec, `App.CoreSpec.Side)] }
+
 def editableImpure : ChallengeFacts :=
   withOwned { inventory := ⟨#[moduleNamed `App.CoreCode],
     #[{ declarationIn `App.CoreCode `App.CoreCode.loop with isUnsafe := true }]⟩ }
@@ -595,6 +605,10 @@ end
 #guard needsWitness baseChallenge holeTypedInput && !needsWitness claimedHypotheses (claimedHypotheses.headlines[0]!)
 
 #guard refuses (.ownedViolation (.impure `App.CoreSpec.loop .coreSpec [.«unsafe»])) (challenge := ownedImpure)
+
+#guard refuses (.ownedViolation (.impure `App.CoreSpec.Side.right .coreSpec [.implementedBy])) (challenge := replacedSpec)
+
+#guard refuses (.ownedViolation (.impure `App.CoreSpec.Side.rec .coreSpec [.implementedBy])) (challenge := replacedSpec)
 
 #guard errorsOf (challenge := editableImpure) == #[]
 

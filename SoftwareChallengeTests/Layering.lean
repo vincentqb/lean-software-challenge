@@ -39,6 +39,9 @@ def constructorIndexIn (module : Name) : DeclarationFact :=
                        indexOf := some (module ++ `Side), indexedConstructors := 2, implementationTyped := true,
                        implementationReadsTag := true }
 
+def constructorIn (module : Name) : DeclarationFact :=
+  { pureIn module with name := module ++ `Side.right, computational := false, unfoldable := false }
+
 def ofModules (facts : Array ModuleFact) : Inventory := { modules := facts, declarations := #[] }
 
 def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #[], declarations := facts }
@@ -127,7 +130,54 @@ def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #
 #guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with implementationReadsTag := false }]) ==
   #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
 
-#guard layered.violations (ofDeclarations #[{ impureIn `C with computational := false }]) == #[]
+#guard layered.violations (ofDeclarations #[{ impureIn `C with computational := false }]) ==
+  #[.impure `C.pure .coreCode [.«unsafe», .extern, .implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ impureIn `W with computational := false }]) ==
+  #[.impure `W.pure .worldCode [.«unsafe», .extern, .implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ impureIn `P with computational := false }]) ==
+  #[.impure `P.pure .worldSpec [.«unsafe», .extern, .implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ pureIn `P with computational := false, external := true }]) ==
+  #[.impure `P.pure .worldSpec [.extern]]
+
+#guard layered.violations (ofDeclarations #[{ impureIn `T with computational := false }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `S with replaced := true }]) ==
+  #[.impure `S.Side.right .coreSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `C with replaced := true }]) ==
+  #[.impure `C.Side.right .coreCode [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `P with replaced := true }]) ==
+  #[.impure `P.Side.right .worldSpec [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `W with replaced := true }]) ==
+  #[.impure `W.Side.right .worldCode [.implementedBy]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `T with replaced := true }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `C with external := true }]) ==
+  #[.impure `C.Side.right .coreCode [.extern]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `P with external := true }]) ==
+  #[.impure `P.Side.right .worldSpec [.extern]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `W with external := true }]) ==
+  #[.impure `W.Side.right .worldCode [.extern]]
+
+#guard layered.violations (ofDeclarations #[{ pureIn `C with computational := false, isUnsafe := true }]) ==
+  #[.impure `C.pure .coreCode [.«unsafe»]]
+
+#guard layered.violations (ofDeclarations #[{ pureIn `P with computational := false, isUnsafe := true }]) ==
+  #[.impure `P.pure .worldSpec [.«unsafe»]]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `C with
+  isPartial := true, initializes := true, effects := true, debug := true }]) == #[]
+
+#guard layered.violations (ofDeclarations #[{ constructorIn `P with
+  isPartial := true, initializes := true, effects := true, debug := true }]) == #[]
 
 #guard layered.violations (ofDeclarations #[externIn `P]) == #[]
 

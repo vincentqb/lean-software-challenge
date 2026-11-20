@@ -103,12 +103,14 @@ inductive Violation where
 
 def DeclarationFact.Allowed (fact : DeclarationFact) : Role → Prop
   | .coreSpec | .coreCode =>
-    fact.countsAsUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.external = false ∧
-      fact.countsAsReplaced = false ∧ fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false
+    fact.countsAsUnsafe = false ∧ fact.external = false ∧ fact.countsAsReplaced = false ∧
+      (fact.computational = true →
+        fact.countsAsPartial = false ∧ fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false)
   | .worldSpec =>
-    fact.countsAsUnsafe = false ∧ fact.countsAsPartial = false ∧ fact.countsAsReplaced = false ∧
-      fact.initializes = false ∧ fact.debug = false ∧ (fact.external = true → fact.unfoldable = false) ∧
-      (fact.external = false → fact.effects = false)
+    fact.countsAsUnsafe = false ∧ fact.countsAsReplaced = false ∧
+      (fact.external = true → fact.computational = true ∧ fact.unfoldable = false) ∧
+      (fact.computational = true → fact.countsAsPartial = false ∧ fact.initializes = false ∧ fact.debug = false ∧
+        (fact.external = false → fact.effects = false))
   | .worldCode => fact.countsAsUnsafe = false ∧ fact.external = false ∧ fact.countsAsReplaced = false
   | .tooling => True
 
@@ -119,6 +121,6 @@ structure Project.Admits (project : Project) (inventory : Inventory) : Prop wher
     ∀ source target, project.role? fact.name = some source → project.role? dependency.name = some target →
       source.MayImport target
   pure : ∀ fact ∈ inventory.declarations, ∃ role, project.role? fact.module = some role ∧
-    (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ (fact.computational = true → fact.Allowed role)
+    (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.Allowed role
 
 end SoftwareChallenge

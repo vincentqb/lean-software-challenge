@@ -21,19 +21,20 @@ def Project.admits (project : Project) (source : Role) (dependency : ImportFact)
     | none => true
 
 def DeclarationFact.reasons (role : Role) (fact : DeclarationFact) : List Reason :=
-  let flags := [(fact.countsAsUnsafe, Reason.«unsafe»), (fact.countsAsPartial, .«partial»),
-    (fact.external, .extern), (fact.countsAsReplaced, .implementedBy), (fact.initializes, .initializer),
-    (fact.effects, .io), (fact.debug, .debug)]
+  let flags := [(fact.countsAsUnsafe, Reason.«unsafe»), (fact.computational && fact.countsAsPartial, .«partial»),
+    (fact.external, .extern), (fact.countsAsReplaced, .implementedBy),
+    (fact.computational && fact.initializes, .initializer), (fact.computational && fact.effects, .io),
+    (fact.computational && fact.debug, .debug)]
   let raised := fun (allowed : List Reason) =>
     flags.filterMap fun (set, reason) => if set && !allowed.contains reason then some reason else none
-  if !fact.computational then [] else match role with
-    | .coreSpec | .coreCode => raised []
-    | .worldSpec =>
-      if !fact.external then raised []
-      else if fact.unfoldable then [.unfoldableExtern]
-      else raised [.extern, .io]
-    | .worldCode => raised [.«partial», .initializer, .io, .debug]
-    | .tooling => []
+  match role with
+  | .coreSpec | .coreCode => raised []
+  | .worldSpec =>
+    if !fact.external || !fact.computational then raised []
+    else if fact.unfoldable then [.unfoldableExtern]
+    else raised [.extern, .io]
+  | .worldCode => raised [.«partial», .initializer, .io, .debug]
+  | .tooling => []
 
 def ModuleFact.violations (project : Project) (fact : ModuleFact) : Array Violation :=
   match project.role? fact.name with
@@ -60,10 +61,10 @@ theorem Role.permits_inner {source target : Role} (permitted : source.permits ta
   cases source <;> cases target <;> simp_all [Role.Inner, Role.permits]
 
 theorem DeclarationFact.reasons_eq_nil_iff_allowed {role : Role} {fact : DeclarationFact} :
-    fact.reasons role = [] ↔ (fact.computational = true → fact.Allowed role) := by
+    fact.reasons role = [] ↔ fact.Allowed role := by
   unfold DeclarationFact.reasons DeclarationFact.Allowed
   cases fact.computational <;> cases role <;> cases fact.external <;> cases fact.unfoldable <;>
-    simp [List.filterMap_eq_nil_iff, and_comm]
+    simp [List.filterMap_eq_nil_iff, and_comm, and_left_comm, and_assoc]
 
 theorem ModuleFact.violations_eq_empty_iff {project : Project} {fact : ModuleFact} :
     fact.violations project = #[] ↔ ∃ role, project.role? fact.name = some role ∧

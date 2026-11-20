@@ -78,7 +78,7 @@ theorem purity_sound (project : Project) (inventory : Inventory)
     (accepted : project.violations inventory = #[]) (fact : DeclarationFact)
     (listed : fact ∈ inventory.declarations) :
     ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
-      (fact.computational = true → fact.Allowed role) := by
+      fact.Allowed role := by
   sorry
 
 @[kills purity_sound] theorem purity_sound_rejects_accepting :
@@ -86,7 +86,7 @@ theorem purity_sound (project : Project) (inventory : Inventory)
       (fun (_ : Project) (_ : Inventory) => (#[] : Array Violation)) project inventory = #[] →
       ∀ (fact : DeclarationFact), fact ∈ inventory.declarations →
       ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
-        (fact.computational = true → fact.Allowed role) := by
+        fact.Allowed role := by
   sorry
 
 theorem Project.violations_eq_empty_iff_admits (project : Project) (inventory : Inventory) :

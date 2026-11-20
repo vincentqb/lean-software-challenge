@@ -29,7 +29,8 @@ def Role.importPurpose : Role → String
 
 def Role.purity : Role → String
   | .coreSpec | .coreCode => "must be pure and total, so that the proofs are about the code that runs"
-  | .worldSpec => "may declare foreign code only as `@[extern] opaque`, so that the kernel never unfolds it"
+  | .worldSpec => "may declare foreign code only as an `@[extern] opaque` that computes a value, so that the kernel \
+      never unfolds it"
   | .worldCode => "may do IO but not use `unsafe`, `@[extern]`, or `@[implemented_by]`, so that the code that \
       runs is the code proved"
   | .tooling => "may do anything"
@@ -48,8 +49,8 @@ def Reason.cure (reason : Reason) (name : Name) : String :=
   match reason with
   | .«unsafe» => s!"remove `unsafe` from {name}"
   | .«partial» => s!"remove `partial` from {name} and recurse structurally or with `termination_by`"
-  | .extern => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, as \
-      `@[extern] opaque`"
+  | .extern => s!"remove `@[extern]` from {name}, since only a WorldSpec module declares foreign code, and only as \
+      an `@[extern] opaque` that computes a value"
   | .implementedBy => s!"remove `@[implemented_by]` from {name}"
   | .initializer => s!"move the initializer of {name} to a WorldCode module"
   | .io => s!"move {name} to a WorldCode module"

@@ -50,7 +50,7 @@ theorem purity_sound (project : Project) (inventory : Inventory)
     (accepted : project.violations inventory = #[]) (fact : DeclarationFact)
     (listed : fact ∈ inventory.declarations) :
     ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
-      (fact.computational = true → fact.Allowed role) := by
+      fact.Allowed role := by
   obtain ⟨role, classified, standard, clean⟩ :=
     DeclarationFact.violations_eq_empty_iff.mp ((Project.violations_eq_empty_iff.mp accepted).2 fact listed)
   exact ⟨role, classified, standard, DeclarationFact.reasons_eq_nil_iff_allowed.mp clean⟩
@@ -60,18 +60,18 @@ theorem purity_sound_rejects_accepting :
       (fun (_ : Project) (_ : Inventory) => (#[] : Array Violation)) project inventory = #[] →
       ∀ (fact : DeclarationFact), fact ∈ inventory.declarations →
       ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
-        (fact.computational = true → fact.Allowed role) := by
+        fact.Allowed role := by
   intro sound
   obtain ⟨role, classified, -, allowed⟩ := sound { modules := #[(`A, .coreCode)] }
     { modules := #[]
-      declarations := #[{ name := `A.hidden, module := `A, line := 1, computational := true,
-                          isUnsafe := true, isPartial := false, external := false, unfoldable := true,
-                          replaced := false, initializes := false, effects := false, debug := false,
+      declarations := #[{ name := `A.Side.right, module := `A, line := 1, computational := false,
+                          isUnsafe := false, isPartial := false, external := false, unfoldable := false,
+                          replaced := true, initializes := false, effects := false, debug := false,
                           axioms := #[] }] }
     rfl _ (Array.mem_singleton.mpr rfl)
   simp [Project.role?] at classified
   subst classified
-  simp [DeclarationFact.Allowed, DeclarationFact.countsAsUnsafe, DeclarationFact.generatedTagRead] at allowed
+  simp [DeclarationFact.Allowed, DeclarationFact.countsAsReplaced, DeclarationFact.generatedConstructorIndex] at allowed
 
 theorem purity_sound_applies :
     ∃ (project : Project) (inventory : Inventory) (fact : DeclarationFact),
