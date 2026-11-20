@@ -1,7 +1,6 @@
 module
 
-public import ConstantFolding.CoreSpec
-public import ConstantFolding.WorldSpec
+public import ConstantFolding.Expr
 meta import SoftwareChallenge
 
 public section
@@ -12,10 +11,18 @@ public section
 Folding preserves meaning, leaves no constant subexpression, removes every constant
 subexpression of a closed expression, keeps every literal, and is idempotent, and the output is
 the true value.
-Not claimed: anything about the native adder beyond `AddAgrees nativeAdd`.
+Not claimed: anything about the native adder beyond `addAgrees`.
 -/
 
 namespace ConstantFolding
+
+@[extern "lean_nat_add"] opaque nativeAdd : @& Nat → @& Nat → Nat
+
+axiom addAgrees : ∀ a b, nativeAdd a b = a + b
+
+@[consistent] theorem addAgrees_consistent :
+    ∃ (nativeAdd : Nat → Nat → Nat), ∀ (a b : Nat), nativeAdd a b = a + b := by
+  sorry
 
 def fold : Expr → Expr := sorry
 
@@ -37,8 +44,7 @@ theorem fold_idempotent (e : Expr) : fold (fold e) = fold e := by
 theorem fold_keeps_literal (n m : Nat) (h : fold (.lit n) = .lit m) : m = n := by
   sorry
 
-theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
-    output e = toString (eval (fun _ => 0) e) := by
+theorem output_correct (e : Expr) : output e = toString (eval (fun _ => 0) e) := by
   sorry
 
 @[kills fold_preserves_meaning] theorem fold_preserves_meaning_rejects_constant :
@@ -62,8 +68,7 @@ theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :
   sorry
 
 @[kills output_correct] theorem output_correct_rejects_suffix :
-    ¬ (AddAgrees Nat.add → ∀ e : Expr,
-      (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e)) := by
+    ¬ ∀ e : Expr, (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e) := by
   sorry
 
 end ConstantFolding

@@ -1,6 +1,6 @@
 module
 
-public import ConstantFolding.CoreSpec
+public import ConstantFolding.Expr
 
 public section
 
