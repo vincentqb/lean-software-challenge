@@ -27,18 +27,6 @@ def impureIn (module : Name) : DeclarationFact :=
 def externIn (module : Name) : DeclarationFact :=
   { pureIn module with external := true, unfoldable := false, effects := true }
 
-def copyIn (module : Name) : DeclarationFact :=
-  { pureIn module with name := module ++ `pure._unsafe_rec, isPartial := true, written := false,
-                       copyOf := some (module ++ `pure) }
-
-def tagReadIn (module : Name) : DeclarationFact :=
-  { pureIn module with name := module ++ `Side.ctorIdx._impl, isUnsafe := true, written := false, readsTag := true }
-
-def constructorIndexIn (module : Name) : DeclarationFact :=
-  { pureIn module with name := module ++ `Side.ctorIdx, replaced := true, written := false,
-                       indexOf := some (module ++ `Side), indexedConstructors := 2, implementationTyped := true,
-                       implementationReadsTag := true }
-
 def constructorIn (module : Name) : DeclarationFact :=
   { pureIn module with name := module ++ `Side.right, computational := false, unfoldable := false }
 
@@ -84,51 +72,15 @@ def ofDeclarations (facts : Array DeclarationFact) : Inventory := { modules := #
 #guard layered.violations (ofDeclarations #[{ pureIn `C with isPartial := true }]) ==
   #[.impure `C.pure .coreCode [.«partial»]]
 
-#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfInstanceMethod := true }]) == #[]
+#guard [`S, `P, `C, `W].all fun module =>
+  layered.violations (ofDeclarations #[{ impureIn module with written := false }]) == #[] &&
+    layered.violations (ofDeclarations #[{ impureIn module with derived := true }]) == #[]
 
-#guard layered.violations (ofDeclarations #[{ copyIn `S with copyOfInstanceMethod := true }]) == #[]
+#guard layered.violations (ofDeclarations #[{ impureIn `C with derived := true, written := false }]) == #[]
 
-#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfTotal := true }]) == #[]
+#guard layered.violations (ofDeclarations #[{ pureIn `C with written := false, axioms := #[`raw] }]) == #[]
 
-#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfFixpoint := true, copyOfTerminated := true }]) ==
-  #[]
-
-#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfFixpoint := true }]) ==
-  #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
-
-#guard layered.violations (ofDeclarations #[copyIn `C]) == #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
-
-#guard layered.violations (ofDeclarations #[{ copyIn `C with copyOfInstanceMethod := true, written := true }]) ==
-  #[.impure `C.pure._unsafe_rec .coreCode [.«partial»]]
-
-#guard layered.violations
-  (ofDeclarations #[tagReadIn `S, constructorIndexIn `S, tagReadIn `W, constructorIndexIn `W]) == #[]
-
-#guard layered.violations (ofDeclarations #[{ tagReadIn `S with written := true }]) ==
-  #[.impure `S.Side.ctorIdx._impl .coreSpec [.«unsafe»]]
-
-#guard layered.violations (ofDeclarations #[{ tagReadIn `S with readsTag := false }]) ==
-  #[.impure `S.Side.ctorIdx._impl .coreSpec [.«unsafe»]]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with written := true }]) ==
-  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexedConstructors := 0 }]) == #[]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexOf := none }]) ==
-  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexedConstructors := 1 }]) ==
-  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with implementationTyped := false }]) ==
-  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with indexedBuiltin := true }]) ==
-  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
-
-#guard layered.violations (ofDeclarations #[{ constructorIndexIn `S with implementationReadsTag := false }]) ==
-  #[.impure `S.Side.ctorIdx .coreSpec [.implementedBy]]
+#guard layered.violations (ofDeclarations #[{ pureIn `X with written := false }]) == #[.unplaced `X]
 
 #guard layered.violations (ofDeclarations #[{ impureIn `C with computational := false }]) ==
   #[.impure `C.pure .coreCode [.«unsafe», .extern, .implementedBy]]

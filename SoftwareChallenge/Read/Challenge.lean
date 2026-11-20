@@ -113,7 +113,7 @@ def ownedFacts (lake : LakeFacts) (challenge : Name) (imported : Imported) (next
     module != challenge && (env.getModuleIdx? module).isSome
   let modules ← catalogModules lake names imported next
   runIn env do
-    let read ← inventoryFacts modules #[]
+    let read ← inventoryFacts modules
     return {
       inventory := read.inventory
       imports := modules.flatMap (·.imports)

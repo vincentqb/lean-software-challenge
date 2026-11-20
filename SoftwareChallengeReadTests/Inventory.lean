@@ -26,7 +26,7 @@ run_cmd Elab.Command.liftCoreM do
   let imported ← catalogEnv lake .anonymous .lint
   let env := imported.env
   let modules ← catalogModules lake catalogNames imported .lint
-  let read ← runIn env (inventoryFacts modules #[fixture `Fixpoint.countdown])
+  let read ← runIn env (inventoryFacts modules)
   let inventory := read.inventory
   check (inventory.modules.map (·.name) == catalogNames) "the inventory did not list every catalog module in order"
   check (inventory.modules.all fun module => module.usesModuleSystem == (module.name != fixture `Legacy))
@@ -42,31 +42,19 @@ run_cmd Elab.Command.liftCoreM do
       Role.ofName (fixture `Linted) == .tooling) "a role was not read from the module name"
   let unsafeFact ← facts inventory (privately (fixture `Rejected) (rejected `hiddenUnsafe))
   check (unsafeFact.isUnsafe && unsafeFact.computational && unsafeFact.line == 11) "an unsafe def was misread"
-  check (← facts inventory (rejected `diverging._unsafe_rec)).isPartial "a partial def's compiled body was not partial"
-  check (!(← facts inventory (rejected `diverging)).isPartial) "a partial def's opaque constant was read as partial"
-  for (name, module) in [(`halve._unsafe_rec, `CoreCode), (`leafSum._unsafe_rec, `CoreSpec),
-      (`Fixpoint.countdown._unsafe_rec, `Fixpoint), (`instBEqRose.beq._unsafe_rec, `CoreCode.Derived),
-      (`instBEqForest.beq._unsafe_rec, `CoreSpec.Derived)] do
-    let some info := env.find? (fixture name) | throwError "{name} is not in the environment"
-    let copy ← facts inventory (fixture name) (fixture module)
-    check (info.isPartial && copy.isPartial && !copy.written && copy.copyOf.isSome && !copy.countsAsPartial)
-      s!"{name}, which well-founded, structural, terminating partial_fixpoint or derived recursion compiles, was \
-        read as a hand-written partial: {repr copy}"
-  check (← facts inventory (fixture `Fixpoint.spin._unsafe_rec) (fixture `Fixpoint)).countsAsPartial
-    "a partial_fixpoint that no @[terminates] covers was not partial"
-  let terminatesNothing ← runIn env (inventoryFacts modules #[])
-  let uncovered :=
-    declarationNamed? terminatesNothing.inventory (fixture `Fixpoint) (fixture `Fixpoint.countdown._unsafe_rec)
-  check (uncovered.any (·.countsAsPartial)) "a partial_fixpoint was exempt though no @[terminates] covers it"
-  let rose ← facts inventory (fixture `instBEqRose.beq._unsafe_rec) (fixture `CoreCode.Derived)
-  check (rose.copyOf == some (fixture `instBEqRose.beq) && rose.copyOfInstanceMethod)
-    s!"a derived instance's compiled copy was misread: {repr rose}"
-  let halved ← facts inventory (fixture `halve._unsafe_rec) (fixture `CoreCode)
-  check (halved.copyOf == some (fixture `halve) && halved.copyOfTotal && !halved.copyOfInstanceMethod)
-    s!"a well-founded function's compiled copy was misread: {repr halved}"
-  let countdown ← facts inventory (fixture `Fixpoint.countdown._unsafe_rec) (fixture `Fixpoint)
-  check (countdown.copyOfFixpoint && countdown.copyOfTerminated)
-    s!"a covered partial_fixpoint's compiled copy was misread: {repr countdown}"
+  let diverging ← facts inventory (rejected `diverging)
+  check (diverging.isPartial && diverging.written && !diverging.derived) "a written partial def was misread"
+  for (name, module) in [(`halve, `CoreCode), (`leafSum, `CoreSpec), (`Fixpoint.countdown, `Fixpoint),
+      (`instBEqRose.beq, `CoreCode.Derived), (`instBEqForest.beq, `CoreSpec.Derived),
+      (`Rejected.diverging, `Rejected)] do
+    let copy ← facts inventory (fixture (name.str "_unsafe_rec")) (fixture module)
+    check (!copy.written && !copy.isPartial) s!"the code Lean compiles for {name} was read as written: {repr copy}"
+  for (name, module) in [(`halve, `CoreCode), (`leafSum, `CoreSpec), (`Fixpoint.countdown, `Fixpoint)] do
+    check (!(← facts inventory (fixture name) (fixture module)).isPartial) s!"the total {name} was read as partial"
+  for (name, module) in [(`instBEqRose.beq, `CoreCode.Derived), (`instBEqForest.beq, `CoreSpec.Derived)] do
+    let derived ← facts inventory (fixture name) (fixture module)
+    check (derived.written && derived.derived && derived.isPartial)
+      s!"{name}, the partial method that `deriving BEq` gives a nested inductive, was misread: {repr derived}"
   let bound ← facts inventory (rejected `bound)
   let foreign ← facts inventory (rejected `foreign)
   check (bound.external && bound.unfoldable && foreign.external && !foreign.unfoldable)

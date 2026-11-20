@@ -21,8 +21,8 @@ def Project.admits (project : Project) (source : Role) (dependency : ImportFact)
     | none => true
 
 def DeclarationFact.reasons (role : Role) (fact : DeclarationFact) : List Reason :=
-  let flags := [(fact.countsAsUnsafe, Reason.«unsafe»), (fact.computational && fact.countsAsPartial, .«partial»),
-    (fact.external, .extern), (fact.countsAsReplaced, .implementedBy),
+  let flags := [(fact.isUnsafe, Reason.«unsafe»), (fact.computational && fact.isPartial, .«partial»),
+    (fact.external, .extern), (fact.replaced, .implementedBy),
     (fact.computational && fact.initializes, .initializer), (fact.computational && fact.effects, .io),
     (fact.computational && fact.debug, .debug)]
   let raised := fun (allowed : List Reason) =>
@@ -48,6 +48,7 @@ def DeclarationFact.violations (project : Project) (fact : DeclarationFact) : Ar
   match project.role? fact.module with
   | none => #[.unplaced fact.module]
   | some role =>
+    if !fact.written || fact.derived then #[] else
     let found := fact.axioms.filter (!standardAxioms.contains ·)
     let reasons := fact.reasons role
     (if found.isEmpty then #[] else #[.axioms fact.name found]) ++
@@ -74,9 +75,9 @@ theorem ModuleFact.violations_eq_empty_iff {project : Project} {fact : ModuleFac
 
 theorem DeclarationFact.violations_eq_empty_iff {project : Project} {fact : DeclarationFact} :
     fact.violations project = #[] ↔ ∃ role, project.role? fact.module = some role ∧
-      (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.reasons role = [] := by
-  unfold DeclarationFact.violations
-  cases project.role? fact.module <;> simp [Array.filter_eq_empty_iff]
+      (fact.Generated ∨ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.reasons role = []) := by
+  unfold DeclarationFact.violations DeclarationFact.Generated
+  cases project.role? fact.module <;> cases fact.written <;> cases fact.derived <;> simp [Array.filter_eq_empty_iff]
 
 theorem Project.violations_eq_empty_iff {project : Project} {inventory : Inventory} :
     project.violations inventory = #[] ↔ (∀ fact ∈ inventory.modules, fact.violations project = #[]) ∧

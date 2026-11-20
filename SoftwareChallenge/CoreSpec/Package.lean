@@ -36,41 +36,14 @@ structure DeclarationFact where
   debug : Bool
   axioms : Array Name
   written : Bool := true
-  copyOf : Option Name := none
-  copyOfInstanceMethod : Bool := false
-  copyOfTotal : Bool := false
-  copyOfFixpoint : Bool := false
-  copyOfTerminated : Bool := false
-  readsTag : Bool := false
-  indexOf : Option Name := none
-  indexedConstructors : Nat := 0
-  indexedBuiltin : Bool := false
-  implementationTyped : Bool := false
-  implementationReadsTag : Bool := false
+  derived : Bool := false
   deriving Repr
 
-def DeclarationFact.compilerCopy (fact : DeclarationFact) : Bool :=
-  !fact.written && fact.copyOf.isSome &&
-    (fact.copyOfInstanceMethod || fact.copyOfTotal || fact.copyOfFixpoint && fact.copyOfTerminated)
-
-def DeclarationFact.countsAsPartial (fact : DeclarationFact) : Bool :=
-  fact.isPartial && !fact.compilerCopy
-
-def DeclarationFact.generatedTagRead (fact : DeclarationFact) : Bool :=
-  !fact.written && fact.readsTag
-
-def DeclarationFact.generatedConstructorIndex (fact : DeclarationFact) : Bool :=
-  !fact.written && fact.indexOf.isSome && fact.indexedConstructors != 1 && !fact.indexedBuiltin &&
-    fact.implementationTyped && fact.implementationReadsTag
-
-def DeclarationFact.countsAsUnsafe (fact : DeclarationFact) : Bool :=
-  fact.isUnsafe && !fact.generatedTagRead
-
-def DeclarationFact.countsAsReplaced (fact : DeclarationFact) : Bool :=
-  fact.replaced && !fact.generatedConstructorIndex
+def DeclarationFact.Generated (fact : DeclarationFact) : Prop :=
+  fact.written = false ∨ fact.derived = true
 
 def DeclarationFact.derivedPartial (fact : DeclarationFact) : Bool :=
-  fact.isPartial && fact.copyOfInstanceMethod && !fact.copyOfTotal
+  fact.derived && fact.isPartial
 
 structure Inventory where
   modules : Array ModuleFact
@@ -103,15 +76,15 @@ inductive Violation where
 
 def DeclarationFact.Allowed (fact : DeclarationFact) : Role → Prop
   | .coreSpec | .coreCode =>
-    fact.countsAsUnsafe = false ∧ fact.external = false ∧ fact.countsAsReplaced = false ∧
+    fact.isUnsafe = false ∧ fact.external = false ∧ fact.replaced = false ∧
       (fact.computational = true →
-        fact.countsAsPartial = false ∧ fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false)
+        fact.isPartial = false ∧ fact.initializes = false ∧ fact.effects = false ∧ fact.debug = false)
   | .worldSpec =>
-    fact.countsAsUnsafe = false ∧ fact.countsAsReplaced = false ∧
+    fact.isUnsafe = false ∧ fact.replaced = false ∧
       (fact.external = true → fact.computational = true ∧ fact.unfoldable = false) ∧
-      (fact.computational = true → fact.countsAsPartial = false ∧ fact.initializes = false ∧ fact.debug = false ∧
+      (fact.computational = true → fact.isPartial = false ∧ fact.initializes = false ∧ fact.debug = false ∧
         (fact.external = false → fact.effects = false))
-  | .worldCode => fact.countsAsUnsafe = false ∧ fact.external = false ∧ fact.countsAsReplaced = false
+  | .worldCode => fact.isUnsafe = false ∧ fact.external = false ∧ fact.replaced = false
   | .tooling => True
 
 structure Project.Admits (project : Project) (inventory : Inventory) : Prop where
@@ -121,6 +94,6 @@ structure Project.Admits (project : Project) (inventory : Inventory) : Prop wher
     ∀ source target, project.role? fact.name = some source → project.role? dependency.name = some target →
       source.MayImport target
   pure : ∀ fact ∈ inventory.declarations, ∃ role, project.role? fact.module = some role ∧
-    (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.Allowed role
+    (fact.Generated ∨ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.Allowed role)
 
 end SoftwareChallenge

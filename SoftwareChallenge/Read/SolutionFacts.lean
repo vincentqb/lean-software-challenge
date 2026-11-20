@@ -87,7 +87,7 @@ def solutionFacts (lake : LakeFacts) (challenge : ChallengeFacts) (imported : Im
     | #[solution] => some solution
     | _ => none
   runIn env do
-    let read ← inventoryFacts modules (challenge.terminating.map (·.definition))
+    let read ← inventoryFacts modules
     let owned := modules.flatMap fun module => module.data.constants.map (module, ·)
     let sought := distinct (challenge.targets.flatMap fun target =>
       #[target.constant.name] ++ target.auxiliaries.map (·.name))

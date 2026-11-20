@@ -30,9 +30,9 @@ theorem Project.violations_eq_empty_iff_admits (project : Project) (inventory : 
       rw [owner] at classified
       cases classified
       exact Role.permits_iff_mayImport.mp permitted
-    · obtain ⟨role, owner, standard, reasons⟩ :=
-        DeclarationFact.violations_eq_empty_iff.mp (declarations fact member)
-      exact ⟨role, owner, standard, DeclarationFact.reasons_eq_nil_iff_allowed.mp reasons⟩
+    · obtain ⟨role, owner, clean⟩ := DeclarationFact.violations_eq_empty_iff.mp (declarations fact member)
+      exact ⟨role, owner, clean.imp_right fun ⟨standard, reasons⟩ =>
+        ⟨standard, DeclarationFact.reasons_eq_nil_iff_allowed.mp reasons⟩⟩
   · intro admits
     refine ⟨fun fact member => ModuleFact.violations_eq_empty_iff.mpr ?_,
       fun fact member => DeclarationFact.violations_eq_empty_iff.mpr ?_⟩
@@ -46,8 +46,9 @@ theorem Project.violations_eq_empty_iff_admits (project : Project) (inventory : 
           simpa using Role.permits_iff_mayImport.mpr
             (admits.layered fact member dependency imported runtime role target owner found)
       · simp
-    · obtain ⟨role, owner, standard, allowed⟩ := admits.pure fact member
-      exact ⟨role, owner, standard, DeclarationFact.reasons_eq_nil_iff_allowed.mpr allowed⟩
+    · obtain ⟨role, owner, clean⟩ := admits.pure fact member
+      exact ⟨role, owner, clean.imp_right fun ⟨standard, allowed⟩ =>
+        ⟨standard, DeclarationFact.reasons_eq_nil_iff_allowed.mpr allowed⟩⟩
 
 theorem Project.violations_eq_empty_iff_admits_rejects_accepting :
     ¬ ∀ (project : Project) (inventory : Inventory),

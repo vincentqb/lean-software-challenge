@@ -111,7 +111,7 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.specImport `App.CoreSpec codeMetaImport, specImportsCode, baseLake),
    (.ownedClaim (claimIn `App.CoreSpec (some `App.CoreSpec)), ownedClaimOutside, baseLake),
    (.ownedClaim (claimIn `App.WorldSpec (some `Other)), ownedClaimUnregistered, worldLake),
-   (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec, derivedSpec, baseLake),
+   (.derivedPartial `App.CoreSpec.instBEqTree.beq `App.CoreSpec, derivedSpec, baseLake),
    (.codeInClosure `App.CoreCode, reachedThrough, baseLake)]
 
 def setupSamples : List Setup :=
@@ -281,8 +281,8 @@ end
 #guard mentions (renderedIn (.ownedClaim (claimIn `App.WorldSpec (some `Other))) ownedClaimUnregistered worldLake)
   "App.WorldSpec adds App.WorldSpec.Agrees to the world claims without the `WorldClaim` command"
 
-#guard mentions (renderedIn (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec) derivedSpec)
-  "`deriving` makes App.CoreSpec.instBEqTree a `partial` definition in App.CoreSpec (CoreSpec)"
+#guard mentions (renderedIn (.derivedPartial `App.CoreSpec.instBEqTree.beq `App.CoreSpec) derivedSpec)
+  "`deriving` makes App.CoreSpec.instBEqTree.beq a `partial` definition in App.CoreSpec (CoreSpec)"
 
 #guard samples.all fun sample => match sample.1 with
   | .ownedViolation _ | .specImport .. | .ownedClaim _ | .derivedPartial .. =>

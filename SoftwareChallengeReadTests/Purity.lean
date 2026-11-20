@@ -4,7 +4,7 @@ meta import SoftwareChallengeReadTests.Support
 meta import SoftwareChallenge.CoreCode.Rules.Lint
 meta import SoftwareChallenge.CoreCode.Report.StatementMessages
 
-namespace SoftwareChallengeReadTests.Attributes
+namespace SoftwareChallengeReadTests.Purity
 
 meta section
 
@@ -24,21 +24,16 @@ def rendered (facts : Facts) : Array String :=
 run_cmd Elab.Command.liftCoreM do
   let module := fixture `CoreCode.Replaced
   let facts ← lintFacts module
-  let replaced := (facts.solution.inventory.declarations.filter (·.countsAsReplaced)).map (·.name)
-  check (replaced == #[module ++ `Coin.tails, module ++ `Coin.rec])
-    s!"the constructor and the recursor that `attribute [implemented_by …]` replaces were not read as replaced: \
-      {replaced}"
-  check (refusals facts == #[.violation (.impure (module ++ `Coin.tails) .coreCode [.implementedBy]),
-      .violation (.impure (module ++ `Coin.rec) .coreCode [.implementedBy])])
-    s!"a CoreCode constructor or recursor with @[implemented_by] was not refused: {repr (refusals facts)}"
+  let replaced := (facts.solution.inventory.declarations.filter (·.replaced)).map (·.name)
+  check (replaced == #[module ++ `Coin.tails])
+    s!"only the constructor that `attribute [implemented_by …]` replaces was to be read as replaced: {replaced}"
+  check (refusals facts == #[.violation (.impure (module ++ `Coin.tails) .coreCode [.implementedBy])])
+    s!"a CoreCode constructor with @[implemented_by] was not refused: {repr (refusals facts)}"
   check (rendered facts == #[
       s!"SoftwareChallengeTests/Fixtures/CoreCode/Replaced.lean:9: {module}.Coin.tails uses `@[implemented_by]` in \
         {module} (CoreCode), but CoreCode code must be pure and total, so that the proofs are about the code that \
-        runs. Remove `@[implemented_by]` from {module}.Coin.tails, then run `lake lint`.",
-      s!"SoftwareChallengeTests/Fixtures/CoreCode/Replaced.lean:7: {module}.Coin.rec uses `@[implemented_by]` in \
-        {module} (CoreCode), but CoreCode code must be pure and total, so that the proofs are about the code that \
-        runs. Remove `@[implemented_by]` from {module}.Coin.rec, then run `lake lint`."])
-    s!"a replaced constructor or recursor was not named at its own line: {rendered facts}"
+        runs. Remove `@[implemented_by]` from {module}.Coin.tails, then run `lake lint`."])
+    s!"a replaced constructor was not named at its own line: {rendered facts}"
 
 run_cmd Elab.Command.liftCoreM do
   let module := fixture `CoreSpec.Replaced
@@ -102,6 +97,36 @@ run_cmd Elab.Command.liftCoreM do
         {proof}, then run `lake lint`."])
     s!"an unsafe csimp proof was not named at its own line: {rendered facts}"
 
+run_cmd Elab.Command.liftCoreM do
+  let module := fixture `CoreCode.UnsafeTerm
+  let facts ← lintFacts module
+  check (refusals facts == #[.violation (.impure (module ++ `address) .coreCode [.«unsafe»])])
+    s!"a CoreCode def that runs an `unsafe` term was not refused: {repr (refusals facts)}"
+  check (rendered facts == #[
+      s!"SoftwareChallengeTests/Fixtures/CoreCode/UnsafeTerm.lean:7: {module}.address uses `unsafe` in {module} \
+        (CoreCode), but CoreCode code must be pure and total, so that the proofs are about the code that runs. \
+        Remove `unsafe` from {module}.address, then run `lake lint`."])
+    s!"a def that runs an `unsafe` term was not named at its own line: {rendered facts}"
+
+run_cmd Elab.Command.liftCoreM do
+  let module := fixture `CoreCode.Generated
+  let facts ← lintFacts module
+  check (refusals facts == #[])
+    s!"a CoreCode declaration that Lean generates was refused: {repr (refusals facts)}"
+  let factOf := fun (name : Name) => facts.solution.inventory.declarations.find? fun fact =>
+    privateToUserName fact.name == module ++ name
+  let generated := [`instBEqRose.beq, `instReprRose.repr, `instOrdRose.ord, `instHashableRose.hash, `instOrdTerm.ord,
+    `instDecidableEqTerm.decEq, `instBEqPoint, `Term.ctorIdx, (`Term.ctorIdx).str "_impl", `size._unsafe_rec,
+    `halve._unsafe_rec, `countdown._unsafe_rec, `size.eq_1, `Cached.leaf._override, `Cached.total._override,
+    `Cached.casesOn, `Term.casesOn, `Term.recOn, `Term.noConfusion, `Point.casesOn]
+  let misread := generated.filter fun name => !(factOf name).any fun fact => !fact.written || fact.derived
+  check misread.isEmpty s!"declarations that Lean generates were read as written: {misread}"
+  let written := [`Rose.node, `Point.x, `Cached.leaf, `Cached.total, `size, `halve, `countdown, `index]
+  let unwritten := written.filter fun name => !(factOf name).any fun fact => fact.written && !fact.derived
+  check unwritten.isEmpty s!"declarations written in the fixture were read as generated: {unwritten}"
+  check ((factOf `instBEqRose.beq).any (·.isPartial) && (factOf `Cached.leaf).any (!·.replaced))
+    "a derived partial method or a computed field's constructor was misread"
+
 end
 
-end SoftwareChallengeReadTests.Attributes
+end SoftwareChallengeReadTests.Purity

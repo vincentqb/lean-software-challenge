@@ -254,12 +254,12 @@ theorem impureSpec_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec) :
   have kept :
       impureSpec ∈ (impureSpecChallenge.owned.inventory.restrictedTo impureSpecChallenge.owns).declarations := by
     simp [impureSpecChallenge, impureSpecOwned, Inventory.restrictedTo, ChallengeFacts.owns, impureSpec, spec]
-  obtain ⟨role, classified, -, allowed⟩ := complete.ownedAdmitted.pure impureSpec kept
+  obtain ⟨role, classified, clean⟩ := complete.ownedAdmitted.pure impureSpec kept
   have placed : role = .coreSpec := by
     simp [Project.role?, LakeFacts.project, impureSpecLake, completeLake, impureSpec, spec] at classified
     exact classified.symm
   subst placed
-  simp [DeclarationFact.Allowed, DeclarationFact.countsAsPartial, DeclarationFact.compilerCopy, impureSpec] at allowed
+  simp [DeclarationFact.Allowed, DeclarationFact.Generated, impureSpec] at clean
 
 def misplacedClaim : RegistrationFact :=
   { claim := `App.CoreSpec.Agrees, module := `App.CoreSpec, home? := some `App.CoreSpec,
@@ -275,8 +275,7 @@ theorem misplacedClaim_incomplete (spec : Role.ofName `App.CoreSpec = .coreSpec)
   simp [Project.role?, LakeFacts.project, impureSpecLake, completeLake, misplacedClaim, spec] at declared
 
 def derivedInstance : DeclarationFact :=
-  { impureSpec with name := `App.CoreSpec.instBEqTree, written := false, copyOf := some `App.CoreSpec.instBEqTree.beq,
-                    copyOfInstanceMethod := true }
+  { impureSpec with name := `App.CoreSpec.instBEqTree.beq, derived := true }
 
 def derivedChallenge : ChallengeFacts :=
   { completeChallenge with owned := { inventory := ⟨#[specModuleFact #[]], #[derivedInstance]⟩ } }

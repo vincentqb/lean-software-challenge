@@ -20,11 +20,11 @@ run_cmd Elab.Command.liftCoreM do
       {owned.inventory.modules.map (·.name)}"
   let derived := owned.inventory.declarations.filterMap fun fact =>
     if fact.derivedPartial then some (fact.name, fact.module) else none
-  check (derived == #[(fixture `instBEqForest.beq._unsafe_rec, fixture `CoreSpec.Derived)])
+  check (derived == #[(fixture `instBEqForest.beq, fixture `CoreSpec.Derived)])
     s!"the partial instances that deriving generates, and only those that do not recurse structurally, were \
       misread: {derived}"
   check (Statement.derivedPartialErrors challenge ==
-      #[.derivedPartial (fixture `instBEqForest.beq._unsafe_rec) (fixture `CoreSpec.Derived)])
+      #[.derivedPartial (fixture `instBEqForest.beq) (fixture `CoreSpec.Derived)])
     "a partial instance that deriving generates in a CoreSpec module was not reported to the owner"
   check (owned.registrations.any fun registration => registration.claim == fixture `SuccAgrees &&
       registration.home? == some (fixture `WorldSpec) && registration.place.line > 0)

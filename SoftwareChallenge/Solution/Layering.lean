@@ -49,20 +49,21 @@ theorem layering_sound_applies :
 theorem purity_sound (project : Project) (inventory : Inventory)
     (accepted : project.violations inventory = #[]) (fact : DeclarationFact)
     (listed : fact ∈ inventory.declarations) :
-    ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
-      fact.Allowed role := by
-  obtain ⟨role, classified, standard, clean⟩ :=
+    ∃ role, project.role? fact.module = some role ∧
+      (fact.Generated ∨ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.Allowed role) := by
+  obtain ⟨role, classified, clean⟩ :=
     DeclarationFact.violations_eq_empty_iff.mp ((Project.violations_eq_empty_iff.mp accepted).2 fact listed)
-  exact ⟨role, classified, standard, DeclarationFact.reasons_eq_nil_iff_allowed.mp clean⟩
+  exact ⟨role, classified, clean.imp_right fun ⟨standard, reasons⟩ =>
+    ⟨standard, DeclarationFact.reasons_eq_nil_iff_allowed.mp reasons⟩⟩
 
 theorem purity_sound_rejects_accepting :
     ¬ ∀ (project : Project) (inventory : Inventory),
       (fun (_ : Project) (_ : Inventory) => (#[] : Array Violation)) project inventory = #[] →
       ∀ (fact : DeclarationFact), fact ∈ inventory.declarations →
-      ∃ role, project.role? fact.module = some role ∧ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧
-        fact.Allowed role := by
+      ∃ role, project.role? fact.module = some role ∧
+        (fact.Generated ∨ (∀ used ∈ fact.axioms, used ∈ standardAxioms) ∧ fact.Allowed role) := by
   intro sound
-  obtain ⟨role, classified, -, allowed⟩ := sound { modules := #[(`A, .coreCode)] }
+  obtain ⟨role, classified, clean⟩ := sound { modules := #[(`A, .coreCode)] }
     { modules := #[]
       declarations := #[{ name := `A.Side.right, module := `A, line := 1, computational := false,
                           isUnsafe := false, isPartial := false, external := false, unfoldable := false,
@@ -71,7 +72,7 @@ theorem purity_sound_rejects_accepting :
     rfl _ (Array.mem_singleton.mpr rfl)
   simp [Project.role?] at classified
   subst classified
-  simp [DeclarationFact.Allowed, DeclarationFact.countsAsReplaced, DeclarationFact.generatedConstructorIndex] at allowed
+  simp [DeclarationFact.Allowed, DeclarationFact.Generated] at clean
 
 theorem purity_sound_applies :
     ∃ (project : Project) (inventory : Inventory) (fact : DeclarationFact),
@@ -82,8 +83,7 @@ theorem purity_sound_applies :
                           isUnsafe := false, isPartial := false, external := false, unfoldable := true,
                           replaced := false, initializes := false, effects := false, debug := false,
                           axioms := #[] }] },
-    _, by simp [Project.violations, DeclarationFact.violations, DeclarationFact.reasons, DeclarationFact.countsAsUnsafe,
-      DeclarationFact.countsAsPartial, DeclarationFact.countsAsReplaced, Project.role?],
+    _, by simp [Project.violations, DeclarationFact.violations, DeclarationFact.reasons, Project.role?],
     Array.mem_singleton.mpr rfl⟩
 
 end SoftwareChallenge

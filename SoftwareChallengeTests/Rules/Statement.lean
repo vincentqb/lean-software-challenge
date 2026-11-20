@@ -334,19 +334,17 @@ def ownedClaimUnregistered : ChallengeFacts := withOwned { registrations := #[cl
 
 def ownedClaimHome : ChallengeFacts := withOwned { registrations := #[claimIn `App.WorldSpec (some `App.WorldSpec)] }
 
-def derivedCopyIn (module : Name) : DeclarationFact :=
-  { declarationIn module (module ++ `instBEqTree) with
-    isPartial := true, written := false, copyOf := some (module ++ `instBEqTree.beq), copyOfInstanceMethod := true }
+def derivedIn (module : Name) : DeclarationFact :=
+  { declarationIn module (module ++ `instBEqTree.beq) with isPartial := true, derived := true }
 
 def derivedSpec : ChallengeFacts :=
-  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[derivedCopyIn `App.CoreSpec]⟩ }
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[derivedIn `App.CoreSpec]⟩ }
 
 def derivedCode : ChallengeFacts :=
-  withOwned { inventory := ⟨#[moduleNamed `App.CoreCode], #[derivedCopyIn `App.CoreCode]⟩ }
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreCode], #[derivedIn `App.CoreCode]⟩ }
 
-def totalCopySpec : ChallengeFacts :=
-  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec],
-    #[{ derivedCopyIn `App.CoreSpec with copyOfTotal := true }]⟩ }
+def totalDerivedSpec : ChallengeFacts :=
+  withOwned { inventory := ⟨#[moduleNamed `App.CoreSpec], #[{ derivedIn `App.CoreSpec with isPartial := false }]⟩ }
 
 def reachedThrough : ChallengeFacts :=
   { codeReached with
@@ -629,11 +627,11 @@ end
 
 #guard errorsOf (lake := worldLake) (files := worldFiles) (challenge := ownedClaimHome) == #[]
 
-#guard errorsOf (challenge := derivedSpec) == #[.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec]
+#guard errorsOf (challenge := derivedSpec) == #[.derivedPartial `App.CoreSpec.instBEqTree.beq `App.CoreSpec]
 
 #guard errorsOf (challenge := derivedCode) == #[]
 
-#guard errorsOf (challenge := totalCopySpec) == #[]
+#guard errorsOf (challenge := totalDerivedSpec) == #[]
 
 #guard refuses (.privateAuxiliary `App.double_even (privateName "proof_1")) (challenge := privateAuxiliary)
 
