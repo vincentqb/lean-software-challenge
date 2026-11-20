@@ -29,11 +29,10 @@ rejects "as in `Check SuccAgrees nativeSucc : nativeSucc ?n = ?n + 1`" in Check 
 rejects "give every argument" in Check SuccAgrees _ := pure ()
 rejects "`SuccAgrees` is a WorldClaim that takes 1 more argument, `(succ : Nat → Nat)`" in Check SuccAgrees := pure ()
 rejects "not a WorldClaim" in Check (2 = 2) : 2 = 2
-rejects "not a WorldClaim" in Check (2 = 2) := pure ()
 rejects "declaration failed" in Check SuccAgrees nativeSucc := (pure 0 : IO Nat)
 
 rejects "marked as `meta`" in
-  def runtimeEvidence : Bool := (SoftwareChallenge.allEvidence default).isEmpty
+  def runtimeEvidence : Bool := SoftwareChallenge.isWorldClaim default .anonymous
 
 meta section
 

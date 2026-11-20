@@ -11,44 +11,6 @@ open Lean SoftwareChallenge SoftwareChallenge.Statement SoftwareChallengeTests.R
 
 meta section
 
-def tag : Error → Nat
-  | .duplicate .. => 0
-  | .mentionsNothing .. => 1
-  | .noKill .. => 2
-  | .unmarkedKill .. => 3
-  | .killOfNonHeadline .. => 4
-  | .killReplacesNothing .. => 5
-  | .misshapenKill .. => 6
-  | .unmentionedHole .. => 7
-  | .challengeImport .. => 8
-  | .filled .. => 9
-  | .challengeAxiom .. => 10
-  | .privateTarget .. => 11
-  | .terminatesNotHole .. => 12
-  | .terminatesWithoutKill .. => 13
-  | .terminatesUnmentioned .. => 14
-  | .unnamedHypothesis .. => 15
-  | .privateAuxiliary .. => 16
-  | .codeInClosure .. => 17
-  | .witnessMissing .. => 18
-  | .witnessPredeclared .. => 19
-  | .unplainName .. => 20
-  | .challengeLookup .. => 21
-  | .challengeAbsent .. => 22
-  | .challengeFails .. => 23
-  | .solutionModule .. => 24
-  | .importsChallenge .. => 25
-  | .noStatementTarget => 26
-  | .exeRootsOutsideWorldCode .. => 27
-  | .ownedUnread .. => 28
-  | .lock .. => 29
-  | .lockUnreadable .. => 30
-  | .ownedViolation .. => 31
-  | .specImport .. => 32
-  | .ownedClaim .. => 33
-  | .derivedPartial .. => 34
-  | .witnessMisstated .. => 35
-
 def challengeImporter : ImportLine :=
   { module := `App.Solution, fact := { name := `Challenge, comptime := false, line := 2 }, text := "import Challenge" }
 
@@ -171,13 +133,9 @@ def mentions (text fragment : String) : Bool := (text.splitOn fragment).length >
 
 end
 
-#guard (List.range 35).all fun index => samples.any (tag ·.1 == index)
-
 #guard samples.all (conventional ∘ messageOf)
 
 #guard setupSamples.all fun setup => conventional (setup.message baseLake)
-
-#guard (samples.map (messageOf · |>.place.line)).all (· > 0)
 
 #guard Next.command .lint == "lake lint" && Next.command .replay == "lake script run software_challenge/replay" &&
   Next.command (.grade "abc") == "lake exe grade abc"

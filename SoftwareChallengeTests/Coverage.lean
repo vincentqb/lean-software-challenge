@@ -27,7 +27,7 @@ open SoftwareChallenge SoftwareChallengeTests.Rules.LintFacts SoftwareChallengeT
 
 def lintRejecting : List Facts := [unbuiltRoot, unreadModule, unlinted, specImportsCode, legacy, codeImportsWorld,
   unplaced, unsafeCode, sorryInLemma, blamed, holeInSolution, noncomputableHole, fixpointHole, terminating, twice,
-  sorried, mainInCode, claimInCode, rawClaim, warned, unreadSpec, edited, lockless, oldLock, noComparator,
+  sorryOnly, mainInCode, claimInCode, rawClaim, warned, unreadSpec, edited, lockless, oldLock, noComparator,
   garbledComparator, staleComparator, targetless, noSolution, twoSolutions, importsTheChallenge, builtinLinted,
   unreadableProof]
 

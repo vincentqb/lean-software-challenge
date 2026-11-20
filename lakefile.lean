@@ -6,16 +6,10 @@ package «software_challenge» where
   lintDriver := "software_challenge/lint_challenge"
   testDriver := "software_challenge/test_challenge"
   testDriverArgs := #["SoftwareChallengeTests", "SoftwareChallengeReadTests", "real_runs"]
-  leanOptions := #[
-    ⟨`autoImplicit, false⟩,
-    ⟨`linter.all, true⟩,
-    ⟨`linter.missingDocs, false⟩,
-    ⟨`linter.coreInternal, false⟩
-  ]
+  leanOptions := #[⟨`autoImplicit, false⟩, ⟨`linter.all, true⟩, ⟨`linter.missingDocs, false⟩]
 
 @[default_target]
-lean_lib «SoftwareChallenge» where
-  globs := #[.andSubmodules `SoftwareChallenge]
+lean_lib «SoftwareChallenge» where globs := #[.andSubmodules `SoftwareChallenge]
 
 lean_lib «SoftwareChallengeStatement» where
   roots := #[`SoftwareChallengeStatement.Challenge]
@@ -23,16 +17,14 @@ lean_lib «SoftwareChallengeStatement» where
 
 lean_lib «SoftwareChallengeTests» where
   roots := #[]
-  globs := #[`Support, `Coverage, `Commands, `Complete, `Format, `Grade, `Graph, `Layering, `Match, `Steps, `Model,
-    `Matrix, `Gate.Read].map (.one <| `SoftwareChallengeTests ++ ·) ++ #[.submodules `SoftwareChallengeTests.Rules,
+  globs := #[`Support, `Coverage, `Commands, `Complete, `Format, `Grade, `Graph, `Layering, `Match, `Steps,
+    `Gate.Read].map (.one <| `SoftwareChallengeTests ++ ·) ++ #[.submodules `SoftwareChallengeTests.Rules,
       .submodules `SoftwareChallengeTests.Golden]
-  leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
 lean_lib «SoftwareChallengeFixtures» where
   roots := #[]
   globs := #[.submodules `SoftwareChallengeTests.Fixtures]
   precompileModules := true
-  leanOptions := #[⟨`linter.extra.unreachableTactic, false⟩]
 
 lean_lib «SoftwareChallengeReadFixtures» where
   roots := #[]
@@ -41,36 +33,12 @@ lean_lib «SoftwareChallengeReadFixtures» where
 lean_lib «SoftwareChallengeReadTests» where
   needs := #[`@/SoftwareChallengeFixtures:leanArts, `@/SoftwareChallengeReadFixtures:leanArts]
 
-lean_exe «grade» where
-  root := `SoftwareChallenge.Steps.Grade
+lean_exe «grade» where root := `SoftwareChallenge.Steps.Grade
 
-lean_exe «lsc-gate» where
-  root := `SoftwareChallengeTests.Gate
+lean_exe «lsc-gate» where root := `SoftwareChallengeTests.Gate
 
 @[default_target]
-target statement pkg : Unit := do
-  return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())
-
-def placeIn (pkg : Package) (holds : String → Bool) : IO Json := do
-  let lines ← if ← pkg.configFile.pathExists then do pure ((← IO.FS.readFile pkg.configFile).splitOn "\n") else pure []
-  let line := ((lines.findIdx? holds).map (· + 1)).getD 1
-  return Json.mkObj [("file", pkg.relConfigFile.toString), ("line", toJson line)]
-
-def source (mod : Lake.Module) : Json :=
-  Json.mkObj [("module", toJson mod.name), ("file", mod.relLeanFile.toString)]
-
-def lexical (path : System.FilePath) : System.FilePath :=
-  System.mkFilePath <| path.components.foldl (init := []) fun parts part =>
-    if part == "." then parts else if part == ".." && parts.length > 1 then parts.dropLast else parts ++ [part]
-
-def ownTest (pkg : Package) (name : String) : IO (Option Json) := do
-  let kind? := if pkg.scripts.contains name.toName then some ("script", "script ")
-    else if (pkg.findLeanLib? name.toName).isSome then some ("library", "lean_lib ")
-    else if (pkg.findLeanExe? name.toName).isSome then some ("executable", "lean_exe ") else none
-  kind?.mapM fun (kind, keyword) => do
-    let place ← placeIn pkg fun line => line.startsWith keyword &&
-      ((line.drop keyword.length).toString.splitOn " ").head?.any ([name, s!"«{name}»"].contains ·)
-    return Json.mkObj [("name", name), ("kind", kind), ("place", place)]
+target statement pkg : Unit := do return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())
 
 def overriddenPackages (file : System.FilePath) : IO (Array String) := do
   unless ← file.pathExists do return #[]
@@ -84,51 +52,45 @@ structure Prepared where
   catalog : Array Lake.Module
   owned : Array Lake.Module
   importers : Array Lake.Module
-  lintTargets : Array String
 
 def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
-  let roots := (pkg.leanLibs.flatMap fun lib => lib.config.roots.filter (·.getString! == "Challenge")).toList.eraseDups
-  let challenge? ← match roots with
-    | [root] => (pkg.findModule? root).filterM (·.leanFile.pathExists)
-    | _ => pure none
-  let defaultExes := pkg.leanExes.filter fun exe => pkg.defaultTargets.contains exe.name
+  let candidates := (pkg.leanLibs.flatMap (·.config.roots.filter (·.getString! == "Challenge"))).toList.eraseDups
+  let challenge? ← if let [root] := candidates then (pkg.findModule? root).filterM (·.leanFile.pathExists)
+    else pure none
+  let exeRoots := (pkg.leanExes.filter (pkg.defaultTargets.contains ·.name)).map (·.config.root)
   let mut catalog := #[]
-  for root in (← (← pkg.defaultModules.fetch).await) ++ defaultExes.filterMap (pkg.findModule? ·.config.root) ++
-      challenge?.toArray do
+  for root in (← (← pkg.defaultModules.fetch).await) ++ exeRoots.filterMap pkg.findModule? ++ challenge?.toArray do
     for mod in (← (← root.transImports.fetch).await).push root do
       unless mod.pkg.keyName != pkg.keyName || (challenge?.toArray ++ catalog).any (·.name == mod.name) do
         catalog := catalog.push mod
-  let imports ← catalog.mapM fun mod => return (mod, ← (← mod.transImports.fetch).await)
   let closure ← challenge?.elim (pure #[]) fun challenge => do (← challenge.transImports.fetch).await
   let owned := catalog.filter fun mod => closure.any (·.name == mod.name) ||
     mod.name.components.any fun part => ["CoreSpec", "WorldSpec"].contains part.toString
-  let configs ← #[pkg.relConfigFile.toString, pkg.relManifestFile.toString, "lean-toolchain"].filterM
-    fun (file : String) => (pkg.dir / file).pathExists
-  let inputs := (configs ++ (challenge?.toArray ++ owned).map (fun (mod : Lake.Module) => mod.relLeanFile.toString)
-    ++ #["owned.lock", "comparator.json"]).toList.eraseDups.toArray
   let importers ← challenge?.elim (pure #[]) fun challenge => catalog.filterM fun mod => do
     return (← (← mod.imports.fetch).await).any (·.name == challenge.name)
-  let tops := catalog.filter fun mod => !imports.any (·.2.any (·.name == mod.name))
-  let defaultExeRoots := defaultExes.map (·.config.root)
+  let configs ← #[pkg.relConfigFile.toString, pkg.relManifestFile.toString, "lean-toolchain"].filterM
+    fun (file : String) => (pkg.dir / file).pathExists
+  let inputs := (configs ++ (challenge?.toArray ++ owned).map (·.relLeanFile.toString) ++
+    #["owned.lock", "comparator.json"]).toList.eraseDups.toArray
   let dir ← IO.FS.realPath pkg.dir
   let overridden ← overriddenPackages (← getWorkspace).packageOverridesFile
   let packages ← ((← getWorkspace).packages.filter (!·.isRoot)).mapM fun dep => do
-    return Json.mkObj [("name", toJson dep.baseName), ("configured", (lexical (dir / dep.relDir)).toString),
-      ("real", (← IO.FS.realPath dep.dir).toString), ("overridden", toJson (overridden.contains dep.baseName.toString)),
-      ("scope", dep.scope), ("manifestFile", dep.relManifestFile.toString), ("configFile", dep.relConfigFile.toString)]
-  let fields := [("packageDir", toJson dir.toString), ("configFiles", toJson configs),
-    ("modules", toJson (catalog.map source)),
-    ("challengeCandidates", toJson (roots.filterMap (pkg.findModule? · |>.map source))),
-    ("defaultExeRoots", toJson defaultExeRoots), ("packages", toJson packages), ("defaultTargets", toJson pkg.defaultTargets),
-    ("builtinLint", ← if pkg.config.builtinLint? == some true then placeIn pkg (·.contains "builtinLint")
-      else pure Json.null),
-    ("lintDriver", toJson pkg.lintDriver), ("testDriver", toJson pkg.testDriver),
-    ("testDriverArgs", toJson testArgs),
-    ("testDriverArgsPlace", ← placeIn pkg (·.contains "testDriverArgs")),
-    ("ownTests", toJson (← (testArgs.filterMapM (ownTest pkg) : IO (Array Json)))), ("inputs", toJson inputs)]
-  return { text := (Json.mkObj fields).pretty, inputs, challenge?, catalog, owned, importers
-           lintTargets := ((tops.filter (!defaultExeRoots.contains ·.name)) ++ tops.filter (defaultExeRoots.contains ·.name)).map
-             (·.name.toString) }
+    return Json.mkObj [("name", toJson dep.baseName), ("configured", (dir / dep.relDir).toString),
+      ("real", (← IO.FS.realPath dep.dir).toString), ("overridden", overridden.contains dep.baseName.toString),
+      ("scope", dep.scope), ("manifestFile", dep.relManifestFile.toString),
+      ("configFile", dep.relConfigFile.toString)]
+  let source := fun (mod : Lake.Module) => Json.mkObj [("module", toJson mod.name), ("file", mod.relLeanFile.toString)]
+  let kinds : List (String × (Name → Bool)) := [("script", pkg.scripts.contains),
+    ("library", fun name => (pkg.findLeanLib? name).isSome), ("executable", fun name => (pkg.findLeanExe? name).isSome)]
+  let ownTests := testArgs.filterMap fun test => (kinds.find? (·.2 test.toName)).map fun (kind, _) =>
+    Json.mkObj [("name", test), ("kind", kind)]
+  let text := Json.pretty <| Json.mkObj [("packageDir", dir.toString), ("configFiles", toJson configs),
+    ("modules", toJson (catalog.map source)), ("defaultExeRoots", toJson exeRoots), ("packages", toJson packages),
+    ("challengeCandidates", toJson (candidates.filterMap (pkg.findModule? · |>.map source))),
+    ("defaultTargets", toJson pkg.defaultTargets), ("builtinLint", pkg.config.builtinLint? == some true),
+    ("lintDriver", pkg.lintDriver), ("testDriver", pkg.testDriver), ("testDriverArgs", toJson testArgs),
+    ("ownTests", toJson ownTests), ("inputs", toJson inputs)]
+  return { text, inputs, challenge?, catalog, owned, importers }
 
 def stepDir (pkg : Package) : System.FilePath := pkg.buildDir / "softwareChallenge"
 
@@ -151,8 +113,7 @@ def inputsTrace (pkg : Package) (prepared : Prepared) : JobM BuildTrace := do
     else pure (BuildTrace.ofHash (pureHash path) s!"absent {path}")
   return mixTraceArray (files.push (.ofHash (pureHash prepared.text) "lake.json"))
 
-def record (pkg : Package) (step : String) (prepared : Prepared) (args : JobM (Array String) := pure #[]) :
-    JobM Unit := do
+def record (pkg : Package) (step : String) (prepared : Prepared) (args : Array String) : JobM Unit := do
   IO.FS.createDirAll (stepDir pkg)
   IO.FS.writeFile (stepDir pkg / s!"{step}.ran") ""
   IO.FS.writeFile (stepDir pkg / "lake.json") prepared.text
@@ -161,11 +122,9 @@ def record (pkg : Package) (step : String) (prepared : Prepared) (args : JobM (A
   let before := mixTrace deps (← inputsTrace pkg prepared)
   setTrace before
   let traceFile := stepDir pkg / s!"{step}.trace"
-  if ← (← readTraceFile traceFile).replayIfUpToDate (stepDir pkg / s!"{step}.status") before then return
-  buildAction before traceFile do
-    let stepped ← stepArgs pkg prepared step (← args)
-    let lean := (← getLean).toString
-    let out ← IO.Process.output { cmd := lean, args := stepped, cwd := pkg.dir, env := ← getAugmentedEnv }
+  buildUnlessUpToDate (stepDir pkg / s!"{step}.status") before traceFile do
+    let out ← IO.Process.output { cmd := (← getLean).toString, args := ← stepArgs pkg prepared step args, cwd := pkg.dir
+                                  env := ← getAugmentedEnv }
     let code ← statusOf pkg step
     let judged := (← (stepDir pkg / s!"{step}.status").pathExists) && (code == 0 || code == 2 ||
       !(out.stdout ++ out.stderr).trimAscii.isEmpty)
@@ -183,103 +142,68 @@ def record (pkg : Package) (step : String) (prepared : Prepared) (args : JobM (A
 
 def stepsJob : FetchM (Job Unit) := do
   let some steps ← findModule? `SoftwareChallenge.Steps | error "SoftwareChallenge.Steps is not in the workspace, so \
-    no step can run. Add `require software_challenge from git \"https://github.com/vincentqb/lean-software-challenge\" \
-    @ \"main\"` to lakefile.lean, run `lake update software_challenge`, then run `lake build`."
+    no step can run. Require software_challenge in lakefile.lean, then run `lake build`."
   return (← steps.leanArts.fetch).map fun _ => ()
 
-def compiled (pkg : Package) (challenge : Lake.Module) : JobM (Array String) := do
-  let dir := stepDir pkg / "statement"
-  let olean := modToFilePath dir challenge.name "olean"
-  IO.FS.createDirAll (olean.parent.getD dir)
-  let out ← IO.Process.output { cmd := (← getLean).toString, cwd := pkg.dir, env := ← getAugmentedEnv
-                                args := #[challenge.leanFile.toString, "-o", olean.toString] ++
-                                  challenge.leanOptions.values.foldl (fun args name value =>
-                                    args.push s!"-D{name}={value.asCliFlagValue}") #[] }
-  if out.exitCode == 0 then return #[dir.toString]
-  logError (out.stdout ++ out.stderr)
-  return #["failed"]
+def stepJob (pkg : Package) (step : String) (prepared : Prepared) (mods : Array Lake.Module) (args : Array String) :
+    FetchM (Job Unit) := do
+  let (mods, args) := if prepared.importers.isEmpty then (mods, args) else (#[], #["importers"])
+  let arts ← mods.mapM fun mod => return (← mod.leanArts.fetch).map fun _ => ()
+  ((← stepsJob).mix (Job.mixArray arts)).mapM fun _ => record pkg step prepared args
 
 package_facet softwareChallengeStatement pkg : Unit := do
   let prepared ← prepare pkg pkg.testDriverArgs
-  let steps ← stepsJob
-  unless prepared.importers.isEmpty do
-    return ← steps.mapM fun _ => record pkg "statement" prepared (pure #["importers"])
-  let some challenge := prepared.challenge? | steps.mapM fun _ => record pkg "statement" prepared
-  let arts ← ((← (← challenge.imports.fetch).await) ++ prepared.owned).mapM fun mod => do
-    return (← mod.leanArts.fetch).map fun _ => ()
-  (steps.mix (Job.mixArray arts)).mapM fun _ => record pkg "statement" prepared (compiled pkg challenge)
+  let some challenge := prepared.challenge? | stepJob pkg "statement" prepared #[] #[]
+  stepJob pkg "statement" prepared ((← (← challenge.imports.fetch).await) ++ prepared.owned) <|
+    challenge.leanOptions.values.foldl (fun args name value => args.push s!"-D{name}={value.asCliFlagValue}") #[]
 
 package_facet softwareChallenge pkg : Unit := do
   let prepared ← prepare pkg pkg.testDriverArgs
-  let steps ← stepsJob
-  unless prepared.importers.isEmpty do
-    return ← steps.mapM fun _ => record pkg "lint" prepared (pure #["importers"])
-  let arts ← (prepared.catalog ++ prepared.challenge?.toArray).mapM fun mod => do
-    return (← mod.leanArts.fetch).map fun _ => ()
-  (steps.mix (Job.mixArray arts)).mapM fun _ => record pkg "lint" prepared
+  stepJob pkg "lint" prepared (prepared.catalog ++ prepared.challenge?.toArray) #[]
 
-def spawnStep (step : String) (testArgs : Array String) (args : Prepared → Array String := fun _ => #[]) :
-    ScriptM UInt32 := do
+def spawnStep (step : String) (testArgs : Array String) : ScriptM UInt32 := do
   let pkg ← getRootPackage
   let prepared ← runBuild do
     let prepared ← prepare pkg testArgs
     return (← stepsJob).map fun _ => prepared
-  discard <| (← IO.Process.spawn {
-    cmd := (← getLean).toString, args := ← stepArgs pkg prepared step (args prepared), cwd := pkg.dir
-    env := ← getAugmentedEnv }).wait
+  discard <| (← IO.Process.spawn { cmd := (← getLean).toString, args := ← stepArgs pkg prepared step #[], cwd := pkg.dir
+                                   env := ← getAugmentedEnv }).wait
   statusOf pkg step
 
-script lint_challenge do
-  spawnStep "drive" (← getRootPackage).testDriverArgs (·.lintTargets)
+script lint_challenge do spawnStep "drive" (← getRootPackage).testDriverArgs
 
-script test_challenge (args) do
-  spawnStep "test" args.toArray
+script test_challenge (args) do spawnStep "test" args.toArray
 
-script replay do
-  spawnStep "replay" (← getRootPackage).testDriverArgs
+script replay do spawnStep "replay" (← getRootPackage).testDriverArgs
 
-def gateInputs : String → List System.FilePath
-  | "comparator" => ["SoftwareChallengeTests" / "Comparator"]
-  | _ => ["Examples" / "ConstantFolding"]
-
-def gateRun (pkg : Package) (run : String) : FetchM (Job Unit) := do
-  let (some gate, some grade, some library) := (pkg.findLeanExe? `«lsc-gate», pkg.findLeanExe? `grade,
-    pkg.findLeanLib? `SoftwareChallenge) | error s!"lakefile.lean declares no lean_exe «lsc-gate», lean_exe «grade» \
-      or lean_lib «SoftwareChallenge», so no real run can start. Restore them, then run `lake build {run}Run`."
-  let inputs ← (gateInputs run).toArray.mapM fun dir => return (← inputDir (pkg.dir / dir) true fun path =>
-    !path.components.contains ".lake" && path.fileName != some "comparator.json").map fun _ => ()
-  let read ← #[`SoftwareChallengeTests.Model, `SoftwareChallengeTests.Golden.ConstantFolding].mapM fun name => do
-    let some mod ← findModule? name | error s!"{name} is not in the workspace, so the real run's reader cannot \
-      start. Restore it in lean_lib «SoftwareChallengeTests», then run `lake build {run}Run`."
-    return (← mod.leanArts.fetch).map fun _ => ()
-  let deps := #[(← gate.exe.fetch).map (fun _ => ()), (← grade.exe.fetch).map (fun _ => ()),
-    (← library.leanArts.fetch).map (fun _ => ()), ← stepsJob] ++ read ++ inputs
-  (Job.mixArray deps).mapM fun _ => do
+def gateRun (pkg : Package) (run : String) (dir : System.FilePath) : FetchM (Job Unit) := do
+  let some read ← findModule? `SoftwareChallengeTests.Gate.Read | error "SoftwareChallengeTests.Gate.Read is missing"
+  let files ← inputDir (pkg.dir / dir) true fun path =>
+    !path.components.contains ".lake" && path.fileName != some "comparator.json"
+  let deps := (((← «lsc-gate».fetch).mix (← grade.fetch)).mix ((← «SoftwareChallenge».fetch).mix files)).mix
+    (← read.leanArts.fetch)
+  deps.mapM fun _ => do
     addLeanTrace
-    for file in ["lakefile.lean", "lake-manifest.json", "lean-toolchain", runner.toString,
-        "SoftwareChallengeTests/Gate/Read.lean"] do
-      addTrace (← computeTrace (TextFilePath.mk (pkg.dir / file)))
+    for file in [pkg.configFile, pkg.manifestFile, pkg.dir / "lean-toolchain", runner] do
+      addTrace (← computeTrace (TextFilePath.mk file))
     let log := pkg.buildDir / "gate" / s!"{run}.txt"
     buildUnlessUpToDate log (← getTrace) (log.addExtension "trace") do
       IO.FS.createDirAll (pkg.buildDir / "gate")
-      let out ← IO.Process.output {
-        cmd := gate.file.toString, args := #[run], cwd := some pkg.dir, env := #[("LAKE", some (← getLake).toString)] }
+      let out ← IO.Process.output { cmd := (← «lsc-gate».get).file.toString, args := #[run], cwd := pkg.dir
+                                    env := #[("LAKE", (← getLake).toString)] }
       IO.FS.writeFile log (out.stdout ++ out.stderr)
       if out.exitCode == 0 then logInfo out.stdout else logError (out.stdout ++ out.stderr)
 
-target templateRun pkg : Unit := gateRun pkg "template"
+target templateRun pkg : Unit := gateRun pkg "template" ("Examples" / "ConstantFolding")
 
-target comparatorRun pkg : Unit := gateRun pkg "comparator"
+target comparatorRun pkg : Unit := gateRun pkg "comparator" ("SoftwareChallengeTests" / "Comparator")
 
-target gradeRun pkg : Unit := gateRun pkg "grade"
+target gradeRun pkg : Unit := gateRun pkg "grade" ("Examples" / "ConstantFolding")
 
-def gateScript (mode : String) : ScriptM UInt32 := do
-  let pkg ← getRootPackage
-  let some gate := pkg.findLeanExe? `«lsc-gate» | return 1
-  let exe ← runBuild gate.exe.fetch
-  (← IO.Process.spawn {
-    cmd := exe.toString, args := #[mode], cwd := pkg.dir, env := #[("LAKE", some (← getLake).toString)] }).wait
+def gate (mode : String) : ScriptM UInt32 := do
+  (← IO.Process.spawn { cmd := (← runBuild «lsc-gate».fetch).toString, args := #[mode], cwd := (← getRootPackage).dir
+                        env := #[("LAKE", (← getLake).toString)] }).wait
 
-script real_runs do gateScript "stale"
+script real_runs do gate "stale"
 
-script full do gateScript "full"
+script full do gate "full"

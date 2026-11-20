@@ -21,7 +21,7 @@ def dispatch (step : String) (lakeFile : System.FilePath) (args : List String) :
   | "statement", _ => Statement.run lakeFile args
   | "lint", ["importers"] => Lint.importers lakeFile
   | "lint", _ => Lint.run lakeFile
-  | "drive", targets => Lint.drive lakeFile targets
+  | "drive", _ => Lint.drive lakeFile
   | "test", _ => Test.run lakeFile
   | "replay", _ => Replay.run lakeFile
   | "facts", _ => Facts.run lakeFile

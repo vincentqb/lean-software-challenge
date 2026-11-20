@@ -7,11 +7,9 @@ namespace SoftwareChallenge
 inductive Doc.Value where
   | string (value : String)
   | array (values : List String)
-  deriving DecidableEq, Repr, Inhabited
 
 structure Doc where
   fields : List (String × Doc.Value)
-  deriving DecidableEq, Repr, Inhabited
 
 private inductive Doc.Token where
   | openObject | closeObject | openArray | closeArray | colon | comma

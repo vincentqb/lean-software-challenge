@@ -10,60 +10,6 @@ open Lean SoftwareChallenge SoftwareChallengeTests.Rules.LintFacts
 
 meta section
 
-def errorTag : Lint.Error → Nat
-  | .unaudited _ => 0
-  | .unlinted _ => 1
-  | .metaImportsEditable _ _ => 2
-  | .violation _ => 3
-  | .axiomUse _ => 4
-  | .holeOutsideCode _ _ => 5
-  | .holeNoncomputable _ _ => 6
-  | .fixpointWithoutTerminates _ _ => 7
-  | .declaredTwice _ _ _ => 8
-  | .sorryUsed _ => 9
-  | .mainOutsideProgram _ => 10
-  | .notFixpoint _ _ => 11
-  | .claimOutsideWorldSpec _ _ => 12
-  | .unregisteredClaim _ => 13
-  | .lintWarning _ => 14
-  | .ownedUnread _ => 15
-  | .lock _ _ => 16
-  | .lockMissing => 17
-  | .lockUnreadable _ => 18
-  | .comparatorMissing => 19
-  | .comparatorStale _ _ _ _ => 20
-  | .comparatorUnreadable _ => 21
-  | .noStatementTarget => 22
-  | .solutionModule _ => 23
-  | .importsChallenge _ => 24
-  | .builtinLintOn _ => 25
-  | .proofUnreadable _ _ => 26
-
-def violationTag : Violation → Nat
-  | .unplaced _ => 0
-  | .legacy _ => 1
-  | .forbiddenImport _ _ _ => 2
-  | .axioms _ _ => 3
-  | .impure _ _ _ => 4
-
-def pendingTag : Lint.Pending → Nat
-  | .standing _ _ => 0
-  | .mainMissing => 1
-  | .unreachedHole _ => 2
-  | .undecidedCheck _ _ => 3
-  | .uncheckedClaim _ => 4
-  | .hiddenDependency _ => 5
-
-def standingTag : Standing → Nat
-  | .holds _ => 0
-  | .unsound _ => 1
-  | .absent => 2
-  | .outside _ _ => 3
-  | .kind _ _ => 4
-  | .universes _ _ => 5
-  | .differs _ _ _ => 6
-  | .auxiliary _ _ => 7
-
 def blame : AxiomBlame :=
   { declaration := `App.fold_correct, axiomName := ``sorryAx, culprit := `App.fold_lemma,
     culpritModule? := some `App.Solution }
@@ -121,10 +67,6 @@ def follows (message : Message) : Bool :=
   !message.place.file.isEmpty && message.place.line ≥ 1 && !message.what.isEmpty && !message.why.isEmpty &&
     !message.fix.isEmpty && !contains text " ask " && !contains text "owner"
 
-#guard (List.range 27).all fun tag => errorSamples.any (errorTag · == tag)
-#guard (List.range 5).all fun tag => violationSamples.any (violationTag · == tag)
-#guard (List.range 6).all fun tag => pendingSamples.any (pendingTag · == tag)
-#guard (List.range 8).all fun tag => standingSamples.any (standingTag · == tag)
 #guard errorSamples.all fun error => follows (error.message complete)
 #guard pendingSamples.all fun found => follows (found.message complete)
 

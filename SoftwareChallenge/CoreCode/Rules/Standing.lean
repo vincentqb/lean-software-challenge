@@ -1,6 +1,6 @@
 module
 
-public import SoftwareChallenge.CoreCode.Facts
+public import SoftwareChallenge.CoreSpec.Facts
 public import SoftwareChallenge.CoreSpec.Lint
 
 public section

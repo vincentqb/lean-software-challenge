@@ -25,7 +25,7 @@ structure Config where
   theorems : Array Name
   definitions : Array Name
   axioms : Array Name
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 def Config.Plain (config : Config) : Prop :=
   Name.Plain config.challenge ∧ Name.Plain config.solution ∧ (∀ name ∈ config.theorems, Name.Plain name) ∧
@@ -36,13 +36,13 @@ namespace Lock
 structure Entry where
   path : String
   digest : String
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 inductive Violation where
   | unrecorded (path : String)
   | differs (path : String)
   | missing (path : String)
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 def digestOf (entries : Array Entry) (path : String) : Option String :=
   (entries.find? (·.path == path)).map (·.digest)

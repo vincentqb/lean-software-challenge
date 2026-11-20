@@ -67,36 +67,15 @@ theorem failuresOf_eq_empty_iff (facts : TestFacts) : failuresOf facts = #[] ↔
 theorem code_eq_zero_iff (failures : Array Failure) : code failures = 0 ↔ failures = #[] := by
   unfold code
   cases empty : failures.isEmpty
-  · have nonempty : failures ≠ #[] := Array.isEmpty_eq_false_iff.mp empty
-    simp only [Bool.false_eq_true, ite_false, nonempty, iff_false]
-    split
-    · decide
-    · assumption
+  · simp only [Bool.false_eq_true, ite_false, Array.isEmpty_eq_false_iff.mp empty, iff_false]
+    decide
   · simp [Array.isEmpty_iff.mp empty]
-
-theorem Failure.code_le_one (failure : Failure) : failure.code ≤ 1 := by
-  cases failure <;> exact (by decide : (1 : UInt32) ≤ 1)
-
-theorem worst_le_one (failures : List Failure) (worst : UInt32) (bounded : worst ≤ 1) :
-    failures.foldl (fun worst failure => max worst failure.code) worst ≤ 1 := by
-  induction failures generalizing worst with
-  | nil => exact bounded
-  | cons failure rest ih =>
-    apply ih
-    by_cases higher : worst ≤ failure.code
-    · simpa [max, maxOfLe, higher] using failure.code_le_one
-    · simpa [max, maxOfLe, higher] using bounded
 
 end Test
 
 theorem Test.run_code_le_one (facts : TestFacts) : (Test.run facts).code ≤ 1 := by
   simp only [Test.run, Test.code]
-  split
-  · decide
-  · split
-    · decide
-    · rw [← Array.foldl_toList]
-      exact Test.worst_le_one _ 0 (by decide)
+  split <;> decide
 
 theorem Test.run_code_le_one_rejects_unjudged :
     ¬ ∀ (facts : TestFacts),

@@ -12,7 +12,7 @@ inductive OwnedFile where
   | lakefile | manifest | toolchain | challenge
   | specModule (module : Name)
   | closureModule (module : Name)
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 namespace Statement
 
@@ -53,25 +53,24 @@ inductive Error where
   | ownedUnread (path : String)
   | lock (violation : Lock.Violation) (owned? : Option OwnedFile)
   | lockUnreadable (problem : String)
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 inductive Setup where
   | lintDriver (found : String)
   | testDriver (found : String)
   | builtinLint (place : Place)
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 structure Writes where
   lock? : Option (Array Lock.Entry)
   config? : Option Config
-  deriving BEq, Repr, Inhabited
+  deriving BEq
 
 structure Result where
   setup : Array Setup
   errors : Array Error
   writes : Writes
   code : UInt32
-  deriving BEq, Repr, Inhabited
 
 end Statement
 

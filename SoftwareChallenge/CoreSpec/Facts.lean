@@ -26,7 +26,7 @@ structure PackageFact where
   configured : String
   real : String
   overridden : Bool := false
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 inductive OwnTestKind where
   | script | library | executable
@@ -69,11 +69,11 @@ structure FileFacts where
   lock : Decoded (Array Lock.Entry)
   comparator : Decoded Config
   digests : Array Lock.Entry
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 inductive Safety where
   | safe | «unsafe» | «partial»
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 inductive ConstantKind where
   | assumed
@@ -112,7 +112,7 @@ structure TargetFact where
   rendered : String
   renderedExplicit : String
   auxiliaries : Array ConstantFact
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure BinderFact where
   name : String
@@ -130,45 +130,45 @@ structure HeadlineFact where
   telescope : List BinderFact
   killTemplate? : Option String
   witness? : Option String
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure KillFact where
   target : TargetFact
   headline : Name
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure WitnessFact where
   target : TargetFact
   headline : Name
   derived : Bool
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure TerminationFact where
   definition : Name
   headline : Name
   place : Place
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure AxiomBlame where
   declaration : Name
   axiomName : Name
   culprit : Name
   culpritModule? : Option Name
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 structure RegistrationFact where
   claim : Name
   module : Name
   home? : Option Name
   place : Place
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 structure DeclarationPlace where
   name : Name
   place : Place
   written : String
   firstLine : String
-  deriving BEq, Repr, Inhabited
+  deriving Repr
 
 structure OwnedFacts where
   inventory : Inventory := ⟨#[], #[]⟩
@@ -177,7 +177,7 @@ structure OwnedFacts where
   registrations : Array RegistrationFact := #[]
   places : Array DeclarationPlace := #[]
   parents : Array (Name × Name) := #[]
-  deriving BEq, Repr, Inhabited
+  deriving Repr
 
 structure ChallengeFacts where
   module : Name
@@ -196,7 +196,7 @@ structure ChallengeFacts where
   replaceable : Array Name
   claims : Array Name := #[]
   owned : OwnedFacts := {}
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure FoundFact where
   constant : ConstantFact
@@ -205,17 +205,17 @@ structure FoundFact where
   compiled : Bool
   rendered : String
   renderedExplicit : String
-  deriving BEq, Repr, Inhabited
+  deriving Repr
 
 structure CheckFact where
   claim : Name
   statement : String
   place : Place
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 inductive MatchOutcome where
   | matched | differs | undecided
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 structure ClaimUse where
   headline : Name
@@ -223,14 +223,14 @@ structure ClaimUse where
   claim : Name
   statement : String
   checks : Array (CheckFact × MatchOutcome)
-  deriving BEq, Repr, Inhabited
+  deriving Repr
 
 structure LintFact where
   module : Name
   place : Place
   linter : Name
   message : String
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 structure SolutionFacts where
   solution? : Option Name
@@ -254,18 +254,18 @@ structure SolutionFacts where
   main? : Option (Name × Place)
   places : Array DeclarationPlace
   parents : Array (Name × Name) := #[]
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 structure CheckOutcome where
   check : CheckFact
   elapsed : Nat
   error? : Option String
-  deriving BEq, Repr, Inhabited
+  deriving Inhabited
 
 structure OwnTestRun where
   test : OwnTestFact
   code : UInt32
-  deriving BEq, Repr, Inhabited
+  deriving Inhabited
 
 structure TestFacts where
   declaredChecks : Array CheckFact
@@ -275,14 +275,14 @@ structure TestFacts where
   unknownOwnTests : Array String
   testDriverArgsPlace : Place
   libraryPlace : Place
-  deriving BEq, Repr, Inhabited
+  deriving Inhabited
 
 structure Facts where
   lake : LakeFacts
   files : FileFacts
   challenge : ChallengeFacts
   solution : SolutionFacts
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 def Name.NamedSolution : Name → Prop
   | .str _ last => last = "Solution"

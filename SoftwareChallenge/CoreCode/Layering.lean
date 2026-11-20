@@ -8,9 +8,6 @@ namespace SoftwareChallenge
 
 open Lean
 
-def Project.ofPackage (modules : Array Name) : Project :=
-  { modules := modules.map fun name => (name, Role.ofName name) }
-
 def Role.permits : Role → Role → Bool
   | .tooling, _ => true
   | .worldCode, target => target != .tooling

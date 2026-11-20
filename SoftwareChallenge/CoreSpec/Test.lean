@@ -15,13 +15,12 @@ inductive Failure where
   | ownTest (run : OwnTestRun)
   | ownTestNotRun (test : OwnTestFact)
   | unknownOwnTest (name : String) (place : Place)
-  deriving BEq, Repr, Inhabited
+  deriving Inhabited
 
 structure Result where
   failures : Array Failure
   timings : Array CheckOutcome
   code : UInt32
-  deriving BEq, Repr, Inhabited
 
 end Test
 

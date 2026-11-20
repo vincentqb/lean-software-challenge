@@ -1,6 +1,6 @@
 module
 
-public import SoftwareChallenge.CoreCode.Facts
+public import SoftwareChallenge.CoreSpec.Facts
 public import SoftwareChallenge.CoreSpec.Statement
 public import SoftwareChallenge.CoreCode.Classify
 public import SoftwareChallenge.CoreCode.Layering

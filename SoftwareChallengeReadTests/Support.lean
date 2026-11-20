@@ -22,6 +22,13 @@ def lakeOf (modules : Array Name) (challenge? : Option Name := none) (inputs : A
     defaultExeRoots := #[], packages := #[], defaultTargets := #[`statement], builtinLint := none, testDriver := "software_challenge/test_challenge"
     testDriverArgs := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, ownTests := #[], inputs }
 
+def readChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do
+  let some candidate := challengeOf? lake | return emptyChallenge .anonymous ""
+  let imported ← challengeEnv lake candidate.module next
+  let challenge ← challengeFacts lake candidate imported next
+  requireChallengeCensus imported.env challenge next
+  return challenge
+
 def challengeNamed (module : Name) : IO ChallengeFacts := do
   readChallenge (← lakeOf #[] (some module)) .lint
 

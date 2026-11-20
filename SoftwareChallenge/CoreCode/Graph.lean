@@ -208,61 +208,6 @@ theorem mem_next_ofEdges {edges : Array (Name × Array Name)} {source target : N
     Array.mem_toList_iff]
   simp
 
-theorem mem_next_reverse {graph : Graph} {node other : Name} :
-    node ∈ graph.reverse.next other ↔ other ∈ graph.next node := by
-  simp only [reverse, mem_next_ofEdges, Array.mem_flatMap, Array.mem_map, Prod.mk.injEq]
-  constructor
-  · rintro ⟨_, ⟨⟨source, found⟩, listed, _, edge, rfl, rfl⟩, member⟩
-    obtain rfl : node = source := Array.mem_singleton.mp member
-    simpa [Graph.next, Std.HashMap.getD_eq_getD_getElem?, Std.HashMap.mem_toArray_iff_getElem?_eq_some.mp listed]
-      using edge
-  · intro edge
-    simp only [Graph.next, Std.HashMap.getD_eq_getD_getElem?] at edge
-    cases found : graph.edges[node]? with
-    | none => simp [found] at edge
-    | some targets =>
-      rw [found, Option.getD_some] at edge
-      exact ⟨#[node], ⟨(node, targets), Std.HashMap.mem_toArray_iff_getElem?_eq_some.mpr found, other, edge, rfl, rfl⟩,
-        Array.mem_singleton.mpr rfl⟩
-
-private theorem Reaches.head {graph : Graph} {source middle target : Name} (edge : middle ∈ graph.next source)
-    (path : graph.Reaches middle target) : graph.Reaches source target := by
-  induction path with
-  | refl => exact .step (.refl source) edge
-  | step _ last reached => exact .step reached last
-
-theorem reaches_reverse_iff {graph : Graph} {source target : Name} :
-    graph.reverse.Reaches source target ↔ graph.Reaches target source := by
-  constructor
-  · intro path
-    induction path with
-    | refl => exact .refl _
-    | step _ edge reached => exact Reaches.head (mem_next_reverse.mp edge) reached
-  · intro path
-    induction path with
-    | refl => exact .refl _
-    | step _ edge reached => exact Reaches.head (mem_next_reverse.mpr edge) reached
-
-theorem dependingOn_iff {graph : Graph} {targets : Array Name} {node : Name} :
-    node ∈ graph.dependingOn targets ↔ ∃ target ∈ targets, graph.Reaches node target := by
-  simp only [dependingOn, mem_closure_iff, reaches_reverse_iff]
-
-private theorem getD_foldl_erase (node : Name) :
-    ∀ (sinks : List Name) (map : Std.HashMap Name (Array Name)),
-      (sinks.foldl Std.HashMap.erase map).getD node #[] = if node ∈ sinks then #[] else map.getD node #[]
-  | [], _ => by simp
-  | sink :: rest, map => by
-    rw [List.foldl_cons, getD_foldl_erase node rest, Std.HashMap.getD_erase]
-    by_cases same : sink = node
-    · subst same; simp
-    · by_cases later : node ∈ rest
-      · simp [later]
-      · simp [later, same, Ne.symm same]
-
-theorem next_cut {graph : Graph} {sinks : Array Name} {node : Name} :
-    (graph.cut sinks).next node = if node ∈ sinks then #[] else graph.next node := by
-  simp only [cut, Graph.next, ← Array.foldl_toList, getD_foldl_erase, Array.mem_toList_iff]
-
 end Graph
 
 end SoftwareChallenge

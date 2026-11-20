@@ -1,6 +1,6 @@
 module
 
-public import SoftwareChallenge.CoreCode.Facts
+public import SoftwareChallenge.CoreSpec.Facts
 
 public section
 
@@ -9,7 +9,7 @@ namespace SoftwareChallenge
 inductive Next where
   | build | lint | test | comparator | replay
   | grade (commit : String)
-  deriving BEq, Repr, Inhabited
+  deriving BEq
 
 structure Message where
   place : Place
@@ -17,7 +17,6 @@ structure Message where
   why : String
   fix : String
   next : Next
-  deriving BEq, Repr, Inhabited
 
 def Next.command : Next → String
   | .build => "lake build"

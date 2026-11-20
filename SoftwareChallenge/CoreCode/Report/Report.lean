@@ -30,7 +30,6 @@ structure Assumption where
   label : String
   checks : Nat
   unused : Bool
-  deriving BEq, Repr, Inhabited
 
 def Assumption.render (assumption : Assumption) : String :=
   let checks := s!"{assumption.checks} {if assumption.checks == 1 then "check" else "checks"}"
@@ -41,7 +40,6 @@ structure HeadlineLine where
   assumptions : Array Assumption
   marks : Array String
   followsFrom : Array String
-  deriving BEq, Repr, Inhabited
 
 def HeadlineLine.render (line : HeadlineLine) : String :=
   let stated := if line.assumptions.isEmpty then line.name

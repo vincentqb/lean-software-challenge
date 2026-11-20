@@ -19,7 +19,7 @@ structure ModuleFact where
   file : String
   usesModuleSystem : Bool
   imports : Array ImportFact
-  deriving DecidableEq, Repr, Inhabited
+  deriving Repr
 
 structure DeclarationFact where
   name : Name
@@ -41,7 +41,7 @@ structure DeclarationFact where
   copyOfTotal : Bool := false
   copyOfFixpoint : Bool := false
   copyOfTerminated : Bool := false
-  deriving DecidableEq, Repr, Inhabited
+  deriving Repr
 
 def DeclarationFact.compilerCopy (fact : DeclarationFact) : Bool :=
   !fact.written && fact.copyOf.isSome &&
@@ -56,7 +56,7 @@ def DeclarationFact.derivedPartial (fact : DeclarationFact) : Bool :=
 structure Inventory where
   modules : Array ModuleFact
   declarations : Array DeclarationFact
-  deriving DecidableEq, Repr, Inhabited
+  deriving Repr, Inhabited
 
 def Inventory.RuntimeImport (inventory : Inventory) (source target : Name) : Prop :=
   ∃ fact ∈ inventory.modules, fact.name = source ∧
@@ -64,7 +64,6 @@ def Inventory.RuntimeImport (inventory : Inventory) (source target : Name) : Pro
 
 structure Project where
   modules : Array (Name × Role)
-  deriving DecidableEq, Repr, Inhabited
 
 def Project.role? (project : Project) (name : Name) : Option Role :=
   (project.modules.find? (·.1 == name)).map (·.2)
@@ -73,7 +72,7 @@ def standardAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound
 
 inductive Reason where
   | «unsafe» | «partial» | extern | implementedBy | initializer | io | debug | unfoldableExtern
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 inductive Violation where
   | unplaced (module : Name)
@@ -81,7 +80,7 @@ inductive Violation where
   | forbiddenImport (module dependency : Name) (role : Role)
   | axioms (declaration : Name) (found : Array Name)
   | impure (declaration : Name) (role : Role) (reasons : List Reason)
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 def DeclarationFact.Allowed (fact : DeclarationFact) : Role → Prop
   | .coreSpec | .coreCode =>

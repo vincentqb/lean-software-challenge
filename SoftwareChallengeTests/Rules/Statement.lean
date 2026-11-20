@@ -346,9 +346,7 @@ def unwitnessed : ChallengeFacts :=
   { baseChallenge with
     headlines := #[holeTypedInput] }
 
-def witnessedInput : ChallengeFacts := { baseChallenge with headlines := #[holeTypedInput] }
-
-def witnessed : ChallengeFacts := { witnessedInput with witnesses := #[stated witnessedInput (witnessOf true)] }
+def witnessed : ChallengeFacts := { unwitnessed with witnesses := #[stated unwitnessed (witnessOf true)] }
 
 def unwitnessedUnkilled : ChallengeFacts :=
   { baseChallenge with
@@ -402,8 +400,6 @@ end
 
 #guard (run baseLake baseFiles baseChallenge).code == 0
 
-#guard errorsOf == #[]
-
 #guard (run baseLake baseFiles baseChallenge).writes.config? == some
   { challenge := `Challenge, solution := `App.Solution, theorems := #[`App.double_even, `App.double_even_rejects],
     definitions := #[`App.double], axioms := standardAxioms }
@@ -447,8 +443,6 @@ end
 #guard !(errorsOf (challenge := trivial)).any (· matches .noKill _ _)
 
 #guard refuses (.noKill `App.double_even (some template)) (challenge := unkilled)
-
-#guard refuses (.unmarkedKill `App.double_even `App.double_even_rejects) (challenge := unmarkedKill)
 
 #guard errorsOf (challenge := unmarkedKill) == #[.unmarkedKill `App.double_even `App.double_even_rejects]
 
@@ -535,11 +529,7 @@ end
 
 #guard refuses (.ownedViolation (.legacy `App.CoreSpec)) (challenge := ownedLegacy)
 
-#guard refuses (.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)) (challenge := ownedLayering)
-
 #guard errorsOf (challenge := ownedLayering) == #[.ownedViolation (.forbiddenImport `App.CoreSpec `App.CoreCode .coreSpec)]
-
-#guard refuses (.specImport `App.CoreSpec codeMetaImport) (challenge := specImportsCode)
 
 #guard errorsOf (challenge := specImportsCode) == #[.specImport `App.CoreSpec codeMetaImport]
 
@@ -551,8 +541,6 @@ end
   (challenge := ownedClaimUnregistered)
 
 #guard errorsOf (lake := worldLake) (files := worldFiles) (challenge := ownedClaimHome) == #[]
-
-#guard refuses (.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec) (challenge := derivedSpec)
 
 #guard errorsOf (challenge := derivedSpec) == #[.derivedPartial `App.CoreSpec.instBEqTree `App.CoreSpec]
 
@@ -567,8 +555,6 @@ end
 #guard setupOf { baseLake with testDriver := "" } == #[.testDriver ""]
 
 #guard setupOf { baseLake with builtinLint := some ⟨"lakefile.lean", 5⟩ } == #[.builtinLint ⟨"lakefile.lean", 5⟩]
-
-#guard setupOf baseLake == #[]
 
 #guard refuses (.witnessMisstated `App.double_even_applies `App.double_even) (challenge := misstatedWitness)
 

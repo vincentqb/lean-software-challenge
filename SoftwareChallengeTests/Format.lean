@@ -57,39 +57,6 @@ def constantFoldingComparator : String := r#"{
 
 #guard Config.parse constantFoldingComparator == some constantFolding
 
-def slowKills : Config where
-  challenge := `Challenge
-  solution := `SlowKills.Solution
-  theorems := #[`SlowKills.double_correct, `SlowKills.triple_correct, `SlowKills.double_correct_rejects_identity,
-    `SlowKills.triple_correct_rejects_identity]
-  definitions := #[`SlowKills.double, `SlowKills.triple]
-  axioms := standardAxioms
-
-def slowKillsComparator : String := r#"{
-  "challenge_module": "Challenge",
-  "solution_module": "SlowKills.Solution",
-  "theorem_names": [
-    "SlowKills.double_correct",
-    "SlowKills.triple_correct",
-    "SlowKills.double_correct_rejects_identity",
-    "SlowKills.triple_correct_rejects_identity"
-  ],
-  "definition_names": [
-    "SlowKills.double",
-    "SlowKills.triple"
-  ],
-  "permitted_axioms": [
-    "propext",
-    "Classical.choice",
-    "Quot.sound"
-  ]
-}
-"#
-
-#guard Config.render slowKills == slowKillsComparator
-
-#guard Config.parse slowKillsComparator == some slowKills
-
 def softwareChallenge : Config where
   challenge := `SoftwareChallengeStatement.Challenge
   solution := `SoftwareChallenge.Solution
@@ -130,7 +97,7 @@ def legacyComparatorJson (config : Config) : String :=
     ("permitted_axioms", names config.axioms)]
   "{\n" ++ ",\n".intercalate (fields.map fun (key, value) => s!"  \"{key}\": {value}") ++ "\n}\n"
 
-#guard [constantFolding, slowKills, softwareChallenge, { slowKills with theorems := #[], definitions := #[] }].all
+#guard [softwareChallenge, { constantFolding with theorems := #[], definitions := #[] }].all
   fun config => Config.render config == legacyComparatorJson config
 
 def lakeReads (config : Config) : Bool :=

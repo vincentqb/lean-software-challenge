@@ -17,13 +17,12 @@ structure Evidence where
 
 inductive LinkKind where
   | kills | terminates | witness
-  deriving BEq, Repr, Inhabited
+  deriving BEq
 
 structure Link where
   kind : LinkKind
   source : Name
   target : Name
-  deriving BEq, Repr, Inhabited
 
 initialize claimsExt : SimplePersistentEnvExtension Name (Array Name) ←
   registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
@@ -40,8 +39,6 @@ def conclusionHead : Expr → Name
   | .forallE _ _ body _ => conclusionHead body
   | .mdata _ expr => conclusionHead expr
   | conclusion => conclusion.getAppFn.constName
-
-def allEvidence (env : Environment) : Array Evidence := evidenceExt.getState env
 
 def moduleLinks (env : Environment) (module : ModuleIdx) (kind : LinkKind) : Array (Name × Name) :=
   ((PersistentEnvExtension.getModuleEntries linksExt env module).filter (·.kind == kind)).map

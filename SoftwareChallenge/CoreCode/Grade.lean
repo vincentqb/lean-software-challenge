@@ -17,7 +17,7 @@ namespace Comparator
 inductive Rejection where
   | kernel | statement | kind | absent | unexported | differs | notDefinition | notTheorem | axiomUsed
   | missing (name : String)
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq
 
 def rejections : List (String × Rejection) := [
   ("kernel rejected the solution", .kernel),

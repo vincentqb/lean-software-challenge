@@ -27,7 +27,7 @@ elab "rejects " reason:str " in " cmd:command : command => do
 
 elab "assert_evidence " n:ident " = " checks:num " checks" : command => do
   let name ← resolveGlobalConstNoOverload n
-  let found := ((allEvidence (← getEnv)).filter (·.claim == name)).size
+  let found := ((evidenceExt.getState (← getEnv)).filter (·.claim == name)).size
   unless found == checks.getNat do throwError "{name}: {found} checks"
 
 end SoftwareChallengeTests

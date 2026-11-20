@@ -213,32 +213,6 @@ theorem independent_eq_true {replaceable : Name → Bool} {headline kill : Shape
         ((independence headline others).witnesses? replaceable kill).isSome := by
   simp [independent, and_assoc]
 
-def existential : List (Universe × Shape) → Shape → Shape
-  | [], body => body
-  | (level, type) :: rest, body => .app (.app (.const ``Exists [level]) type) (.lam type (existential rest body))
-
-def applicability (premises : List Shape) (inputs : List (Universe × Shape)) (preconditions : List Shape) :
-    Shape :=
-  premises.foldr .forallE (existential inputs (conjunction preconditions))
-
-def applies (premises : List Shape) (inputs : List (Universe × Shape)) (preconditions : List Shape)
-    (witness : Shape) : Bool :=
-  !preconditions.isEmpty &&
-    ((applicability premises inputs preconditions).witnesses? (fun _ => false) witness).isSome
-
-private theorem subst_unreplaceable (σ : Witnesses) (statement : Shape) :
-    statement.subst (fun _ => false) σ = statement := by
-  induction statement <;> simp_all [subst]
-
-theorem applies_sound {premises : List Shape} {inputs : List (Universe × Shape)} {preconditions : List Shape}
-    {witness : Shape} (accepted : applies premises inputs preconditions witness = true) :
-    preconditions ≠ [] ∧ witness = premises.foldr .forallE (existential inputs (conjunction preconditions)) := by
-  simp only [applies, Bool.and_eq_true, Bool.not_eq_true', List.isEmpty_eq_false_iff] at accepted
-  obtain ⟨nonempty, found⟩ := accepted
-  obtain ⟨σ, found⟩ := Option.isSome_iff_exists.mp found
-  obtain ⟨_, instantiates⟩ := witnesses?_some found
-  exact ⟨nonempty, by rw [← instantiates, subst_unreplaceable]; rfl⟩
-
 end Shape
 
 end SoftwareChallenge

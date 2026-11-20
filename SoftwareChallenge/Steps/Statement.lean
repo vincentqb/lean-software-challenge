@@ -29,11 +29,16 @@ def challengeImports (lake : LakeFacts) (next : Next) : IO (Array ImportLine) :=
 
 namespace Statement
 
-def challengeOf (lake : LakeFacts) (compiled : List String) : IO ChallengeFacts := do
-  let (some candidate, [dir]) := (Read.challengeOf? lake, compiled) | return Read.emptyChallenge .anonymous ""
-  searchPathRef.modify (System.FilePath.mk dir :: ·)
-  let imported ← Read.challengeEnv { lake with challengeCandidates := #[] } candidate.module .build
-  Read.listedChallenge lake candidate imported .build
+def compiled (lake : LakeFacts) (dir : System.FilePath) (options : List String) : IO (Option (SourceFact × Bool)) := do
+  let some candidate := Read.challengeOf? lake | return none
+  let file := System.FilePath.mk lake.packageDir / candidate.file
+  unless ← file.pathExists do return none
+  let olean := modToFilePath dir candidate.module "olean"
+  IO.FS.createDirAll (olean.parent.getD dir)
+  let out ← IO.Process.output
+    { cmd := (← IO.appPath).toString, args := #[file.toString, "-o", olean.toString] ++ options.toArray }
+  unless out.exitCode == 0 do IO.println (out.stdout ++ out.stderr)
+  return some (candidate, out.exitCode == 0)
 
 def written (lake : LakeFacts) (file : String) (text : String) : IO Bool := do
   if (← Read.readInput lake file .build) == some text then return false
@@ -56,11 +61,18 @@ def failed (lake : LakeFacts) : IO UInt32 := do
     "The statement check" .build)
   return 1
 
-def run (lakeFile : System.FilePath) (args : List String) : IO UInt32 := do
+def run (lakeFile : System.FilePath) (options : List String) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .build
-  if args == ["failed"] then return ← failed lake
+  let dir := (lakeFile.parent.getD ".") / "statement"
+  let built ← compiled lake dir options
+  if let some (_, false) := built then return ← failed lake
   let files ← Read.fileFacts lake .build
-  let challenge ← challengeOf lake args
+  let challenge ← match built with
+    | some (candidate, _) => do
+      searchPathRef.modify (dir :: ·)
+      let imported ← Read.challengeEnv { lake with challengeCandidates := #[] } candidate.module .build
+      Read.listedChallenge lake candidate imported .build
+    | none => pure (Read.emptyChallenge .anonymous "")
   let result := SoftwareChallenge.Statement.run lake files challenge
   if result.code == 0 then
     for line in ← perform lake result.writes do IO.println line

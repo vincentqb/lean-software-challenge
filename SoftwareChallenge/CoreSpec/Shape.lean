@@ -13,7 +13,7 @@ inductive Universe where
   | imax (left right : Universe)
   | param (name : Name)
   | mvar (name : Name)
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Repr
 
 inductive Shape where
   | bvar (index : Nat)

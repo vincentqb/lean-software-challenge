@@ -17,7 +17,6 @@ inductive Standing where
   | universes (module : Name) (found : List Name)
   | differs (module : Name) (plain explicit : String)
   | auxiliary (module : Name) (constant : Name)
-  deriving BEq, Repr, Inhabited
 
 namespace Lint
 
@@ -49,7 +48,7 @@ inductive Error where
   | importsChallenge (importing : ImportLine)
   | builtinLintOn (place : Place)
   | proofUnreadable (target module : Name)
-  deriving BEq, Repr, Inhabited
+  deriving BEq, Repr
 
 inductive Pending where
   | standing (target : Name) (standing : Standing)
@@ -58,14 +57,12 @@ inductive Pending where
   | undecidedCheck (use : ClaimUse) (check : CheckFact)
   | uncheckedClaim (use : ClaimUse)
   | hiddenDependency (dependency : PackageFact)
-  deriving BEq, Repr, Inhabited
 
 structure Result where
   errors : Array Error
   pending : Array Pending
   report : Array String
   code : UInt32
-  deriving BEq, Repr, Inhabited
 
 end Lint
 

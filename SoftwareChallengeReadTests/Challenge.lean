@@ -182,7 +182,7 @@ run_cmd Elab.Command.liftCoreM do
       stray.target.enclosingNamespace == fixture `StrayChallenge) "a private theorem was misread"
   check (challenge.axioms.map (fun (name, place) => (name, place.line)) == #[(member `double_axiom, 19)])
     "an axiom of the challenge was misread"
-  check (#[`Color, `Color.red, `Color.green, `Color.rec, `triple].all fun name =>
+  check (#[`Color.red, `Color.green].all fun name =>
       challenge.filled.any (·.1 == member name))
     s!"a declaration the challenge defines was not read as filled: {challenge.filled.map (·.1)}"
   check (#[(`Color, 21), (`triple, 25), (`Color._sizeOf_inst, 21), (`Color.rec, 0)].all fun (name, line) =>

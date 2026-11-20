@@ -21,13 +21,6 @@ def challengeOf? (lake : LakeFacts) : Option SourceFact :=
   | #[candidate] => some candidate
   | _ => none
 
-def readChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do
-  let some candidate := challengeOf? lake | return emptyChallenge .anonymous ""
-  let imported ← challengeEnv lake candidate.module next
-  let challenge ← challengeFacts lake candidate imported next
-  requireChallengeCensus imported.env challenge next
-  return challenge
-
 def readOwned (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) : IO OwnedFacts := do
   if (Statement.ownedRoots lake challenge).isEmpty then return {}
   ownedFacts lake challenge.module (← ownedEnv lake challenge next) next
@@ -48,9 +41,6 @@ def readSolution (lake : LakeFacts) (challenge : ChallengeFacts) (next : Next) :
 def readListedChallenge (lake : LakeFacts) (next : Next) : IO ChallengeFacts := do
   let some candidate := challengeOf? lake | return emptyChallenge .anonymous ""
   listedChallenge lake candidate (← challengeEnv lake candidate.module next) next
-
-def readStatement (lake : LakeFacts) (next : Next) : IO (FileFacts × ChallengeFacts) :=
-  return (← fileFacts lake next, ← readListedChallenge lake next)
 
 def readFacts (lake : LakeFacts) (next : Next) : IO Facts := do
   let challenge ← readListedChallenge lake next

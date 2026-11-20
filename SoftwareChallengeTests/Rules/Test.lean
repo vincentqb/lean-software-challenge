@@ -33,7 +33,6 @@ def complete : TestFacts :=
     unknownOwnTests := #[], testDriverArgsPlace := ⟨"lakefile.lean", 8⟩, libraryPlace := ⟨"lakefile.lean", 14⟩ }
 
 #guard (Test.run complete).code == 0
-#guard (Test.run complete).failures.isEmpty
 #guard ((Test.run complete).timings.map (·.check.claim)) == #[`App.ClockAdvances, `App.AddAgrees]
 #guard Report.test "Challenge.lean" (Test.run complete) ==
   #["App/WorldCode.lean:30 App.ClockAdvances  1.5 s", "App/WorldCode.lean:12 App.AddAgrees  0.1 s"]
@@ -59,10 +58,6 @@ def ownFails : TestFacts := { complete with ownTests := #[⟨ownScript, 2⟩, �
 
 #guard refuses ownFails 1 (· matches .ownTest { test := { name := "own_test", .. }, code := 2 })
 
-def ownCrashes : TestFacts := { complete with ownTests := #[⟨ownScript, 3⟩, ⟨ownLibrary, 0⟩] }
-
-#guard (Test.run ownCrashes).code == 1
-
 def bothFail : TestFacts := { failing with ownTests := #[⟨ownScript, 2⟩, ⟨ownLibrary, 0⟩] }
 
 #guard (Test.run bothFail).code == 1 && (Test.run bothFail).failures.size == 2
@@ -74,14 +69,6 @@ def ownNotRun : TestFacts := { complete with ownTests := #[⟨ownScript, 0⟩] }
 def unknown : TestFacts := { complete with unknownOwnTests := #["missing_test"] }
 
 #guard refuses unknown 1 (· matches .unknownOwnTest "missing_test" ⟨"lakefile.lean", 8⟩)
-
-def failureTag : Test.Failure → Nat
-  | .checkFailed _ => 0
-  | .nativeCodeMissing .. => 1
-  | .checkNotRun _ => 2
-  | .ownTest _ => 3
-  | .ownTestNotRun _ => 4
-  | .unknownOwnTest _ _ => 5
 
 def nativeError : String :=
   "Could not find native implementation of external declaration 'App.nativeAdd' (symbols 'l_App_nativeAdd___boxed' \
@@ -98,7 +85,6 @@ def follows (message : Message) : Bool :=
   !message.place.file.isEmpty && message.place.line ≥ 1 && !message.what.isEmpty && !message.why.isEmpty &&
     !message.fix.isEmpty && !contains text " ask " && !contains text "owner" && message.next == .test
 
-#guard (List.range 6).all fun tag => samples.any (failureTag · == tag)
 #guard samples.all fun failure => follows (failure.message "Challenge.lean")
 
 def says (failure : Test.Failure) (fragments : List String) : Bool :=

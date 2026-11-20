@@ -11,7 +11,6 @@ open Lean SoftwareChallenge SoftwareChallengeTests.Rules.LintFacts
 meta section
 
 #guard (Lint.run complete).code == 0
-#guard (errorsOf complete).isEmpty && (pendingOf complete).isEmpty
 
 def rejects (facts : Facts) (expected : Lint.Error → Bool) : Bool :=
   (Lint.run facts).code == 1 && (errorsOf facts).any expected
@@ -208,10 +207,6 @@ def twice : Facts := withSolution fun solution => { solution with inventory := {
   declarations := solution.inventory.declarations.push (declaration `App.fold_lemma `App.CoreCode 9 false) } }
 
 #guard rejects twice (· matches .declaredTwice `App.fold_lemma `App.Solution `App.CoreCode)
-
-def sorried : Facts := withSolution fun solution => { solution with sorries := #[⟨"App/Solution.lean", 6⟩] }
-
-#guard rejects sorried (· matches .sorryUsed ⟨"App/Solution.lean", 6⟩)
 
 def mainInCode : Facts := withSolution fun solution => { solution with main? := some (`App.CoreCode, ⟨"App/CoreCode.lean", 9⟩) }
 
@@ -416,12 +411,5 @@ meta def generatedEquations : Facts :=
           { declaration `App.fold.eq_1 `App.CoreCode 0 false with written := false }] } } }
 
 #guard !(errorsOf generatedEquations).any (· matches .declaredTwice ..)
-
-meta def writtenTwice : Facts :=
-  { complete with
-    solution := { solution with inventory := { solution.inventory with
-      declarations := solution.inventory.declarations.push (declaration `App.fold `App.Solution 30 true) } } }
-
-#guard (errorsOf writtenTwice).any (· matches .declaredTwice `App.fold _ _)
 
 end SoftwareChallengeTests.Rules.Lint

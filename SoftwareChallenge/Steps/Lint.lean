@@ -44,10 +44,17 @@ def environmentLinters (lake : LakeFacts) (lakeCommand : String) (targets : List
   return builtin.exitCode == 0 || !(builtin.stderr.contains "error" ||
     shown.any fun line => line.startsWith "-- Found " || line.contains "error:")
 
-def drive (lakeFile : System.FilePath) (targets : List String) : IO UInt32 := do
+def lintTargets (lake : LakeFacts) : IO (List String) := do
+  let imported ← lake.modules.flatMapM fun source => do
+    return (← Read.importLines source.module source.file (← Read.readSource lake source.file .lint)).map (·.fact.name)
+  let (roots, others) := (lake.modules.filter (!imported.contains ·.module)).partition
+    (lake.defaultExeRoots.contains ·.module)
+  return (others ++ roots).toList.map (·.module.toString)
+
+def drive (lakeFile : System.FilePath) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .lint
   let lakeCommand := (← IO.getEnv "LAKE").getD "lake"
-  let clean ← environmentLinters lake lakeCommand targets
+  let clean ← environmentLinters lake lakeCommand (← lintTargets lake)
   let ran := (lakeFile.parent.getD ".") / "lint.ran"
   if ← ran.pathExists then IO.FS.removeFile ran
   discard <| (← IO.Process.spawn

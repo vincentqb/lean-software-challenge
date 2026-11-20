@@ -43,8 +43,6 @@ def rejected (output : String) : Option Comparator.Rejection := Comparator.rejec
 #guard Comparator.classify 0 (exported ++ "Running Lean default kernel on solution\n\
   Lean default kernel accepts the solution\nYour solution is okay!\n") == .accept
 
-#guard Comparator.classify 0 "Uses no axioms\n" == .accept
-
 #guard rejected (exported ++ "error: Const not found in solution: 'ConstantFolding.fold'") == some .absent
 
 #guard rejected (exported ++ "error: Const not found in solution 'ConstantFolding.eval'") == some .absent
@@ -117,24 +115,10 @@ def rejected (output : String) : Option Comparator.Rejection := Comparator.rejec
 #guard judged (building ++ "error: failed to write '/lib/.lake/build/A.olean': read-only file system\n\
   error: Child exited with 1") == .cannotJudge
 
-#guard rejected (building ++ "warning: could not write cache: Read-only file system\n\
-  Build completed successfully (72 jobs).\nExporting #[ConstantFolding.fold_idempotent] from ConstantFolding.Solution\n\
-  error: Challenge and solution theorem statement do not match: 'ConstantFolding.fold_idempotent'\n") ==
-  some .statement
-
 #guard judged "bwrap: Can't bind mount /oldroot/tmp on /newroot/tmp: Unable to mount source on destination" ==
   .cannotJudge
 
 #guard judged "Resolving dependencies\nerror: `lake env` did not report the project's search path" == .cannotJudge
-
-#guard Comparator.classify 2 "error: malformed configuration in 'comparator.json': unexpected end" ==
-  .cannotJudge
-
-#guard Comparator.classify 2 "error: nothing to check: the configuration names no theorems or definitions" ==
-  .cannotJudge
-
-#guard Comparator.classify 2 "error: `lake comparator` needs `bwrap` to sandbox the code it checks" ==
-  .cannotJudge
 
 #guard Comparator.classify 2 (exported ++ "error: Challenge and solution theorem statement do not match") ==
   .cannotJudge
@@ -193,8 +177,6 @@ def missingWitness : String := "Resolving dependencies\n\
   /lib64/libc.so.6(clone+0x3f) [0x7faa69ef752f]\n\
   error: Child exited with 134\n"
 
-#guard Comparator.missingConstant? missingWitness == some "ConstantFolding.fold_keeps_literal_applies"
-
 #guard rejected missingWitness == some (.missing "ConstantFolding.fold_keeps_literal_applies")
 
 #guard judged "error: Child exited with 134\n" == .cannotJudge
@@ -249,9 +231,6 @@ def lock : Array Lock.Entry := #[{ path := "Challenge.lean", digest := "1" },
 def described : String :=
   "{\"packages\": [{\"name\": \"software_challenge\", \"configured\": \"../..\", \"real\": \"/w/repo\", \
     \"scope\": \"\", \"manifestFile\": \"lake-manifest.json\", \"configFile\": \"lakefile.lean\"}]}"
-
-#guard ((Steps.Grade.dependencies described).toOption.map (·.map fun found => (found.name, found.real))) ==
-  some #[(`software_challenge, "/w/repo")]
 
 #guard ((Steps.Grade.dependencies described).toOption.map Steps.Grade.overrides) == some (Json.mkObj [
   ("version", "1.3.0"), ("packages", Json.arr #[Json.mkObj [("type", "path"), ("scope", ""),

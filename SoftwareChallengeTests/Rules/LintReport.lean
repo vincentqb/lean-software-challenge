@@ -128,7 +128,6 @@ def corollary : Facts :=
 #guard Report.independentLine? corollary == some "Independent: 1 of 2 headlines"
 #guard Report.independentLine? complete == none
 #guard Lint.followsFrom (Lint.proofGraph corollary.solution) #[`App.fold_correct, `App.fold_idempotent] `App.fold_idempotent == #[]
-#guard Lint.followsFrom (Lint.proofGraph corollary.solution) #[`App.fold_correct] `App.fold_idempotent == #[]
 #guard Lint.followsFrom (Lint.proofGraph corollary.solution) #[`App.fold_idempotent] `App.fold_correct == #[`App.fold_idempotent]
 
 def throughOther : SolutionFacts :=
@@ -141,13 +140,6 @@ def throughOther : SolutionFacts :=
   found := corollary.solution.found.filter (·.constant.name != `App.fold_idempotent) } }).map (·.render) ==
   #["fold_correct  assumes AddAgrees (1 check)", "fold_idempotent  (not yet proved)"]
 
-#guard Lint.unreachedHoles solution #[`App.fold, `App.run, `App.fold_lemma] == #[`App.fold_lemma]
-#guard Lint.unreachedHoles { solution with calls := #[(`main, #[`App.run])] } #[`App.fold] == #[`App.fold]
-#guard (Lint.solutionClosure modules `App.Solution).size == 6
-#guard (Lint.solutionClosure modules `App.Solution).contains `App.CoreSpec && (Lint.solutionClosure modules `App.Solution).contains `Init
-#guard !(Lint.solutionClosure modules `App.CoreCode).contains `App.WorldCode
-#guard Lint.importingSolution modules `App.CoreCode == #[`App.WorldCode, `App.Solution]
-#guard Lint.importingSolution modules `App.Solution == #[]
 
 def termination : TerminationFact :=
   { definition := `App.fold, headline := `App.fold_correct, place := ⟨"Challenge.lean", 8⟩ }

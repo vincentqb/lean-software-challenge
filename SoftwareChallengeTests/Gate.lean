@@ -242,9 +242,8 @@ def idle (context : Context) (dir : System.FilePath) (recorded : Recorded) : Tri
       that is idle" else "; one more build does not settle it either"
     throwThe String s!"`lake build --no-build` exited {ran.code} in {dir} right after the build that recorded \
       owned.lock, so a consumer who re-locks with `rm owned.lock && lake build` reruns {outOfDate ran} on the next \
-      build{after}. The statement step traces owned.lock, which its own first run writes: save the step's trace \
-      with the lock it records, in the softwareChallengeStatement facet of lakefile.lean (Steps.Statement after \
-      Stage C1), then run `{next}`.\n{ran.tail}"
+      build{after}. The statement step traces owned.lock, which its own first run writes: make record in \
+      lakefile.lean save the step's trace with the lock it records, then run `{next}`.\n{ran.tail}"
   for (file, before) in [("owned.lock", recorded.lock), ("comparator.json", recorded.config)] do
     unless (← IO.FS.readFile (dir / file)) == before do
       throwThe String s!"{file}: the second `lake build` in {dir} rewrote it with other bytes, so the file the \
@@ -364,8 +363,8 @@ def factsMatchGolden (context : Context) (dir : System.FilePath) : Trial Unit :=
   let diff ← runShown "git diff --no-index" context.root "git"
     #["diff", "--no-index", "--no-color", "-U1", golden.toString, fresh.toString]
   throwThe String s!"{goldenFile}:1: it differs from the facts that `SoftwareChallengeRun.lean facts` emits for the \
-    template, normalized as in {fresh} and shown in the diff below, so SoftwareChallengeTests/Matrix.lean judges facts \
-    that are not the template's. If the reader or the template changed on purpose, run `{regenerate}`, review the \
+    template, normalized as in {fresh} and shown in the diff below, so the lint report computed from the golden is \
+    not the template's. If the reader or the template changed on purpose, run `{regenerate}`, review the \
     diff of {goldenFile} and commit it alone; otherwise fix the reader. Then run `{next}`.\n\
     {"\n".intercalate ((diff.stdout.splitOn "\n").take 80)}"
 
@@ -704,11 +703,11 @@ def coversOnlyHidden (project consumer hidden : System.FilePath) : Trial Unit :=
 
 def casesModules : Array String := #["Cases.Solution", "Cases.Elsewhere", "Cases.Forged"]
 
-def modelAgrees (context : Context) (project : System.FilePath) : Trial Unit := do
+def standingsAgree (context : Context) (project : System.FilePath) : Trial Unit := do
   let runner := context.lsc / "SoftwareChallengeTests" / "Gate" / "Read.lean"
   let ran ← context.lakeIn context.lsc (#["env", "lean", "--run", runner.toString, "comparator", project.toString] ++
     casesModules)
-  succeed ran "the reader cannot read the facts of the comparator cases, so Model.comparator has nothing to judge"
+  succeed ran "the reader cannot read the facts of the comparator cases, so the standing rule has nothing to judge"
     "Fix what the output below reports in SoftwareChallenge/Read or SoftwareChallengeTests/Comparator" next
   let judged := (ran.stdout.splitOn "\n").filterMap fun line => match line.splitOn " " with
     | name :: verdict@(_ :: _) => some (name, " ".intercalate verdict)
@@ -718,10 +717,9 @@ def modelAgrees (context : Context) (project : System.FilePath) : Trial Unit := 
     let found := names.map fun name => ((judged.find? (·.1 == name)).map (·.2)).getD "no verdict"
     if found.all (· == verdictWord case.verdict) then none else some s!"{case.name}: {found}, expected {case.expected}"
   unless wrong.isEmpty do
-    throwThe String s!"SoftwareChallengeTests/Model.lean:1: Model.comparator judges the reader's facts of \
-      {project} otherwise than `lake comparator` does: {"; ".intercalate wrong}, so the matrix's comparator column, \
-      which Model.comparator computes, does not predict the comparator. Make Model.judge follow the comparator, or \
-      Shape.ofExpr and the standing rule follow ExprSimilar, then run `{next}`."
+    throwThe String s!"SoftwareChallengeTests/Gate/Read.lean:1: the standing rule judges the reader's facts of \
+      {project} otherwise than `lake comparator` does: {"; ".intercalate wrong}, so lint's standings do not predict \
+      the comparator. Make Shape.ofExpr and the standing rule follow ExprSimilar, then run `{next}`."
 
 def run (context : Context) : IO (Array Outcome) := do
   let dir := context.root / "comparator"
@@ -751,8 +749,8 @@ def run (context : Context) : IO (Array Outcome) := do
     let sandbox ← if ready?.isSome then
         check "Sandbox.covers flags only the dependency under /tmp" next (coversOnlyHidden project consumer hidden)
       else pure (skipped "Sandbox.covers flags only the dependency under /tmp" "its consumer did not build")
-    let agrees ← check "Model.comparator gives these verdicts on the reader's facts, but for the forgery and the \
-      solution that does not build, which have no facts that show why" next (modelAgrees context project)
+    let agrees ← check "the standing rule gives these verdicts on the reader's facts, but for the forgery and the \
+      solution that does not build, which have no facts that show why" next (standingsAgree context project)
     return #[setup, hiddenSetup] ++ outcomes ++ #[sandbox, agrees]
   finally
     if let some scratch := hidden.parent then
@@ -905,8 +903,7 @@ def worktreesRemoved (base : System.FilePath) : Trial Unit := do
       `{next}`.\n{listed.stdout}"
 
 def replacedJudge : List Edit := [
-  ("lakefile.lean", replacing "script lint_challenge do\n"
-    "script lint_challenge do\n  return 0\n\nscript lint_challenge_replaced do\n"),
+  ("lakefile.lean", replacing "script lint_challenge do " "script lint_challenge do return 0\n\nscript lint_replaced do "),
   ("Examples" / "ConstantFolding" / coreCodeFile, appending "\ntheorem ConstantFolding.broken : False := rfl\n")]
 
 def judgeReplacement : Grading :=

@@ -1,7 +1,7 @@
 module
 
 public meta import Lean
-public meta import SoftwareChallenge.CoreCode.Facts
+public meta import SoftwareChallenge.CoreSpec.Facts
 public meta import SoftwareChallenge.CoreCode.Rules.Statement
 public meta import SoftwareChallenge.Read.Source
 meta import all Lean.Environment

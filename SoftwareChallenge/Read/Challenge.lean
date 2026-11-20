@@ -2,7 +2,7 @@ module
 
 public meta import Lean
 public meta import SoftwareChallenge.Commands
-public meta import SoftwareChallenge.CoreCode.Facts
+public meta import SoftwareChallenge.CoreSpec.Facts
 public meta import SoftwareChallenge.Read.Source
 public meta import SoftwareChallenge.Read.Files
 public meta import SoftwareChallenge.Read.Constants
