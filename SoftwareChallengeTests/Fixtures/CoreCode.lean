@@ -87,7 +87,6 @@ theorem bundled_hidden : BothHold := ⟨rfl, rfl⟩
 
 theorem not_bundled_exists : ∃ n : Nat, n = 1 := ⟨1, rfl⟩
 
-/-- A claim outside a WorldSpec module. Declaring it here falsifies the audit. -/
 WorldClaim CoreClaim := 1 = 1
 
 end SoftwareChallengeTests.Fixtures

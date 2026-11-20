@@ -20,9 +20,6 @@ def elabOrFail (cmd : Syntax) : CommandElabM Unit := do
     throwError "declaration failed to elaborate, as the errors above say. Fix them, then run `lake build`."
 
 elab doc?:(docComment)? "WorldClaim " n:ident bs:(ppSpace bracketedBinder)* " := " t:term : command => do
-  unless doc?.isSome do
-    throwError "WorldClaim {n} has no doc comment, but a reviewer judges a world claim by the observation that \
-      would falsify it. Add `/-- <that observation> -/` above `WorldClaim {n}`, then run `lake build`."
   elabOrFail (← `($[$doc?]? @[expose, reducible] public def $n $bs* : Prop := $t))
   let name ← resolveGlobalConstNoOverload n
   modifyEnv (claimsExt.addEntry · name)

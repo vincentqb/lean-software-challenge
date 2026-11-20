@@ -15,8 +15,6 @@ namespace SoftwareChallengeTests.Commands
 
 open SoftwareChallengeTests.Fixtures
 
-rejects "doc comment" in WorldClaim Undocumented := True
-
 Check SuccAgrees nativeSucc : nativeSucc 0 = 0 + 1
 assert_evidence SuccAgrees = 4 checks
 

@@ -156,7 +156,7 @@ def pendingSays (facts : Facts) (found : Lint.Pending) (fragments : List String)
     places := solution.places.push (placeOf `App.AddAgrees "App/CoreCode.lean" 9 "AddAgrees") })
   (.claimOutsideWorldSpec `App.AddAgrees `App.CoreCode)
   ["App/CoreCode.lean:9: WorldClaim App.AddAgrees is declared in App.CoreCode (CoreCode)", "only a WorldSpec module states",
-    "Remove the `WorldClaim AddAgrees` command and its doc comment from App/CoreCode.lean"]
+    "Remove the `WorldClaim AddAgrees` command from App/CoreCode.lean"]
 #guard errorSays complete (.unregisteredClaim { registration with module := `App.CoreCode })
   ["App.CoreCode adds App.AddAgrees, declared at App/WorldSpec.lean:7, to the world claims without the \
     `WorldClaim` command", "calls `SoftwareChallenge.claimsExt.addEntry`"]
@@ -254,8 +254,7 @@ def specRaw : AxiomBlame :=
 #guard errorSays owning (.axiomUse specRaw) ["Prove App.specLemma without App.raw in App/CoreSpec.lean, " ++ relocked]
 #guard errorSays owning (.claimOutsideWorldSpec `App.SpecClaim `App.CoreSpec)
   ["App/CoreSpec.lean:13: WorldClaim App.SpecClaim is declared in App.CoreSpec (CoreSpec)",
-    "Move the `WorldClaim SpecClaim` command and its doc comment from App/CoreSpec.lean to a WorldSpec module, " ++
-      relocked]
+    "Move the `WorldClaim SpecClaim` command from App/CoreSpec.lean to a WorldSpec module, " ++ relocked]
 #guard errorSays owning (.unregisteredClaim { registration with module := `App.CoreSpec })
   ["Delete the command in App/CoreSpec.lean that calls `SoftwareChallenge.claimsExt.addEntry`, " ++ relocked]
 #guard errorSays owning (.lintWarning { warning with module := `App.CoreSpec, place := ⟨"App/CoreSpec.lean", 4⟩ })

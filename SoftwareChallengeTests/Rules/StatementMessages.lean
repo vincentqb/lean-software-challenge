@@ -276,7 +276,7 @@ end
   "App/CoreSpec.lean:6: WorldClaim App.CoreSpec.Agrees is declared in App.CoreSpec (CoreSpec)"
 
 #guard mentions (renderedIn (.ownedClaim (claimIn `App.CoreSpec (some `App.CoreSpec))) ownedClaimOutside)
-  "Move the `WorldClaim Agrees` command and its doc comment from App/CoreSpec.lean to a WorldSpec module"
+  "Move the `WorldClaim Agrees` command from App/CoreSpec.lean to a WorldSpec module"
 
 #guard mentions (renderedIn (.ownedClaim (claimIn `App.WorldSpec (some `Other))) ownedClaimUnregistered worldLake)
   "App.WorldSpec adds App.WorldSpec.Agrees to the world claims without the `WorldClaim` command"

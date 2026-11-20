@@ -486,8 +486,8 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
       { place := placeOf challenge headline
         what := s!"{headline} assumes {shownHypothesis}, which is not a WorldClaim"
         why := s!"so no Check tests it, and a false assumption would make {headline} vacuous"
-        fix := s!"Declare it in a WorldSpec module as `WorldClaim Name := {hypothesis.shown}`, with a doc comment, and \
-          assume that instead, or remove it from {headline}, and {relock}"
+        fix := s!"Declare it in a WorldSpec module as `WorldClaim Name := {hypothesis.shown}`, and assume that \
+          instead, or remove it from {headline}, and {relock}"
         next := .build }
   | .privateAuxiliary headline auxiliary =>
     { place := placeOf challenge headline
@@ -539,8 +539,8 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
           {roleSuffix (lake.project.role? registration.module)}"
         why := s!"but a world claim is an assumption about the world, which only a WorldSpec module states, and \
           {ownerOnly registration.module}"
-        fix := s!"Move the `WorldClaim {claimWritten registration.claim}` command and its doc comment from {file} to a \
-          WorldSpec module, and {relock}"
+        fix := s!"Move the `WorldClaim {claimWritten registration.claim}` command from {file} to a WorldSpec module, \
+          and {relock}"
         next := .build }
   | .derivedPartial declaration module =>
     { place := ownedPlace lake challenge module declaration

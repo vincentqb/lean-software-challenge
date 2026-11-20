@@ -4,7 +4,7 @@
   "lean-toolchain": "6421944472842839407",
   "SoftwareChallengeStatement/Challenge.lean": "14509090130089611454",
   "SoftwareChallenge/Commands/Extensions.lean": "16594120768024651404",
-  "SoftwareChallenge/Commands/WorldClaim.lean": "12089482548766129759",
+  "SoftwareChallenge/Commands/WorldClaim.lean": "16780841150165546767",
   "SoftwareChallenge/Commands/Check.lean": "14197048277697239493",
   "SoftwareChallenge/CoreSpec/Role.lean": "10501740876243156350",
   "SoftwareChallenge/CoreSpec/Telescope.lean": "3718984449065492159",

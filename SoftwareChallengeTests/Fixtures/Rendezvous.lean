@@ -20,7 +20,6 @@ def meet (mine theirs : String) : IO Unit := do
     IO.sleep 100
     waited := waited + 100
 
-/-- Two Checks of this claim meet while both run. A Check that waits alone for 20 s falsifies it. -/
 WorldClaim Meets := True
 
 Check Meets := meet "first" "second"

@@ -596,7 +596,7 @@ def Error.message (facts : Facts) : Error → Message
         fix, next := .lint }
       fix
   | .claimOutsideWorldSpec claim module =>
-    let command := s!"the `WorldClaim {writtenOf facts module claim}` command and its doc comment"
+    let command := s!"the `WorldClaim {writtenOf facts module claim}` command"
     withOwner (ownedModule? facts module)
       { place := declarationPlace facts module claim
         what := s!"WorldClaim {claim} is declared in {located facts module}"
