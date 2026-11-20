@@ -102,6 +102,7 @@ structure Context where
   base : FilePath
   candidate : String
   again : String
+  amended : String
   baseRef : String
   fixRef : String
   checkoutFix : String
@@ -260,9 +261,9 @@ def stepStage (context : Context) (checkout : FilePath) (stage : Stage) (step : 
   | 0 => return
   | 3 => stop stage .cannotJudge s!"cannot judge: `{stage.command}` stopped in {checkout} before judging, as printed \
       above, so grade cannot tell whether {context.candidate} is right. Run `{stage.command}` in a checkout of \
-      {context.candidate} to see the cause, fix it there, {context.again}."
+      {context.candidate} to see the cause, fix it there, {context.amended}."
   | _ => stop stage .refuse s!"refused: `{stage.command}` fails on {context.candidate}, as printed above. Fix each \
-      problem it reports in {context.candidate} as it says, {context.again}."
+      problem it reports in {context.candidate} as it says, {context.amended}."
 
 def comparator (context : Context) (checkout : FilePath) (config : String) : IO IO.Process.Output := do
   IO.FS.writeFile context.configFile config
@@ -326,6 +327,8 @@ def grade (candidate : String) : IO UInt32 := do
   let context : Context := {
     lake := (← IO.getEnv "LAKE").getD "lake", base, candidate, baseRef, fixRef, checkoutFix
     again := s!"then run `lake exe grade {candidate}`"
+    amended := if isBranch then s!"then run `lake exe grade {candidate}`"
+      else s!"commit the fix on a branch (`{checkoutFix}`), then run `lake exe grade {fixRef}`"
     merge := s!"merge {baseRef} into {fixRef} (`{checkoutFix} && git merge {baseRef} && git checkout {baseRef}`), \
       then run `lake exe grade {fixRef}`"
     stamp := s!"{← IO.monoNanosNow}-{← IO.Process.getPID}" }
