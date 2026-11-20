@@ -1,4 +1,5 @@
 import Lake
+import Lake.Load.Manifest
 open Lean Lake DSL
 
 package «software_challenge» where
@@ -40,11 +41,6 @@ lean_exe «lsc-gate» where root := `SoftwareChallengeTests.Gate
 @[default_target]
 target statement pkg : Unit := do return (← pkg.fetchFacetJob `softwareChallengeStatement).map (fun _ => ())
 
-def overriddenPackages (file : System.FilePath) : IO (Array String) := do
-  unless ← file.pathExists do return #[]
-  let entries := ((Json.parse (← IO.FS.readFile file)).bind (·.getObjValAs? (Array Json) "packages")).toOption.getD #[]
-  return entries.filterMap fun entry => (entry.getObjValAs? String "name").toOption
-
 structure Prepared where
   text : String
   inputs : Array String
@@ -73,10 +69,10 @@ def prepare (pkg : Package) (testArgs : Array String) : FetchM Prepared := do
   let inputs := (configs ++ (challenge?.toArray ++ owned).map (·.relLeanFile.toString) ++
     #["owned.lock", "comparator.json"]).toList.eraseDups.toArray
   let dir ← IO.FS.realPath pkg.dir
-  let overridden ← overriddenPackages (← getWorkspace).packageOverridesFile
+  let overridden ← Manifest.tryLoadEntries (← getWorkspace).packageOverridesFile
   let packages ← ((← getWorkspace).packages.filter (!·.isRoot)).mapM fun dep => do
     return Json.mkObj [("name", toJson dep.baseName), ("configured", (dir / dep.relDir).toString),
-      ("real", (← IO.FS.realPath dep.dir).toString), ("overridden", overridden.contains dep.baseName.toString),
+      ("real", (← IO.FS.realPath dep.dir).toString), ("overridden", overridden.any (·.name == dep.baseName)),
       ("scope", dep.scope), ("manifestFile", dep.relManifestFile.toString),
       ("configFile", dep.relConfigFile.toString)]
   let source := fun (mod : Lake.Module) => Json.mkObj [("module", toJson mod.name), ("file", mod.relLeanFile.toString)]
