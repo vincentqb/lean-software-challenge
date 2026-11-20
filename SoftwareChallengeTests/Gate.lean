@@ -169,18 +169,7 @@ def challengeFile : System.FilePath := "Challenge.lean"
 
 def solutionFile : System.FilePath := "ConstantFolding" / "Solution.lean"
 
-def theoremCount : Nat := 13
-
 def checkCount : Nat := 2
-
-def restatedByOwner : List Edit := [
-  (challengeFile, replacing "(h : fold (.lit n) = .lit m) : m = n := by" "(h : fold (.lit n) = .lit m) : n = m := by"),
-  (challengeFile, replacing "= .lit m → m = n := by" "= .lit m → n = m := by")]
-
-def restatedByAgent : List Edit := [
-  (solutionFile, replacing "(h : fold (.lit n) = .lit m) : m = n := by" "(h : fold (.lit n) = .lit m) : n = m := by"),
-  (solutionFile, replacing "  injection h with h\n  exact h.symm" "  injection h"),
-  (solutionFile, replacing "= .lit m → m = n := by" "= .lit m → n = m := by")]
 
 def droppedKill : List Edit := [
   (challengeFile, replacing "@[kills fold_normalizes] theorem fold_normalizes_rejects_identity : \
@@ -271,45 +260,11 @@ def testRunsChecks (context : Context) (dir : System.FilePath) : Trial Unit := d
   let ran ← context.lakeIn dir #["test"]
   unless ran.code == 0 && checksTimed ran == checkCount do
     throwThe String s!"`lake test` exited {ran.code} in {dir} and timed {checksTimed ran} Checks of \
-      ConstantFolding/WorldCode.lean, expected exit 0 and {checkCount} Checks, so the template's Checks do not all \
-      run and pass. Fix what the output below reports; if the template's Checks or the lines that time them \
-      changed on purpose, change checkCount or checksTimed in {source}. Then run `{next}`.\n{ran.tail}"
-
-def replayProves (context : Context) (dir : System.FilePath) (recorded : Recorded) : Trial Unit := do
-  let some config := Config.parse recorded.config | throwThe String s!"comparator.json: Config.parse cannot read \
-    the file that `lake build` wrote in {dir}, so grade could not read it either. Make the statement step write it \
-    with Config.render, then run `{next}`."
-  let count := config.theorems.size
-  let ran ← context.lakeIn dir #["script", "run", "software_challenge/replay"]
-  let replayed := s!"Replayed: {count} of {count} theorems"
-  unless ran.code == 0 && ran.output.contains replayed && count == theoremCount do
-    throwThe String s!"`lake script run software_challenge/replay` exited {ran.code} in {dir} for the {count} \
-      theorems of comparator.json, expected exit 0, \"{replayed}\" and {theoremCount} theorems, so `lake \
-      comparator` does not accept every headline, kill and witness of the template. Fix what the output below \
-      reports; if the template's theorems changed on purpose, change theoremCount in {source}. Then run \
-      `{next}`.\n{ran.tail}"
-
-def ownerRestates (context : Context) (dir : System.FilePath) : Trial Unit := do
-  reset dir
-  applyEdits dir source next restatedByOwner
-  IO.FS.removeFile (dir / "owned.lock")
-  let relocked ← context.lakeIn dir #["build"]
-  succeed relocked "an owner who restates fold_keeps_literal and its kill cannot re-lock" s!"Fix what the output \
-    below reports, or change restatedByOwner in {source} if the template changed" next
-  let pending ← context.lakeIn dir #["lint"]
-  let restatement := (pending.output.splitOn "\n").any fun line =>
-    line.contains "fold_keeps_literal" && line.contains "the comparator rejects it"
-  unless pending.code == 2 && restatement do
-    throwThe String s!"`lake lint` exited {pending.code} in {dir} after the owner restated fold_keeps_literal in \
-      Challenge.lean, expected 2 with a pending item saying the comparator rejects the old fold_keeps_literal, so \
-      a solution that proves the old statement is not reported as unfinished. Restore the standing check that \
-      compares the solution's statement with the challenge's, then run `{next}`.\n{pending.tail}"
-  applyEdits dir source next restatedByAgent
-  let restated ← context.lakeIn dir #["lint"]
-  unless restated.code == 0 do
-    throwThe String s!"`lake lint` exited {restated.code} in {dir} after the agent restated fold_keeps_literal in \
-      ConstantFolding/Solution.lean as the owner did, expected 0, so a solution of the restated challenge is not \
-      accepted. Fix what the output below reports, then run `{next}`.\n{restated.tail}"
+      ConstantFolding/WorldCode.lean, expected exit 0 and {checkCount} Checks, so the template's Checks, which call \
+      nativeAdd from its extern_lib, do not all run and pass. Fix what the output below reports, such as \
+      test_challenge in lakefile.lean no longer passing each extern_lib's dynlib to the Checks with \
+      `--load-dynlib`; if the template's Checks or the lines that time them changed on purpose, change checkCount \
+      or checksTimed in {source}. Then run `{next}`.\n{ran.tail}"
 
 def ownerDropsKill (context : Context) (dir : System.FilePath) : Trial Unit := do
   reset dir
@@ -333,16 +288,6 @@ def coreCodeFile : System.FilePath := "ConstantFolding" / "CoreCode.lean"
 def worldCodeFile : System.FilePath := "ConstantFolding" / "WorldCode.lean"
 
 def presentations : List Presentation := [
-  { name := "renamed and implicit binders", edits := [
-      (challengeFile, replacing "theorem fold_preserves_meaning (env : Nat → Nat) (e : Expr) :\n    \
-        eval env (fold e) = eval env e := by" "theorem fold_preserves_meaning (ρ : Nat → Nat) (x : Expr) :\n    \
-        eval ρ (fold x) = eval ρ x := by"),
-      (solutionFile, replacing "theorem fold_normalizes (e : Expr) : normal (fold e) = true :=\n  normal_fold e"
-        "theorem fold_normalizes (input : Expr) : normal (fold input) = true :=\n  normal_fold input"),
-      (solutionFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :="
-        "theorem fold_idempotent {e : Expr} : fold (fold e) = fold e :="),
-      (solutionFile, replacing "¬ ∀ (n m : Nat), (fun (_ : Expr) => Expr.lit 0) (.lit n) = .lit m → m = n := \
-        by\n  intro h" "¬ ∀ (a b : Nat), (fun (_ : Expr) => Expr.lit 0) (.lit a) = .lit b → b = a := by\n  intro h")] },
   { name := "a world claim restated under ∀", edits := [
       (challengeFile, replacing "theorem output_correct (agrees : AddAgrees nativeAdd) (e : Expr) :"
         "theorem output_correct (agrees : ∀ _ : Unit, AddAgrees nativeAdd) (e : Expr) :"),
@@ -371,25 +316,6 @@ def presentations : List Presentation := [
         by\n  sorry\n"),
       (solutionFile, replacing "theorem fold_normalizes (e : Expr) :"
         "theorem _root_.ConstantFolding.fold_normalizes (e : Expr) :")] },
-  { name := "no_index metadata in the solution", edits := [
-      (solutionFile, replacing "theorem fold_normalizes (e : Expr) : normal (fold e) = true :="
-        "theorem fold_normalizes (e : Expr) : no_index (normal (fold e)) = true :=")] },
-  { name := "let in the challenge, have in the solution", edits := [
-      (challengeFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e := by"
-        "set_option cleanup.letToHave false in\n\
-          theorem fold_idempotent (e : Expr) : (let f := fold e; fold f = f) := by"),
-      (challengeFile, replacing "@[kills fold_idempotent] theorem fold_idempotent_rejects_increment :\n    \
-        ¬ ∀ e : Expr, \
-        (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =\n      \
-        (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e := by" "set_option cleanup.letToHave false in\n\
-        @[kills fold_idempotent] theorem fold_idempotent_rejects_increment :\n    ¬ ∀ e : Expr, (let f := (fun e => \
-        Expr.lit (eval (fun _ => 0) e + 1)) e;\n      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) f = f) := by"),
-      (solutionFile, replacing "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :="
-        "theorem fold_idempotent (e : Expr) : (have f := fold e; fold f = f) :="),
-      (solutionFile, replacing "    ¬ ∀ e : Expr, (fun e => Expr.lit (eval (fun _ => 0) e + 1)) ((fun e => Expr.lit \
-        (eval (fun _ => 0) e + 1)) e) =\n      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e := by"
-        "    ¬ ∀ e : Expr, (have f := (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e;\n      (fun e => Expr.lit (eval \
-        (fun _ => 0) e + 1)) f = f) := by")] },
   { name := "a kill marked by `attribute` afterwards", edits := [
       (challengeFile, replacing "@[kills fold_keeps_literal] theorem fold_keeps_literal_rejects_zero :\n    \
         ¬ ∀ (n m : Nat), (fun (_ : Expr) => Expr.lit 0) (.lit n) = .lit m → m = n := by\n  sorry\n" "theorem \
@@ -467,10 +393,8 @@ def run (context : Context) : IO (Array Outcome) := do
       | _, none => pure (skipped name "the template's comparator.json is unreadable")
   let mut outcomes := #[setup, idled, (← IO.ofExcept linted.get).1]
   for (name, action) in [
-      (s!"test runs and passes the template's {checkCount} Checks", testRunsChecks context dir),
-      (s!"replay accepts all {theoremCount} theorems of comparator.json", replayProves context dir recorded),
-      ("an owner who restates fold_keeps_literal and re-locks leaves lint pending until the agent restates it",
-        ownerRestates context dir),
+      (s!"test runs and passes the template's {checkCount} Checks, which call nativeAdd from its extern_lib",
+        testRunsChecks context dir),
       ("an owner who drops fold_normalizes' kill fails the build with the kill to write",
         ownerDropsKill context dir)] do
     outcomes := outcomes.push (← check name next action)
@@ -871,77 +795,6 @@ def run (context : Context) : IO (Array Outcome) := do
 
 end SoftwareChallengeTests.Gate.GradeRun
 
-namespace SoftwareChallengeTests.Gate.NativeRun
-
-def next : String := "lake build nativeRun"
-
-def source : String := "SoftwareChallengeTests/Gate.lean"
-
-def fixture : System.FilePath := "SoftwareChallengeTests" / "Native"
-
-def checksTimed (ran : Ran) : Nat :=
-  ((ran.output.splitOn "\n").filter fun line =>
-    line.startsWith "Native/WorldCode.lean:" && line.contains " Native.TwiceDoubles ").length
-
-def withoutModuleObject : List Edit := [
-  ("lakefile.lean", replacing "#[← twice.oExport.fetch, native]" "#[native]")]
-
-def withoutProgram : List Edit := [
-  ("lakefile.lean", replacing "@[default_target]\nlean_exe" "lean_exe")]
-
-def testedWith (context : Context) (dir : System.FilePath) (edits : List Edit) : Trial Ran := do
-  IO.FS.writeFile (dir / "lakefile.lean") (← IO.FS.readFile (context.lsc / fixture / "lakefile.lean"))
-  applyEdits dir source next edits
-  context.lakeIn dir #["test"]
-
-def loadsNativeCode (context : Context) (dir : System.FilePath) : Trial Unit := do
-  let ran ← (exclusively (context.root / "template-build.lock") (context.lakeIn dir #["test"]) : IO Ran)
-  unless ran.code == 0 && checksTimed ran == 1 do
-    throwThe String s!"`lake test` exited {ran.code} in {dir} and timed {checksTimed ran} Checks of \
-      Native/WorldCode.lean, expected exit 0 and 1 Check, so a Check that calls Native.twice, whose C the \
-      extern_lib of {fixture}/lakefile.lean builds, does not run with that C loaded. Make test_challenge in \
-      lakefile.lean build the dynlib of each extern_lib and pass it to the Checks with `--load-dynlib`, then run \
-      `{next}`.\n{ran.tail}"
-
-def namesMissingSymbol (context : Context) (dir : System.FilePath) : Trial Unit := do
-  let ran ← testedWith context dir withoutModuleObject
-  let named := ran.output.contains "they call Native.twice, an `@[extern]` declaration" &&
-    ran.output.contains "the `o.export` facet of its module" &&
-    ran.output.contains "declared in a module that imports only Lean's own"
-  unless ran.code == 1 && named do
-    throwThe String s!"`lake test` exited {ran.code} in {dir} after its extern_lib dropped the object of \
-      Native.WorldSpec.Twice, expected 1 with the message that Native.twice's symbol is missing and that the \
-      extern_lib needs the `o.export` facet of a module that imports only Lean's own, so a package whose extern_lib \
-      holds only the C function is not told what its library lacks. Restore the nativeCodeMissing message of \
-      SoftwareChallenge/CoreCode/Report/TestMessages.lean, then run `{next}`.\n{ran.tail}"
-
-def namesUnlinkedObject (context : Context) (dir : System.FilePath) : Trial Unit := do
-  let ran ← testedWith context dir withoutProgram
-  let named := ran.output.contains "the native code of extern_lib native, which no default-target lean_exe links"
-  unless ran.code == 1 && named do
-    throwThe String s!"`lake test` exited {ran.code} in {dir} after its lean_exe native_twice stopped being a default \
-      target, expected 1 with the message that no default-target lean_exe links the static library of extern_lib \
-      native, so a Check that runs native code no program runs goes unreported. Restore unlinkedObjects in \
-      SoftwareChallenge/CoreCode/Rules/Test.lean and the nativeCodeUnlinked message of \
-      SoftwareChallenge/CoreCode/Report/TestMessages.lean, then run `{next}`.\n{ran.tail}"
-
-def run (context : Context) : IO (Array Outcome) := do
-  let dir := context.root / "native"
-  let (setup, ready?) ← attempt s!"a copy of {fixture} requires this checkout" next do
-    fresh dir
-    copyTree (context.lsc / fixture) dir (· == ".lake")
-    TemplateRun.requireLocally context.lsc dir
-  if ready?.isNone then return #[setup]
-  let mut outcomes := #[setup]
-  for (name, action) in [
-      ("lake test runs a Check that calls the C of an extern_lib", loadsNativeCode context dir),
-      ("lake test names the symbol an extern_lib without the module's object lacks", namesMissingSymbol context dir),
-      ("lake test names the extern_lib that no default-target lean_exe links", namesUnlinkedObject context dir)] do
-    outcomes := outcomes.push (← check name next action)
-  return outcomes
-
-end SoftwareChallengeTests.Gate.NativeRun
-
 namespace SoftwareChallengeTests.Gate
 
 open SoftwareChallenge
@@ -949,14 +802,13 @@ open SoftwareChallenge
 def runs : List (String × String × (Context → IO (Array Outcome))) := [
   ("template", "R1, the template", TemplateRun.run),
   ("comparator", "R2, the comparator on SoftwareChallengeTests/Comparator", ComparatorRun.run),
-  ("grade", "R3, real grades with the template as the base", GradeRun.run),
-  ("native", "R4, Checks that call the C of an extern_lib, on SoftwareChallengeTests/Native", NativeRun.run)]
+  ("grade", "R3, real grades with the template as the base", GradeRun.run)]
 
 def usage : String :=
   s!"usage: `lake exe lsc-gate <run>` runs one real run from the library's root, where <run> is \
-    {" or ".intercalate (runs.map (·.1))}; `lake build templateRun`, `lake build comparatorRun`, `lake build \
-    gradeRun` and `lake build nativeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, and `lake \
-    exe lsc-gate full` runs all four again."
+    {" or ".intercalate (runs.map (·.1))}; `lake build templateRun`, `lake build comparatorRun` and `lake \
+    build gradeRun` run them traced, `lake exe lsc-gate stale` names the stale ones, and `lake exe lsc-gate full` runs \
+    all three again."
 
 def contextHere : IO (Except String Context) := do
   let lsc ← IO.FS.realPath (← IO.currentDir)

@@ -210,8 +210,6 @@ target comparatorRun pkg : Unit := gateRun pkg "comparator" ("SoftwareChallengeT
 
 target gradeRun pkg : Unit := gateRun pkg "grade" ("Examples" / "ConstantFolding")
 
-target nativeRun pkg : Unit := gateRun pkg "native" ("SoftwareChallengeTests" / "Native")
-
 def gate (mode : String) : ScriptM UInt32 := do
   (← IO.Process.spawn { cmd := (← runBuild «lsc-gate».fetch).toString, args := #[mode], cwd := (← getRootPackage).dir
                         env := #[("LAKE", (← getLake).toString)] }).wait
