@@ -1,3 +1,3 @@
 module
 
-public meta import SoftwareChallenge.Commands
+public meta import SoftwareChallenge.Attributes
