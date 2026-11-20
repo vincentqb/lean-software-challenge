@@ -54,15 +54,20 @@ theorem undeclaredOwnTests_eq_empty_iff (facts : TestFacts) :
     undeclaredOwnTests facts = #[] ↔ facts.unknownOwnTests = #[] := by
   simp [undeclaredOwnTests]
 
+theorem unlinkedObjects_eq_empty_iff (facts : TestFacts) :
+    unlinkedObjects facts = #[] ↔ ∀ object ∈ facts.loadedObjects, object.file ∈ facts.linkedObjects :=
+  filterMap_ite_eq_empty
+
 theorem failuresOf_eq_empty_iff (facts : TestFacts) : failuresOf facts = #[] ↔ Test.Complete facts := by
   simp only [failuresOf, Array.append_eq_empty_iff, failedChecks_eq_empty_iff, checksNotRun_eq_empty_iff,
-    failedOwnTests_eq_empty_iff, ownTestsNotRun_eq_empty_iff, undeclaredOwnTests_eq_empty_iff]
+    failedOwnTests_eq_empty_iff, ownTestsNotRun_eq_empty_iff, undeclaredOwnTests_eq_empty_iff,
+    unlinkedObjects_eq_empty_iff]
   constructor
-  · rintro ⟨⟨⟨⟨passed, run⟩, ownPassed⟩, ownRun⟩, declared⟩
-    exact ⟨run, passed, ownRun, ownPassed, declared⟩
+  · rintro ⟨⟨⟨⟨⟨passed, run⟩, ownPassed⟩, ownRun⟩, declared⟩, linked⟩
+    exact ⟨run, passed, ownRun, ownPassed, declared, linked⟩
   · intro complete
-    exact ⟨⟨⟨⟨complete.checksPass, complete.checksRun⟩, complete.ownTestsPass⟩, complete.ownTestsRun⟩,
-      complete.ownTestsDeclared⟩
+    exact ⟨⟨⟨⟨⟨complete.checksPass, complete.checksRun⟩, complete.ownTestsPass⟩, complete.ownTestsRun⟩,
+      complete.ownTestsDeclared⟩, complete.loadedObjectsLinked⟩
 
 theorem code_eq_zero_iff (failures : Array Failure) : code failures = 0 ↔ failures = #[] := by
   unfold code
@@ -91,7 +96,8 @@ theorem Test.run_code_ne_zero_iff (facts : TestFacts) :
 
 private def passingTests : TestFacts :=
   { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[],
-    testDriverArgsPlace := ⟨"lakefile.lean", 1⟩, libraryPlace := ⟨"lakefile.lean", 1⟩ }
+    loadedObjects := #[], linkedObjects := #[], testDriverArgsPlace := ⟨"lakefile.lean", 1⟩,
+    libraryPlace := ⟨"lakefile.lean", 1⟩ }
 
 private def unknownTest : TestFacts := { passingTests with unknownOwnTests := #["own"] }
 
@@ -101,6 +107,7 @@ private theorem passingTests_complete : Test.Complete passingTests where
   ownTestsRun := by simp [passingTests]
   ownTestsPass := by simp [passingTests]
   ownTestsDeclared := rfl
+  loadedObjectsLinked := by simp [passingTests]
 
 theorem Test.run_code_eq_zero_iff_rejects_accepting :
     ¬ ∀ (facts : TestFacts),

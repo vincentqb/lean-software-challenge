@@ -13,7 +13,8 @@ namespace SoftwareChallenge.Steps
 
 def usage : String :=
   "usage: `lean --run SoftwareChallengeRun.lean <step> <lake.json>`, where <step> is statement, lint, test, replay, \
-    facts or drive; the lakefile of software_challenge runs it from `lake build`, `lake lint` and `lake test`."
+    facts or drive, and test also takes <native.json>; the lakefile of software_challenge runs it from `lake build`, \
+    `lake lint` and `lake test`."
 
 def dispatch (step : String) (lakeFile : System.FilePath) (args : List String) : IO UInt32 :=
   match step, args with
@@ -22,7 +23,7 @@ def dispatch (step : String) (lakeFile : System.FilePath) (args : List String) :
   | "lint", ["importers"] => Lint.importers lakeFile
   | "lint", _ => Lint.run lakeFile
   | "drive", _ => Lint.drive lakeFile
-  | "test", loads => Test.run lakeFile loads.toArray
+  | "test", [nativeFile] => Test.run lakeFile nativeFile
   | "replay", _ => Replay.run lakeFile
   | "facts", _ => Facts.run lakeFile
   | _, _ => do IO.eprintln usage; return 3

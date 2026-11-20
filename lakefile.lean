@@ -172,12 +172,22 @@ def spawnStep (step : String) (testArgs : Array String) (args : Array String := 
 
 script lint_challenge do spawnStep "drive" (← getRootPackage).testDriverArgs
 
-def loadDynlibs (pkg : Package) : FetchM (Job (Array String)) := do
-  return (Job.collectArray (← pkg.externLibs.mapM (·.dynlib.fetch))).map (·.map (s!"--load-dynlib={·.path}"))
+def nativeFacts (pkg : Package) : FetchM (Job Json) := do
+  let loaded ← pkg.externLibs.mapM fun lib => do
+    return (← lib.dynlib.fetch).zipWith (fun dynlib static => Json.mkObj [
+      ("library", lib.name.toString (escape := false)), ("dynlib", dynlib.path.toString),
+      ("objects", toJson #[static.toString])]) (← lib.static.fetch)
+  let linked ← (pkg.leanExes.filter (pkg.defaultTargets.contains ·.name)).mapM fun exe =>
+    if exe.supportInterpreter then exe.root.linkInfoExport.fetch else exe.root.linkInfoNoExport.fetch
+  return (Job.collectArray loaded).zipWith (fun loaded links => Json.mkObj [("loaded", toJson loaded),
+    ("linked", toJson (links.flatMap (·.objs.map (·.toString))))]) (Job.collectArray linked)
 
 script test_challenge (args) do
-  let loads ← runBuild (loadDynlibs (← getRootPackage))
-  spawnStep "test" args.toArray loads
+  let pkg ← getRootPackage
+  let native ← runBuild (nativeFacts pkg)
+  IO.FS.createDirAll (stepDir pkg)
+  IO.FS.writeFile (stepDir pkg / "native.json") native.pretty
+  spawnStep "test" args.toArray #[(stepDir pkg / "native.json").toString]
 
 script replay do spawnStep "replay" (← getRootPackage).testDriverArgs
 

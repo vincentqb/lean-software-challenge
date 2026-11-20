@@ -51,8 +51,13 @@ def ownTestsNotRun (facts : TestFacts) : Array Failure :=
 def undeclaredOwnTests (facts : TestFacts) : Array Failure :=
   facts.unknownOwnTests.map fun name => .unknownOwnTest name facts.testDriverArgsPlace
 
+def unlinkedObjects (facts : TestFacts) : Array Failure :=
+  facts.loadedObjects.filterMap fun object =>
+    if object.file ∈ facts.linkedObjects then none else some (.nativeCodeUnlinked object)
+
 def failuresOf (facts : TestFacts) : Array Failure :=
-  failedChecks facts ++ checksNotRun facts ++ failedOwnTests facts ++ ownTestsNotRun facts ++ undeclaredOwnTests facts
+  failedChecks facts ++ checksNotRun facts ++ failedOwnTests facts ++ ownTestsNotRun facts ++
+    undeclaredOwnTests facts ++ unlinkedObjects facts
 
 def code (failures : Array Failure) : UInt32 :=
   if failures.isEmpty then 0 else 1

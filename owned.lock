@@ -1,5 +1,5 @@
 {
-  "lakefile.lean": "6307480366301673905",
+  "lakefile.lean": "16219686156718471845",
   "lake-manifest.json": "7994980052932455075",
   "lean-toolchain": "14208040065456890848",
   "SoftwareChallengeStatement/Challenge.lean": "6270303150396533162",
@@ -15,12 +15,12 @@
   "SoftwareChallenge/CoreSpec/Package.lean": "535658611165304708",
   "SoftwareChallenge/CoreSpec/Shape.lean": "11047625928083142431",
   "SoftwareChallenge/CoreSpec/Format.lean": "7274218307632563844",
-  "SoftwareChallenge/CoreSpec/Facts.lean": "18391554659752358464",
+  "SoftwareChallenge/CoreSpec/Facts.lean": "2350541044648752870",
   "SoftwareChallenge/CoreSpec/Witness.lean": "1090745620840651198",
   "SoftwareChallenge/CoreSpec/Statement.lean": "10594890855157059150",
   "SoftwareChallenge/CoreSpec/Graph.lean": "4233496271491041866",
   "SoftwareChallenge/CoreSpec/Expr.lean": "11251135936227902779",
   "SoftwareChallenge/CoreSpec/Grade.lean": "12822711151217089458",
   "SoftwareChallenge/CoreSpec/Lint.lean": "432019767944117060",
-  "SoftwareChallenge/CoreSpec/Test.lean": "16629902123972770033"
+  "SoftwareChallenge/CoreSpec/Test.lean": "9866973512445938162"
 }

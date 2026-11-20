@@ -72,28 +72,37 @@ def crashed (ran : Checks.Ran) (output : IO.Process.Output) : Checks.Ran :=
     { ran with outcomes := ran.declared.map fun check => { check, elapsed := 0, error? := some line } }
   | _, _ => ran
 
-def libraryPlace (lake : LakeFacts) : IO Place := do
-  let some file := lake.configFiles[0]? | return ⟨"lakefile.lean", 1⟩
-  let lines := ((← Read.readInput lake file .test).getD "").splitOn "\n"
-  return { file, line := ((lines.findIdx? (·.contains "lean_lib")).map (· + 1)).getD 1 }
+def configFile (lake : LakeFacts) : String :=
+  lake.configFiles[0]?.getD "lakefile.lean"
 
-def run (lakeFile : System.FilePath) (loads : Array String) : IO UInt32 := do
+def configText (lake : LakeFacts) : IO String := do
+  let some file := lake.configFiles[0]? | return ""
+  return (← Read.readInput lake file .test).getD ""
+
+def libraryPlace (lake : LakeFacts) (config : String) : Place :=
+  { file := configFile lake, line := (((config.splitOn "\n").findIdx? (·.contains "lean_lib")).map (· + 1)).getD 1 }
+
+def run (lakeFile nativeFile : System.FilePath) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .test
+  let native ← Read.loadNative nativeFile
   let dir := lakeFile.parent.getD "."
-  let (ran?, output) ← runChecks lake loads dir
+  let (ran?, output) ← runChecks lake (native.loaded.map (s!"--load-dynlib={·.dynlib}")) dir
   unless ran?.any (·.finished) do
     IO.print output.stdout
     IO.eprint output.stderr
   let some ran := ran?.map (crashed · output) | do IO.eprintln (unrun dir); return 1
   let ownTests ← lake.ownTests.mapM (runOwnTest lake)
+  let config ← configText lake
   let result := SoftwareChallenge.Test.run {
     declaredChecks := ran.declared
     checks := ran.outcomes
     declaredOwnTests := lake.ownTests
     ownTests
     unknownOwnTests := lake.testDriverArgs.filter fun name => !lake.ownTests.any (·.name == name)
+    loadedObjects := native.objects config (configFile lake)
+    linkedObjects := native.linked
     testDriverArgsPlace := lake.testDriverArgsPlace
-    libraryPlace := ← libraryPlace lake }
+    libraryPlace := libraryPlace lake config }
   let challengeFile := ((Read.challengeOf? lake).map (·.file)).getD "Challenge.lean"
   for line in Report.test challengeFile result do IO.println line
   return result.code

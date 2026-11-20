@@ -131,8 +131,8 @@ run_cmd do
 
 run_cmd do
   covered ``SoftwareChallenge.Test.Failure ([Rules.Test.failing, Rules.Test.notRun, Rules.Test.movedCheck,
-      Rules.Test.ownFails, Rules.Test.ownNotRun, Rules.Test.unknown, Rules.Test.nativeMissing].flatMap fun facts =>
-        (SoftwareChallenge.Test.run facts).failures.toList.map (·.ctorIdx))
+      Rules.Test.ownFails, Rules.Test.ownNotRun, Rules.Test.unknown, Rules.Test.nativeMissing,
+      Rules.Test.unlinked].flatMap fun facts => (SoftwareChallenge.Test.run facts).failures.toList.map (·.ctorIdx))
     "TestFacts value that Test.run rejects with it"
 
 run_cmd do

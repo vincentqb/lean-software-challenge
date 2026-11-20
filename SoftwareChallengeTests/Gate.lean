@@ -968,8 +968,16 @@ def checksTimed (ran : Ran) : Nat :=
 def withoutModuleObject : List Edit := [
   ("lakefile.lean", replacing "#[← twice.oExport.fetch, native]" "#[native]")]
 
+def withoutProgram : List Edit := [
+  ("lakefile.lean", replacing "@[default_target]\nlean_exe" "lean_exe")]
+
+def testedWith (context : Context) (dir : System.FilePath) (edits : List Edit) : Trial Ran := do
+  IO.FS.writeFile (dir / "lakefile.lean") (← IO.FS.readFile (context.lsc / fixture / "lakefile.lean"))
+  applyEdits dir source next edits
+  context.lakeIn dir #["test"]
+
 def loadsNativeCode (context : Context) (dir : System.FilePath) : Trial Unit := do
-  let ran ← context.lakeIn dir #["test"]
+  let ran ← (exclusively (context.root / "template-build.lock") (context.lakeIn dir #["test"]) : IO Ran)
   unless ran.code == 0 && checksTimed ran == 1 do
     throwThe String s!"`lake test` exited {ran.code} in {dir} and timed {checksTimed ran} Checks of \
       Native/WorldCode.lean, expected exit 0 and 1 Check, so a Check that calls Native.twice, whose C the \
@@ -978,8 +986,7 @@ def loadsNativeCode (context : Context) (dir : System.FilePath) : Trial Unit := 
       `{next}`.\n{ran.tail}"
 
 def namesMissingSymbol (context : Context) (dir : System.FilePath) : Trial Unit := do
-  applyEdits dir source next withoutModuleObject
-  let ran ← context.lakeIn dir #["test"]
+  let ran ← testedWith context dir withoutModuleObject
   let named := ran.output.contains "they call Native.twice, an `@[extern]` declaration" &&
     ran.output.contains "the `o.export` facet of its module" &&
     ran.output.contains "declared in a module that imports only Lean's own"
@@ -988,6 +995,16 @@ def namesMissingSymbol (context : Context) (dir : System.FilePath) : Trial Unit 
       Native.WorldSpec.Twice, expected 1 with the message that Native.twice's symbol is missing and that the \
       extern_lib needs the `o.export` facet of a module that imports only Lean's own, so a package whose extern_lib \
       holds only the C function is not told what its library lacks. Restore the nativeCodeMissing message of \
+      SoftwareChallenge/CoreCode/Report/TestMessages.lean, then run `{next}`.\n{ran.tail}"
+
+def namesUnlinkedObject (context : Context) (dir : System.FilePath) : Trial Unit := do
+  let ran ← testedWith context dir withoutProgram
+  let named := ran.output.contains "the native code of extern_lib native, which no default-target lean_exe links"
+  unless ran.code == 1 && named do
+    throwThe String s!"`lake test` exited {ran.code} in {dir} after its lean_exe native_twice stopped being a default \
+      target, expected 1 with the message that no default-target lean_exe links the static library of extern_lib \
+      native, so a Check that runs native code no program runs goes unreported. Restore unlinkedObjects in \
+      SoftwareChallenge/CoreCode/Rules/Test.lean and the nativeCodeUnlinked message of \
       SoftwareChallenge/CoreCode/Report/TestMessages.lean, then run `{next}`.\n{ran.tail}"
 
 def run (context : Context) : IO (Array Outcome) := do
@@ -1000,7 +1017,8 @@ def run (context : Context) : IO (Array Outcome) := do
   let mut outcomes := #[setup]
   for (name, action) in [
       ("lake test runs a Check that calls the C of an extern_lib", loadsNativeCode context dir),
-      ("lake test names the symbol an extern_lib without the module's object lacks", namesMissingSymbol context dir)] do
+      ("lake test names the symbol an extern_lib without the module's object lacks", namesMissingSymbol context dir),
+      ("lake test names the extern_lib that no default-target lean_exe links", namesUnlinkedObject context dir)] do
     outcomes := outcomes.push (← check name next action)
   return outcomes
 

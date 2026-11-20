@@ -40,7 +40,8 @@ def completeFacts : Facts :=
 
 def completeTests : TestFacts :=
   { declaredChecks := #[], checks := #[], declaredOwnTests := #[], ownTests := #[], unknownOwnTests := #[],
-    testDriverArgsPlace := ⟨"lakefile.lean", 9⟩, libraryPlace := ⟨"lakefile.lean", 14⟩ }
+    loadedObjects := #[], linkedObjects := #[], testDriverArgsPlace := ⟨"lakefile.lean", 9⟩,
+    libraryPlace := ⟨"lakefile.lean", 14⟩ }
 
 theorem completeOwnedDigested (path : String) (owned : completeLake.Owned completeChallenge path) :
     completeFiles.Digested path := by
@@ -142,6 +143,7 @@ theorem testsComplete : Test.Complete completeTests where
   ownTestsRun := by simp [completeTests]
   ownTestsPass := by simp [completeTests]
   ownTestsDeclared := rfl
+  loadedObjectsLinked := by simp [completeTests]
 
 def unauditedModule : Facts :=
   { completeFacts with
@@ -317,5 +319,14 @@ def ownTestNotRun : TestFacts := { completeTests with declaredOwnTests := #[decl
 theorem ownTestNotRun_incomplete : ¬ Test.Complete ownTestNotRun := fun complete => by
   obtain ⟨run, member, -⟩ := complete.ownTestsRun declaredOwnTest (by simp [ownTestNotRun])
   simp [ownTestNotRun, completeTests] at member
+
+def loadedObject : LoadedObject :=
+  { library := "adder", file := "/work/.lake/build/lib/libadder.a", place := ⟨"lakefile.lean", 18⟩ }
+
+def unlinkedObject : TestFacts := { completeTests with loadedObjects := #[loadedObject] }
+
+theorem unlinkedObject_incomplete : ¬ Test.Complete unlinkedObject := fun complete => by
+  have linked := complete.loadedObjectsLinked loadedObject (by simp [unlinkedObject])
+  simp [unlinkedObject, completeTests] at linked
 
 end SoftwareChallengeTests.Complete

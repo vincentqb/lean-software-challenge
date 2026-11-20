@@ -11,3 +11,5 @@ Check TwiceDoubles twice := do
   unless twice 21 == 42 do throw (IO.userError s!"twice 21 is {twice 21}, not 42")
 
 end Native
+
+def main : IO Unit := IO.println (Native.twice 21)

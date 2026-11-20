@@ -268,12 +268,20 @@ structure OwnTestRun where
   code : UInt32
   deriving Inhabited
 
+structure LoadedObject where
+  library : String
+  file : String
+  place : Place
+  deriving BEq, Repr, Inhabited
+
 structure TestFacts where
   declaredChecks : Array CheckFact
   checks : Array CheckOutcome
   declaredOwnTests : Array OwnTestFact
   ownTests : Array OwnTestRun
   unknownOwnTests : Array String
+  loadedObjects : Array LoadedObject
+  linkedObjects : Array String
   testDriverArgsPlace : Place
   libraryPlace : Place
   deriving Inhabited

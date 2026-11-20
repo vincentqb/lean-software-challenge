@@ -11,6 +11,10 @@ require software_challenge from git "https://github.com/vincentqb/lean-software-
 lean_lib «Native» where
   globs := #[.submodules `Native]
 
+@[default_target]
+lean_exe «native_twice» where
+  root := `Native.WorldCode
+
 extern_lib «native» pkg := do
   let some twice ← findModule? `Native.WorldSpec.Twice
     | error "Native.WorldSpec.Twice is not a module of the package, so no library holds the C of Native.twice"

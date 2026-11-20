@@ -52,6 +52,16 @@ def Failure.message (challengeFile : String) : Failure → Message
         process runs that module's initializer, which calls its imports'; or add `precompileModules := true` to the \
         lean_lib of its module; then delete owned.lock and run `lake build`"
       next := .test }
+  | .nativeCodeUnlinked object =>
+    let place := lineOne object.place
+    { place
+      what := s!"the Checks load {object.file}, the native code of extern_lib {object.library}, which no \
+        default-target lean_exe links"
+      why := "so a Check would run native code that the program does not run"
+      fix := s!"Make the program a `@[default_target]` lean_exe in {place.file} whose root is its WorldCode module, \
+        since Lake links every extern_lib of the package into each lean_exe, or delete extern_lib {object.library} if \
+        the program does not call its code; then delete owned.lock and run `lake build`"
+      next := .test }
   | .checkNotRun check =>
     let place := lineOne check.place
     { place, what := s!"the Check of {check.claim} did not run"

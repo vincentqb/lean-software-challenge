@@ -27,10 +27,15 @@ def ownLibrary : OwnTestFact := { name := "AppTests", kind := .library, place :=
 
 def ownExecutable : OwnTestFact := { name := "app_tests", kind := .executable, place := ⟨"lakefile.lean", 25⟩ }
 
+def adder : LoadedObject :=
+  { library := "adder", file := "/work/.lake/build/lib/libadder.a", place := ⟨"lakefile.lean", 18⟩ }
+
 def complete : TestFacts :=
   { declaredChecks := #[agrees, advances], checks := #[passed agrees 120, passed advances 1530],
     declaredOwnTests := #[ownScript, ownLibrary], ownTests := #[⟨ownScript, 0⟩, ⟨ownLibrary, 0⟩],
-    unknownOwnTests := #[], testDriverArgsPlace := ⟨"lakefile.lean", 8⟩, libraryPlace := ⟨"lakefile.lean", 14⟩ }
+    unknownOwnTests := #[], loadedObjects := #[adder],
+    linkedObjects := #["/work/.lake/build/ir/App/WorldCode.c.o.export", adder.file],
+    testDriverArgsPlace := ⟨"lakefile.lean", 8⟩, libraryPlace := ⟨"lakefile.lean", 14⟩ }
 
 #guard (Test.run complete).code == 0
 #guard ((Test.run complete).timings.map (·.check.claim)) == #[`App.ClockAdvances, `App.AddAgrees]
@@ -70,6 +75,11 @@ def unknown : TestFacts := { complete with unknownOwnTests := #["missing_test"] 
 
 #guard refuses unknown 1 (· matches .unknownOwnTest "missing_test" ⟨"lakefile.lean", 8⟩)
 
+def unlinked : TestFacts := { complete with linkedObjects := #["/work/.lake/build/ir/App/WorldCode.c.o.export"] }
+
+#guard refuses unlinked 1 (· matches .nativeCodeUnlinked { library := "adder", .. })
+#guard (Test.run unlinked).failures.size == 1
+
 def nativeError : String :=
   "Could not find native implementation of external declaration 'App.nativeAdd' (symbols 'l_App_nativeAdd___boxed' \
     or 'l_App_nativeAdd')"
@@ -77,6 +87,7 @@ def nativeError : String :=
 def samples : Array Test.Failure :=
   #[.checkFailed { passed agrees 120 with error? := some "expected 3,\n  got 4" },
     .nativeCodeMissing { passed agrees 3 with error? := some nativeError } "App.nativeAdd" ⟨"lakefile.lean", 14⟩,
+    .nativeCodeUnlinked adder,
     .checkNotRun agrees, .ownTest ⟨ownScript, 2⟩, .ownTest ⟨ownLibrary, 1⟩, .ownTest ⟨ownExecutable, 3⟩,
     .ownTestNotRun ownLibrary, .unknownOwnTest "missing_test" ⟨"lakefile.lean", 8⟩]
 
@@ -130,6 +141,12 @@ def nativeMissing : TestFacts :=
       runs that module's initializer, which calls its imports'; or add `precompileModules := true` to the lean_lib \
       of its module; then delete owned.lock and run `lake build`, then run `lake test`."]
 #guard !says (samples[1]!) ["Fix the Check"]
+#guard says (.nativeCodeUnlinked adder)
+  ["lakefile.lean:18: the Checks load /work/.lake/build/lib/libadder.a, the native code of extern_lib adder, which \
+    no default-target lean_exe links, so a Check would run native code that the program does not run",
+    "Make the program a `@[default_target]` lean_exe in lakefile.lean whose root is its WorldCode module",
+    "or delete extern_lib adder if the program does not call its code; then delete owned.lock and run `lake build`, \
+      then run `lake test`."]
 #guard ((Report.test "Challenge.lean" (Test.run nativeMissing)).filter (contains · "extern_lib")).size == 1
 
 end
