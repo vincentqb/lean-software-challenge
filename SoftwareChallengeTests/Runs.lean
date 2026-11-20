@@ -51,13 +51,17 @@ def templateRun (context : Context) : Check String := do
   let tested ← step dir #["test"] 0 ["Tests: 2 of 2 passed"]
   let compared ← comparatorIn dir
   let program ← step dir #["exe", "constant_folding"] 0 ["5"]
+  (Edit.replace "ConstantFolding/Expr.lean" "end ConstantFolding"
+    "axiom closedLit : closed (.lit 0) = true\n\nend ConstantFolding").apply dir
+  discard <| step dir statement 1 ["no @[consistent] theorem states"]
   return "\n".intercalate [lastLines linted 1, lastLines tested 3, lastLines compared 1, lastLines program 1]
 
 def gradeRun (context : Context) : Check String := do
   let dir := context.dir "grade"
   templateCopy context.lsc dir []
-  committed dir []
-  let graded ← step dir #["exe", "grade", "base"] 0 ["accepted: base"]
+  committed dir [.replace "ConstantFolding/Fold.lean" "end ConstantFolding"
+    "theorem fold_lit (n : Nat) : fold (.lit n) = .lit n := fold_eq_self_of_normal _ rfl\n\nend ConstantFolding"]
+  let graded ← step dir #["exe", "grade", "candidate"] 0 ["accepted: candidate"]
   return ((graded.splitOn "\n").find? (·.startsWith "accepted:")).getD ""
 
 def coverageRun (context : Context) : Check Unit := do

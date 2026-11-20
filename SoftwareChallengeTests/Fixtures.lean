@@ -77,9 +77,14 @@ def fixtures : List Fixture := [
     edits := [.replace challenge "@[kills fold_normalizes] theorem fold_normalizes_rejects_identity : \
       ¬ ∀ e, normal (id e) = true := by\n  sorry\n\n" ""] },
   { rule := .killShape, command := statement, code := 1
-    says := ["kill ConstantFolding.fold_keeps_literal_rejects_zero does not negate headline"]
+    says := ["kill ConstantFolding.fold_keeps_literal_rejects_zero does not negate headline",
+      "kill ConstantFolding.fold_normalizes_rejects_identity does not negate headline",
+      "kill ConstantFolding.fold_idempotent_rejects_increment does not negate headline"]
     edits := [.replace challenge "(fun (_ : Expr) => Expr.lit 0) (.lit n) = .lit m → m = n := by"
-      "fold (.lit n) = .lit m → m = n := by"] },
+        "fold (.lit n) = .lit m → m = n := by",
+      .replace challenge "¬ ∀ e, normal (id e) = true" "¬ ∀ e, normal ((fun _ => e) e) = true",
+      .replace challenge "(fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) =\n      (fun e => Expr.lit (eval (fun _ => 0) e + 1)) e"
+        "(fun e => Expr.lit (eval (fun _ => 0) e + 1)) e) = e"] },
   { rule := .witness, command := statement, code := 1
     says := ["has no witness ConstantFolding.fold_normalizes_applies"]
     edits := [.replace challenge "@[kills fold_normalizes]"
@@ -95,10 +100,12 @@ def fixtures : List Fixture := [
     edits := [.replace solution "fold (fold e) = fold e :=\n  fold_eq_self_of_normal (fold e) (normal_fold e)"
       "fold (fold e) = fold e := by\n  sorry"] },
   { rule := .axiomUsed, command := lint, code := 1
-    says := ["headline ConstantFolding.fold_idempotent uses the axiom ConstantFolding.fold_idempotent_fact"]
+    says := ["headline ConstantFolding.fold_idempotent uses the axiom ConstantFolding.fold_idempotent_fact",
+      "consistency theorem ConstantFolding.addAgrees_consistent uses the axiom ConstantFolding.addAgrees"]
     edits := [.replace solution "theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  \
       fold_eq_self_of_normal (fold e) (normal_fold e)" "axiom fold_idempotent_fact (e : Expr) : fold (fold e) = fold e\n\n\
-      theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  fold_idempotent_fact e"] },
+      theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  fold_idempotent_fact e",
+      .replace solution "⟨fun a b => a + b, fun _ _ => rfl⟩" "⟨nativeAdd, addAgrees⟩"] },
   { rule := .impure, command := lint, code := 1
     says := ["ConstantFolding.render, which hole ConstantFolding.output computes through, is @[implemented_by]"]
     edits := [.replace "ConstantFolding/Output.lean" "@[expose] def output (e : Expr) : String := toString"
@@ -112,13 +119,27 @@ def fixtures : List Fixture := [
       "IO.println \"5\""] },
   { rule := .untested, command := lint, code := 1
     says := ["world claim ConstantFolding.addAgrees has no test that `lake test` runs"]
-    edits := [.replace "ConstantFolding/Tests.lean" "@[tests addAgrees] def" "def"] },
+    edits := [.replace "ConstantFolding/Tests.lean" "def main := SoftwareChallenge.testsMain" "def main : IO UInt32 := pure 0"] },
   { rule := .owned, command := #["exe", "grade", "candidate"], code := 1
     says := ["changes the owned files ConstantFolding/Expr.lean"]
     candidate := [.replace "ConstantFolding/Expr.lean" "end ConstantFolding"
       "theorem eval_lit (env : Nat → Nat) (n : Nat) : eval env (.lit n) = n := rfl\n\nend ConstantFolding"] }]
 
-def coverage : List Edit := [
+def coverage : List Edit := countdown ++ [
+  .replace challenge "theorem countdown_returns (n" "@[terminates countdown] theorem countdown_returns (n",
+  .replace "lakefile.lean" "root := `ConstantFolding.Main" "root := `Main",
+  .replace "lakefile.lean" "testDriver := \"tests\"" "testDriver := \"constant_folding/tests\"",
+  .write "Main.lean" "module
+
+import ConstantFolding.Output
+import ConstantFolding.Countdown
+
+public section
+
+def main : IO Unit := do
+  IO.println (ConstantFolding.output (.add (.lit 2) (.lit 3)))
+  IO.println (ConstantFolding.countdown 3)
+",
   .replace "lakefile.lean" "lean_lib «Challenge» where" "lean_lib «Helpers» where\n  roots := #[`Helpers]\n\n\
     lean_lib «Challenge» where",
   .write "Helpers.lean" "module
@@ -227,6 +248,6 @@ def coverageSays : List String := [
   "Helpers.viaUnsafe, which hole ConstantFolding.fold computes through, is @[implemented_by]",
   "Helpers.unsafely, which hole ConstantFolding.fold computes through, is unsafe",
   "Helpers.external, which hole ConstantFolding.fold computes through, is @[extern]",
-  "Proved: 7 of 7 headlines, 7 of 7 kills, 7 of 7 witnesses, 1 of 1 consistency theorems"]
+  "Proved: 8 of 8 headlines, 8 of 8 kills, 8 of 8 witnesses, 1 of 1 consistency theorems"]
 
 end SoftwareChallengeTests
