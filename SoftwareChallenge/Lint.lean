@@ -21,10 +21,14 @@ def reach (plan : Plan) (env : Environment) (roots : Array Name) : NameSet := Id
     pending := pending ++ callees env info
   return reached
 
-def impurity (env : Environment) (foreign : Array Name) (info : ConstantInfo) : Option String :=
+def isUnsafeTerm (env : Environment) (name : Name) : CoreM Bool := do
+  return (env.find? name).any (· matches .opaqueInfo _) && !(← isWritten name) &&
+    (Compiler.getImplementedBy? env name).any fun impl => (env.find? impl).any (·.isUnsafe)
+
+def impurity (env : Environment) (foreign withUnsafeTerm : Array Name) (info : ConstantInfo) : Option String :=
   if isExtern env info.name then if foreign.contains info.name then none else some "@[extern]"
   else if (Compiler.getImplementedBy? env info.name).isSome then some "@[implemented_by]"
-  else if info.isUnsafe then some "unsafe"
+  else if info.isUnsafe || withUnsafeTerm.contains (privateToUserName info.name) then some "unsafe"
   else if info matches .opaqueInfo _ && (env.find? (Compiler.mkUnsafeRecName info.name)).any (·.isPartial) then
     some "partial"
   else none
@@ -71,9 +75,10 @@ def purity (plan : Plan) (challenge : Challenge) (checked : NameSet) (hole : Nam
   let env ← getEnv
   unless env.contains hole do return (#[], checked)
   let reached := reach plan env #[hole]
+  let withUnsafeTerm := (← reached.toArray.filterM (isUnsafeTerm env ·)).map (privateToUserName · |>.getPrefix)
   let impure ← ((reached.toArray.filter (!checked.contains ·)).qsort Name.lt).filterMapM fun name => do
     let some info := env.find? name | return none
-    let some reason := impurity env challenge.foreign info | return none
+    let some reason := impurity env challenge.foreign withUnsafeTerm info | return none
     unless ← isWritten name do return none
     return some (lintProblem .impure (← plan.place name) s!"{name}, which hole {hole} computes through, is {reason}"
       "so the program does not run the Lean definition that the proofs are about"

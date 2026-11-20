@@ -107,10 +107,11 @@ def fixtures : List Fixture := [
       theorem fold_idempotent (e : Expr) : fold (fold e) = fold e :=\n  fold_idempotent_fact e",
       .replace solution "⟨fun a b => a + b, fun _ _ => rfl⟩" "⟨nativeAdd, addAgrees⟩"] },
   { rule := .impure, command := lint, code := 1
-    says := ["ConstantFolding.render, which hole ConstantFolding.output computes through, is @[implemented_by]"]
+    says := ["ConstantFolding.render, which hole ConstantFolding.output computes through, is @[implemented_by]",
+      "ConstantFolding.renderNat, which hole ConstantFolding.output computes through, is unsafe"]
     edits := [.replace "ConstantFolding/Output.lean" "@[expose] def output (e : Expr) : String := toString"
-      "def renderNat (n : Nat) : String := toString n\n\n@[expose, implemented_by renderNat] def render (n : Nat) : \
-        String := toString n\n\n@[expose] def output (e : Expr) : String := render",
+      "def renderNat (n : Nat) : String := unsafe (unsafeCast (toString n))\n\n@[expose, implemented_by renderNat] \
+        def render (n : Nat) : String := toString n\n\n@[expose] def output (e : Expr) : String := render",
       .replace solution "simp only [output, evalNative_eq" "simp only [output, render, evalNative_eq"] },
   { rule := .fixpoint, command := lint, code := 1, edits := countdown
     says := ["hole ConstantFolding.countdown is a partial_fixpoint without a @[terminates ConstantFolding.countdown]"] },
