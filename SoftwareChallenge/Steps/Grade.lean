@@ -267,7 +267,6 @@ def judge (context : Context) (passed : IO.Ref (Array Observation)) : Judge Unit
 def clean (context : Context) : IO Unit := do
   discard <| output "git" #["worktree", "remove", "--force", context.worktree.toString] context.base
   if ← context.worktree.pathExists then IO.FS.removeDirAll context.worktree
-  discard <| output "git" #["worktree", "prune"] context.base
   if ← context.configFile.pathExists then IO.FS.removeFile context.configFile
 
 def grade (candidate : String) : IO UInt32 := do
