@@ -102,9 +102,7 @@ def environmentLinters (lake : LakeFacts) (lakeCommand : String) (targets : List
 def lintTargets (lake : LakeFacts) : IO (List String) := do
   let imported ← lake.modules.flatMapM fun source => do
     return (← Read.importLines source.module source.file (← Read.readSource lake source.file .lint)).map (·.fact.name)
-  let (roots, others) := (lake.modules.filter (!imported.contains ·.module)).partition
-    (lake.defaultExeRoots.contains ·.module)
-  return (others ++ roots).toList.map (·.module.toString)
+  return (lake.modules.filter (!imported.contains ·.module)).toList.map (·.module.toString)
 
 def drive (lakeFile : System.FilePath) : IO UInt32 := do
   let lake ← Read.loadLake lakeFile .lint
