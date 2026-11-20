@@ -169,7 +169,8 @@ private def purposeOf (facts : Facts) (name : Name) : String :=
   match facts.challenge.kills.find? (·.target.constant.name == name),
       facts.challenge.witnesses.find? (·.target.constant.name == name) with
   | some kill, _ => s!"so nothing shows that {kill.headline} rejects a wrong implementation"
-  | _, some witness => s!"so nothing shows that some input meets the preconditions of {witness.headline}"
+  | _, some witness => s!"so nothing shows that some input meets the preconditions of {witness.headline} and the \
+    world claims about that input"
   | none, none =>
     if isHole facts name then "so no headline about it can be proved" else "so the solution does not claim it yet"
 

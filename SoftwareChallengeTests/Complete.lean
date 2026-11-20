@@ -79,6 +79,7 @@ theorem statementComplete : Statement.Complete completeLake completeFiles comple
   preconditionsWitnessed := by simp [completeChallenge]
   witnessesDerived := by simp [completeChallenge]
   witnessesStated := by simp [completeChallenge]
+  foreignPreconditionsPremised := by simp [completeChallenge]
   terminatesNamesHole := by simp [completeChallenge]
   terminatesOnKilledHeadline := by simp [completeChallenge]
   terminatesMentionsHole := by simp [completeChallenge]

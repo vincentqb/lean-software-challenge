@@ -286,6 +286,29 @@ def hypothesisErrors (challenge : ChallengeFacts) : Array Error :=
   challenge.headlines.flatMap fun headline =>
     ((closedHypotheses challenge headline).map (Error.unnamedHypothesis headline.target.constant.name)).toArray
 
+def isForeignFunction (challenge : ChallengeFacts) (name : Name) : Bool :=
+  challenge.isReplaceable name && !challenge.holes.any (·.constant.name == name)
+
+def constraining (challenge : ChallengeFacts) (headline : HeadlineFact) (name : Name) : List (BinderFact × Nat) :=
+  headline.telescope.zipIdx.filter fun (binder, index) =>
+    Telescope.kindAt challenge.isClaim headline.telescope index binder == .claim &&
+      binder.expanded.constants.contains name
+
+def unpremisedClaim? (challenge : ChallengeFacts) (headline : HeadlineFact) (name : Name) : Option Nat :=
+  let claims := constraining challenge headline name
+  if claims.any fun (binder, index) => (Telescope.refersAt index binder).isEmpty then none
+  else (claims.find? fun (binder, index) => !(Telescope.refersAt index binder).isEmpty).map (·.2)
+
+def unprovableWitnesses (challenge : ChallengeFacts) (headline : HeadlineFact) : List Error :=
+  headline.telescope.zipIdx.flatMap fun (binder, index) =>
+    if Telescope.kindAt challenge.isClaim headline.telescope index binder == .precondition then
+      (binder.meaning.constants.filter (isForeignFunction challenge)).eraseDups.filterMap fun name =>
+        (unpremisedClaim? challenge headline name).map (.witnessUnprovable headline.target.constant.name index name)
+    else []
+
+def unprovableErrors (challenge : ChallengeFacts) : Array Error :=
+  challenge.headlines.flatMap fun headline => (unprovableWitnesses challenge headline).toArray
+
 def misstated (challenge : ChallengeFacts) (witness : WitnessFact) : Bool :=
   challenge.headlines.any fun headline =>
     headline.target.constant.name == witness.headline &&
@@ -338,7 +361,7 @@ def meaningErrors (challenge : ChallengeFacts) : Array Error :=
     killErrors challenge ++ witnessErrors challenge ++ holeErrors challenge
 
 def statedErrors (challenge : ChallengeFacts) : Array Error :=
-  terminationErrors challenge ++ hypothesisErrors challenge ++ auxiliaryErrors challenge
+  terminationErrors challenge ++ hypothesisErrors challenge ++ unprovableErrors challenge ++ auxiliaryErrors challenge
 
 def findings (lake : LakeFacts) (challenge : ChallengeFacts) : Array Error :=
   setupErrors lake challenge ++ ownershipErrors lake challenge ++ meaningErrors challenge ++ statedErrors challenge

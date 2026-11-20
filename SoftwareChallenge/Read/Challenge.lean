@@ -77,6 +77,7 @@ def binderFacts (locals : Array Expr) : MetaM (List BinderFact) := do
     let earlier := locals.extract 0 index
     let type ← inferType binder
     let meaning ← Telescope.unfolded type
+    let expanded ← deltaExpand meaning (isWorldClaim (← getEnv))
     let (conclusion, variables) ← forallTelescope meaning fun peeled body => do
       let chosen ← peeled.filterMapM fun bound => do
         if ← isProp (← inferType bound) then return none
@@ -86,6 +87,7 @@ def binderFacts (locals : Array Expr) : MetaM (List BinderFact) := do
       name := toString (← binder.fvarId!.getUserName).eraseMacroScopes
       type := Shape.ofExpr (type.abstract earlier)
       meaning := Shape.ofExpr (meaning.abstract earlier)
+      expanded := Shape.ofExpr (expanded.abstract earlier)
       prop := ← isProp type
       shown := ← shown type
       conclusion, variables

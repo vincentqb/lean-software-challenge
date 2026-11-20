@@ -94,19 +94,15 @@ def placed (telescope : List BinderFact) (inputs : List Nat) (bound extra index 
 def build (telescope : List BinderFact) (summary : List Binder) : Shape :=
   let kept := Telescope.kept summary
   let kindIs := fun (kind : BinderKind) (index : Nat) => (summary[index]?).any (·.kind == kind)
-  let closed := fun (index : Nat) => (summary[index]?).any (·.refers.isEmpty)
+  let premised := fun (index : Nat) => kindIs .claim index && (summary[index]?).any (·.refers.isEmpty)
   let inputs := kept.filter (kindIs .input)
-  let claims := kept.filter (kindIs .claim)
-  let inner := claims.filter fun index => !closed index
-  let outer := claims.filter closed
-  let preconditions := kept.filter (kindIs .precondition)
-  let body := conjunction (preconditions.map (placed telescope inputs inputs.length inner.length))
-  let premised := inner.zipIdx.foldr (fun (index, position) statement =>
-    .forallE (placed telescope inputs inputs.length position index) statement) body
+  let premises := kept.filter premised
+  let conditions := kept.filter fun index => !kindIs .input index && !premised index
+  let body := conjunction (conditions.map (placed telescope inputs inputs.length 0))
   let quantified := inputs.zipIdx.foldr (fun (index, position) statement =>
     let type := placed telescope inputs position 0 index
-    .app (.app (.const ``Exists [levelAt telescope index]) type) (.lam type statement)) premised
-  outer.foldr (fun index statement => .forallE (typeAt telescope index) statement) quantified
+    .app (.app (.const ``Exists [levelAt telescope index]) type) (.lam type statement)) body
+  premises.foldr (fun index statement => .forallE (typeAt telescope index) statement) quantified
 
 end Witness
 

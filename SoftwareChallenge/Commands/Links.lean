@@ -36,7 +36,7 @@ private def deriveWitness (headline : Name) (ref : Syntax) : CoreM Unit := do
 initialize registerBuiltinAttribute {
   name := `kills
   descr := "marks a theorem of the challenge as a kill of the headline it names, and on the headline's first kill \
-    derives the theorem that some input meets the headline's preconditions"
+    derives the theorem that some input meets the headline's preconditions and the world claims about that input"
   add := fun declaration stx _ => do
     let target ← realizeGlobalConstNoOverloadWithInfo stx[1]
     modifyEnv (linksExt.addEntry · { kind := .kills, source := declaration, target })
@@ -44,9 +44,9 @@ initialize registerBuiltinAttribute {
     catch problem =>
       let line := ((← findDeclarationRanges? target).map (·.selectionRange.pos.line)).getD 0
       logWarning m!"`@[kills {target}]` could not derive {witnessName target}, the theorem that some input meets \
-        the preconditions of {target} (line {line}), because {problem.toMessageData}, so nothing would show that \
-        {target} is not vacuous. State each precondition of {target} as a hypothesis of its own, delete owned.lock \
-        if there is one, then run `lake build`." }
+        the preconditions of {target} (line {line}) and the world claims about that input, because \
+        {problem.toMessageData}, so nothing would show that {target} is not vacuous. State each precondition of \
+        {target} as a hypothesis of its own, delete owned.lock if there is one, then run `lake build`." }
 
 initialize registerBuiltinAttribute {
   name := `terminates

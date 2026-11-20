@@ -42,6 +42,7 @@ inductive Error where
   | witnessMissing (headline : Name)
   | witnessPredeclared (witness headline : Name)
   | witnessMisstated (witness headline : Name)
+  | witnessUnprovable (headline : Name) (precondition : Nat) (foreign : Name) (claim : Nat)
   | unplainName (name : Name)
   | challengeLookup (candidates : Array SourceFact)
   | challengeAbsent (module : Name) (file : String)
@@ -126,6 +127,11 @@ structure Statement.Complete (lake : LakeFacts) (files : FileFacts) (challenge :
   witnessesStated : ∀ witness ∈ challenge.witnesses, ∀ headline ∈ challenge.headlines,
     headline.target.constant.name = witness.headline →
       witness.target.constant.type = headline.expectedWitness challenge
+  foreignPreconditionsPremised : ∀ headline ∈ challenge.headlines, ∀ index binder name,
+    headline.telescope[index]? = some binder → headline.Precondition challenge.claims index →
+    challenge.Foreign name → binder.meaning.Mentions name →
+    (∃ claim claimed, headline.ClaimConstrains challenge.claims claim claimed name ∧ claimed.Open claim) →
+      ∃ law stated, headline.ClaimConstrains challenge.claims law stated name ∧ ¬ stated.Open law
   terminatesNamesHole : ∀ termination ∈ challenge.terminating,
     ∃ hole ∈ challenge.holes, hole.constant.name = termination.definition
   terminatesOnKilledHeadline : ∀ termination ∈ challenge.terminating,

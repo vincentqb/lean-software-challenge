@@ -618,6 +618,85 @@ theorem hypothesisErrors_eq_empty {challenge : ChallengeFacts} :
     exact Telescope.refersAt_ne_nil_iff.mpr
       (opened index binder found ((Telescope.kindAt_eq_precondition_iff found).mp precondition))
 
+theorem isForeignFunction_eq_true {challenge : ChallengeFacts} {name : Name} :
+    isForeignFunction challenge name = true ↔ challenge.Foreign name := by
+  simp [isForeignFunction, ChallengeFacts.Foreign, ChallengeFacts.isReplaceable]
+
+theorem mem_constraining {challenge : ChallengeFacts} {headline : HeadlineFact} {name : Name} {binder : BinderFact}
+    {index : Nat} :
+    (binder, index) ∈ constraining challenge headline name ↔
+      headline.ClaimConstrains challenge.claims index binder name := by
+  unfold constraining HeadlineFact.ClaimConstrains
+  rw [List.mem_filter, List.mem_zipIdx_iff_getElem?]
+  simp only [Bool.and_eq_true, beq_iff_eq, List.contains_iff_mem, Shape.mem_constants]
+  constructor
+  · rintro ⟨found, claimed, mentions⟩
+    exact ⟨found, (Telescope.kindAt_eq_claim_iff found).mp claimed, mentions⟩
+  · rintro ⟨found, claimed, mentions⟩
+    exact ⟨found, (Telescope.kindAt_eq_claim_iff found).mpr claimed, mentions⟩
+
+theorem unpremisedClaim?_eq_none {challenge : ChallengeFacts} {headline : HeadlineFact} {name : Name} :
+    unpremisedClaim? challenge headline name = none ↔
+      ((∃ claim claimed, headline.ClaimConstrains challenge.claims claim claimed name ∧ claimed.Open claim) →
+        ∃ law stated, headline.ClaimConstrains challenge.claims law stated name ∧ ¬ stated.Open law) := by
+  unfold unpremisedClaim?
+  dsimp only
+  split
+  · rename_i premised
+    obtain ⟨⟨stated, law⟩, member, closed⟩ := List.any_eq_true.mp premised
+    refine ⟨fun _ _ => ⟨law, stated, mem_constraining.mp member, fun opened => ?_⟩, fun _ => rfl⟩
+    exact Telescope.refersAt_ne_nil_iff.mpr opened (List.isEmpty_iff.mp closed)
+  · rename_i unpremised
+    rw [Option.map_eq_none_iff, List.find?_eq_none]
+    constructor
+    · rintro absent ⟨claim, claimed, constrains, opened⟩
+      have rejected := absent (claimed, claim) (mem_constraining.mpr constrains)
+      simp only [Bool.not_eq_true', List.isEmpty_eq_false_iff, ne_eq, Classical.not_not] at rejected
+      exact absurd rejected (Telescope.refersAt_ne_nil_iff.mpr opened)
+    · intro implies pair member opened
+      obtain ⟨claimed, claim⟩ := pair
+      have named : (Telescope.refersAt claim claimed).isEmpty = false := by simpa using opened
+      obtain ⟨law, stated, constrains, closed⟩ :=
+        implies ⟨claim, claimed, mem_constraining.mp member,
+          Telescope.refersAt_ne_nil_iff.mp (List.isEmpty_eq_false_iff.mp named)⟩
+      have empty : Telescope.refersAt law stated = [] :=
+        Classical.byContradiction fun nonempty => closed (Telescope.refersAt_ne_nil_iff.mp nonempty)
+      exact unpremised (List.any_eq_true.mpr ⟨(stated, law), mem_constraining.mpr constrains, by simp [empty]⟩)
+
+theorem unprovableErrors_eq_empty {challenge : ChallengeFacts} :
+    unprovableErrors challenge = #[] ↔ ∀ headline ∈ challenge.headlines, ∀ index binder name,
+      headline.telescope[index]? = some binder → headline.Precondition challenge.claims index →
+      challenge.Foreign name → binder.meaning.Mentions name →
+      (∃ claim claimed, headline.ClaimConstrains challenge.claims claim claimed name ∧ claimed.Open claim) →
+        ∃ law stated, headline.ClaimConstrains challenge.claims law stated name ∧ ¬ stated.Open law := by
+  simp only [unprovableErrors, Array.flatMap_eq_empty_iff, listToArray_eq_empty, unprovableWitnesses,
+    List.flatMap_eq_nil_iff]
+  refine forall₂_congr fun headline _ => ?_
+  constructor
+  · intro accepted index binder name found precondition foreign mentions
+    have judged := accepted (binder, index) (List.mem_zipIdx_iff_getElem?.mpr found)
+    have preconditioned : Telescope.kindAt challenge.isClaim headline.telescope index binder = .precondition :=
+      (Telescope.kindAt_eq_precondition_iff found).mpr precondition
+    simp only [preconditioned, beq_self_eq_true, ↓reduceIte, List.filterMap_eq_nil_iff] at judged
+    have listed : name ∈ (binder.meaning.constants.filter (isForeignFunction challenge)).eraseDups := by
+      rw [List.mem_eraseDups, List.mem_filter]
+      exact ⟨Shape.mem_constants.mpr mentions, isForeignFunction_eq_true.mpr foreign⟩
+    have unpremised := judged name listed
+    rw [Option.map_eq_none_iff, unpremisedClaim?_eq_none] at unpremised
+    exact unpremised
+  · intro holds pair member
+    obtain ⟨binder, index⟩ := pair
+    have found := List.mem_zipIdx_iff_getElem?.mp member
+    split
+    · rename_i preconditioned
+      rw [List.filterMap_eq_nil_iff]
+      intro name listed
+      rw [List.mem_eraseDups, List.mem_filter, Shape.mem_constants, isForeignFunction_eq_true] at listed
+      rw [Option.map_eq_none_iff, unpremisedClaim?_eq_none]
+      exact holds index binder name found
+        ((Telescope.kindAt_eq_precondition_iff found).mp (beq_iff_eq.mp preconditioned)) listed.2 listed.1
+    · rfl
+
 theorem ownedViolationErrors_eq_empty {lake : LakeFacts} {challenge : ChallengeFacts} :
     ownedViolationErrors lake challenge = #[] ↔
       lake.project.Admits (challenge.owned.inventory.restrictedTo challenge.owns) := by
@@ -722,7 +801,7 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
     obtain ⟨challengeEmpty, solutionEmpty, targetEmpty, programEmpty, importEmpty, closureEmpty, filledEmpty,
       axiomEmpty, privateEmpty, plainEmpty, ownedViolationEmpty, specImportEmpty, ownedClaimEmpty, derivedEmpty,
       duplicateEmpty, mentionEmpty, unmarkedEmpty, noKillEmpty, killEmpty, witnessEmpty, holeEmpty, terminationEmpty,
-      hypothesisEmpty, auxiliaryEmpty⟩ := found
+      hypothesisEmpty, unprovableEmpty, auxiliaryEmpty⟩ := found
     have marked := marked_of_unmarkedErrors unmarkedEmpty duplicateEmpty
     have mentions := mentions_of_mentionErrors mentionEmpty duplicateEmpty auxiliaryEmpty unmarkedEmpty
     have killed := killed_of_noKillErrors noKillEmpty duplicateEmpty auxiliaryEmpty mentions marked
@@ -752,6 +831,7 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
       preconditionsWitnessed := witnesses.1
       witnessesDerived := witnesses.2.1
       witnessesStated := witnesses.2.2
+      foreignPreconditionsPremised := unprovableErrors_eq_empty.mp unprovableEmpty
       terminatesNamesHole := fun termination member => (terminations termination member).1
       terminatesOnKilledHeadline := fun termination member => (terminations termination member).2.1
       terminatesMentionsHole := fun termination member => (terminations termination member).2.2
@@ -787,6 +867,7 @@ theorem clean_iff_complete {lake : LakeFacts} {files : FileFacts} {challenge : C
           ⟨complete.terminatesNamesHole termination member, complete.terminatesOnKilledHeadline termination member,
             complete.terminatesMentionsHole termination member⟩,
         hypothesisErrors_eq_empty.mpr complete.hypothesesClaimed,
+        unprovableErrors_eq_empty.mpr complete.foreignPreconditionsPremised,
         auxiliaryErrors_eq_empty.mpr complete.auxiliariesPublic⟩
 
 theorem run_code_eq_zero {lake : LakeFacts} {files : FileFacts} {challenge : ChallengeFacts} :
@@ -857,6 +938,7 @@ private theorem accepted : Statement.Complete acceptedLake acceptedFiles accepte
   preconditionsWitnessed := by simp [acceptedChallenge]
   witnessesDerived := by simp [acceptedChallenge]
   witnessesStated := by simp [acceptedChallenge]
+  foreignPreconditionsPremised := by simp [acceptedChallenge]
   terminatesNamesHole := by simp [acceptedChallenge]
   terminatesOnKilledHeadline := by simp [acceptedChallenge]
   terminatesMentionsHole := by simp [acceptedChallenge]

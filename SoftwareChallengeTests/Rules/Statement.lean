@@ -396,6 +396,79 @@ def misstatedWitness : ChallengeFacts := { witnessedBase with witnesses := #[wit
 
 def statedWitness : ChallengeFacts := { witnessedBase with witnesses := #[stated witnessedBase (witnessOf true)] }
 
+def nativeSucc : Shape := .const `App.nativeSucc []
+
+def succAgrees (function : Shape) : Shape := .app (.const `App.SuccAgrees []) function
+
+def succAt (term : Shape) : Shape := .app (.const `App.SuccAt []) term
+
+def succAtMeans (term : Shape) : Shape := equal (.app nativeSucc term) (.app (.const ``Nat.succ []) term)
+
+def existential (type body : Shape) : Shape := .app (.app (.const ``Exists [.succ .zero]) type) (.lam type body)
+
+def functionBinder : BinderFact := { binderFact "f" (.forallE nat nat) false "Nat → Nat" with level := .succ .zero }
+
+def natInput : BinderFact := { natBinder with level := .succ .zero }
+
+def vanishingHeadline : HeadlineFact :=
+  { evenHeadline with telescope := [functionBinder, binderFact "agrees" (succAgrees (.bvar 0)) true "App.SuccAgrees f",
+      natInput,
+      binderFact "vanishes" (equal (.app (.bvar 2) (.app double (.bvar 0))) (.natLit 0)) true "f (App.double n) = 0"] }
+
+def vanishingBase : ChallengeFacts :=
+  { baseChallenge with headlines := #[vanishingHeadline], claims := #[`App.SuccAgrees] }
+
+def witnessStating (statement : Shape) : WitnessFact :=
+  { witnessOf true with target.constant.type := statement }
+
+def vanishingPremised : ChallengeFacts :=
+  { vanishingBase with witnesses := #[witnessStating (existential (.forallE nat nat) (existential nat
+      (.forallE (succAgrees (.bvar 1)) (equal (.app (.bvar 2) (.app double (.bvar 1))) (.natLit 0)))))] }
+
+def vanishingMet : ChallengeFacts := { vanishingBase with witnesses := #[stated vanishingBase (witnessOf true)] }
+
+def succAtBinder : BinderFact :=
+  { binderFact "h" (succAt (.bvar 0)) true "App.SuccAt n" with expanded := succAtMeans (.bvar 0) }
+
+def succEverywhere : BinderFact :=
+  { binderFact "h" (.forallE nat (succAt (.bvar 0))) true "∀ (m : Nat), App.SuccAt m" with
+    expanded := .forallE nat (succAtMeans (.bvar 0)) }
+
+def clockAdvances : BinderFact := binderFact "clock" (.const `App.ClockAdvances []) true "App.ClockAdvances"
+
+def hitsOne (input : Nat) : BinderFact :=
+  binderFact "k" (equal (.app nativeSucc (.bvar input)) (.natLit 1)) true "App.nativeSucc n = 1"
+
+def foreignHeadline (telescope : List BinderFact) : HeadlineFact :=
+  { evenHeadline with telescope }
+
+def foreignBase (telescope : List BinderFact) : ChallengeFacts :=
+  { baseChallenge with
+    headlines := #[foreignHeadline telescope]
+    claims := #[`App.SuccAt, `App.SuccAgrees, `App.SuccAgreesOn, `App.ClockAdvances]
+    replaceable := #[`App.double, `App.nativeSucc] }
+
+def foreignChallenge (telescope : List BinderFact) : ChallengeFacts :=
+  { foreignBase telescope with witnesses := #[stated (foreignBase telescope) (witnessOf true)] }
+
+def foreignUnderInputClaim : ChallengeFacts := foreignChallenge [natInput, succAtBinder, hitsOne 1]
+
+def foreignUnderLaw : ChallengeFacts := foreignChallenge [succEverywhere, natInput, hitsOne 0]
+
+def foreignUnderAgreement : ChallengeFacts :=
+  foreignChallenge [binderFact "agrees" (succAgrees nativeSucc) true "App.SuccAgrees App.nativeSucc", natInput,
+    hitsOne 0]
+
+def foreignBesideClock : ChallengeFacts := foreignChallenge [clockAdvances, natInput, succAtBinder, hitsOne 1]
+
+def foreignRestated : ChallengeFacts :=
+  foreignChallenge [natInput, succAtBinder,
+    binderFact "k" (equal (.app (.const ``Nat.succ []) (.bvar 1)) (.natLit 1)) true "n + 1 = 1"]
+
+def holeUnderInputClaim : ChallengeFacts :=
+  foreignChallenge [natInput, succAtBinder, binderFact "k" (equal (.app double (.bvar 1)) (.natLit 1)) true
+    "App.double n = 1"]
+
 end
 
 #guard (run baseLake baseFiles baseChallenge).code == 0
@@ -563,6 +636,33 @@ end
 #guard witnessedHeadline.expectedWitness witnessedBase ==
   .app (.app (.const ``Exists [.succ .zero]) (.const ``Nat []))
     (.lam (.const ``Nat []) (equal (.app double (.bvar 0)) (.natLit 0)))
+
+#guard vanishingHeadline.expectedWitness vanishingBase ==
+  existential (.forallE nat nat) (existential nat
+    (Shape.conjunction [succAgrees (.bvar 1), equal (.app (.bvar 1) (.app double (.bvar 0))) (.natLit 0)]))
+
+#guard refuses (.witnessMisstated `App.double_even_applies `App.double_even) (challenge := vanishingPremised)
+
+#guard !(errorsOf (challenge := vanishingMet)).any (· matches .witnessMisstated ..)
+
+#guard (foreignHeadline [binderFact "agrees" (succAgrees nativeSucc) true "App.SuccAgrees App.nativeSucc", natInput,
+    hitsOne 0]).expectedWitness foreignUnderAgreement ==
+  .forallE (succAgrees nativeSucc) (existential nat (equal (.app nativeSucc (.bvar 0)) (.natLit 1)))
+
+#guard (foreignHeadline [natInput, succAtBinder, hitsOne 1]).expectedWitness foreignUnderInputClaim ==
+  existential nat (Shape.conjunction [succAt (.bvar 0), equal (.app nativeSucc (.bvar 0)) (.natLit 1)])
+
+#guard errorsOf (challenge := foreignUnderInputClaim) == #[.witnessUnprovable `App.double_even 2 `App.nativeSucc 1]
+
+#guard errorsOf (challenge := foreignUnderLaw) == #[]
+
+#guard errorsOf (challenge := foreignUnderAgreement) == #[]
+
+#guard errorsOf (challenge := foreignBesideClock) == #[.witnessUnprovable `App.double_even 3 `App.nativeSucc 2]
+
+#guard errorsOf (challenge := foreignRestated) == #[]
+
+#guard errorsOf (challenge := holeUnderInputClaim) == #[]
 
 #guard refuses (.witnessMissing `App.double_even) (challenge := unwitnessed)
 

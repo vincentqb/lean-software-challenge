@@ -39,4 +39,7 @@ def SuccLaw : Prop := SuccAgrees nativeSucc → ∀ n, nativeSucc n = n + 1
 
 @[expose] def SuccAgreesWrapped (succ : Nat → Nat) : Prop := SuccAgrees succ
 
+/-- The successor of each listed number is that number plus one. A listed n with another successor falsifies it. -/
+WorldClaim SuccAgreesOn (listed : List Nat) := ∀ n ∈ listed, nativeSucc n = n + 1
+
 end SoftwareChallengeTests.Fixtures

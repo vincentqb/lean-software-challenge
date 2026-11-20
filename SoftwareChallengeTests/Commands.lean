@@ -1,6 +1,7 @@
 module
 
 public import SoftwareChallengeTests.Fixtures.WorldCode
+public import SoftwareChallengeTests.Fixtures.WitnessChallenge
 meta import SoftwareChallengeTests.Fixtures.WorldCode
 meta import SoftwareChallengeTests.Fixtures.Sibling
 meta import SoftwareChallengeTests.Fixtures.Rendezvous
@@ -33,6 +34,21 @@ rejects "declaration failed" in Check SuccAgrees nativeSucc := (pure 0 : IO Nat)
 
 rejects "marked as `meta`" in
   def runtimeEvidence : Bool := SoftwareChallenge.isWorldClaim default .anonymous
+
+#guard_expr type_of% WitnessChallenge.succ_vanishes_applies =ₐ
+  ∃ f : Nat → Nat, ∃ n : Nat, SuccAgrees f ∧ f (WitnessChallenge.double n) = 0
+
+theorem succ_vanishes_holds : type_of% WitnessChallenge.succ_vanishes :=
+  fun _ agrees n vanishes => by have := agrees (WitnessChallenge.double n); omega
+
+theorem succ_vanishes_applies_refuted : ¬ type_of% WitnessChallenge.succ_vanishes_applies :=
+  fun ⟨_, n, agrees, vanishes⟩ => by have := agrees (WitnessChallenge.double n); omega
+
+theorem double_listed_applies_holds : type_of% WitnessChallenge.double_listed_applies :=
+  ⟨[], (fun _ listed => nomatch listed), rfl⟩
+
+theorem succ_hits_one_everywhere_applies_holds : type_of% WitnessChallenge.succ_hits_one_everywhere_applies :=
+  fun everywhere => ⟨0, everywhere 0⟩
 
 meta section
 

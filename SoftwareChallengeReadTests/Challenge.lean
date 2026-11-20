@@ -68,7 +68,8 @@ run_cmd Elab.Command.liftCoreM do
   check (lastNames (challenge.headlines.map (·.target.constant.name)) == #["double_halves", "double_positive",
       "double_between", "double_lengths", "succ_hits_one", "double_small", "double_zero", "double_negative_vanishes",
       "double_nonnegative_vanishes", "double_vanishes_only_at_zero", "double_zero_fin", "double_first", "double_fin",
-      "double_under_claim", "double_at", "double_assumes_wrapped", "double_hidden", "double_odd", "succ_law"])
+      "double_under_claim", "double_at", "double_assumes_wrapped", "double_hidden", "double_odd", "succ_law",
+      "succ_vanishes", "double_listed", "succ_hits_one_at", "succ_hits_one_everywhere"])
     s!"a kill or a witness was read as a headline: {challenge.headlines.map (·.target.constant.name)}"
   let derived := [(`double_halves, "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4", 16),
     (`double_positive, "∃ n, 0 < SoftwareChallengeTests.Fixtures.WitnessChallenge.double n", 21),
@@ -83,13 +84,23 @@ run_cmd Elab.Command.liftCoreM do
     (`double_first, "∃ n h, ↑⟨0, h⟩ = 0", 72), (`double_fin, "∃ i, True", 77),
     (`double_under_claim, "(∀ (m : Nat), m > 0 → SoftwareChallengeTests.Fixtures.SuccAt m) → ∃ n, \
       SoftwareChallengeTests.Fixtures.WitnessChallenge.double n < 5", 81),
-    (`double_at, "∃ n, SoftwareChallengeTests.Fixtures.SuccAt n → \
+    (`double_at, "∃ n, SoftwareChallengeTests.Fixtures.SuccAt n ∧ \
       SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 1", 86),
     (`double_hidden, "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 4", 96)]
-  let expected := (derived.map fun (name, statement, line) =>
-    (witnessName (member name), member name, true, statement, line, s!"{name}_applies")).toArray.push
+  let conjoined := [(`succ_vanishes, "∃ f n, SoftwareChallengeTests.Fixtures.SuccAgrees f ∧ \
+      f (SoftwareChallengeTests.Fixtures.WitnessChallenge.double n) = 0", 112),
+    (`double_listed, "∃ listed, SoftwareChallengeTests.Fixtures.SuccAgreesOn listed ∧ \
+      (List.map SoftwareChallengeTests.Fixtures.WitnessChallenge.double listed).sum = 0", 118),
+    (`succ_hits_one_at, "∃ n, SoftwareChallengeTests.Fixtures.SuccAt n ∧ SoftwareChallengeTests.Fixtures.nativeSucc n = 1",
+      123),
+    (`succ_hits_one_everywhere, "(∀ (m : Nat), SoftwareChallengeTests.Fixtures.SuccAt m) → ∃ n, \
+      SoftwareChallengeTests.Fixtures.nativeSucc n = 1", 128)]
+  let derivedFact := fun ((name, statement, line) : Name × String × Nat) =>
+    (witnessName (member name), member name, true, statement, line, s!"{name}_applies")
+  let expected := ((derived.map derivedFact).toArray.push
       (member `double_odd_applies, member `double_odd, false,
-        "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 3", 101, "double_odd_applies")
+        "∃ n, SoftwareChallengeTests.Fixtures.WitnessChallenge.double n = 3", 101, "double_odd_applies")) ++
+    (conjoined.map derivedFact).toArray
   check (challenge.witnesses.map (fun witness => (witness.target.constant.name, witness.headline, witness.derived,
       witness.target.rendered, witness.target.place.line, witness.target.written)) == expected)
     s!"the witnesses were misread: {challenge.witnesses.map fun witness => (witness.target.constant.name,
@@ -97,6 +108,18 @@ run_cmd Elab.Command.liftCoreM do
   check (challenge.witnesses.all fun witness => witness.target.enclosingNamespace == fixture `WitnessChallenge &&
       (witness.target.signature.isEmpty == witness.derived))
     "a witness's namespace or signature was misread"
+  check ((Statement.witnessErrors challenge).filter (· matches .witnessMisstated ..) ==
+      #[.witnessMisstated (member `double_hidden_applies) (member `double_hidden)])
+    s!"a derived witness but double_hidden's, whose conclusion hides a precondition in a definition the challenge \
+      cannot unfold, states other than Witness.build: {repr (Statement.witnessErrors challenge)}"
+  check (Statement.unprovableErrors challenge ==
+      #[.witnessUnprovable (member `succ_hits_one_at) 2 (fixture `nativeSucc) 1])
+    s!"a precondition about nativeSucc that only an input claim constrains was misjudged: \
+      {repr (Statement.unprovableErrors challenge)}"
+  for (name, index) in [(`succ_hits_one_at, 1), (`succ_hits_one_everywhere, 0)] do
+    check (((← headline challenge (member name)).telescope[index]?).any
+        (·.expanded.constants.contains (fixture `nativeSucc)))
+      s!"the world claim of {name} was not expanded to the nativeSucc it constrains"
   let source ← IO.FS.readFile challenge.file
   let replayed := challenge.witnesses.map fun witness =>
     (witness.target.constant.name, SoftwareChallenge.Steps.Replay.lineOf source witness.target.constant.name,
@@ -116,7 +139,12 @@ run_cmd Elab.Command.liftCoreM do
       (`double_assumes_wrapped, [binder .claim true true [], binder .input false false []]),
       (`double_negative_vanishes, [binder .input false false [], binder .precondition true true [0]]),
       (`double_nonnegative_vanishes, [binder .input false false [], binder .precondition true true [0]]),
-      (`double_vanishes_only_at_zero, []), (`succ_law, [binder .claim true true [], binder .input false false []])] do
+      (`double_vanishes_only_at_zero, []), (`succ_law, [binder .claim true true [], binder .input false false []]),
+      (`succ_vanishes, [binder .input false false [], binder .claim true false [0], binder .input false false [],
+        binder .precondition true true [0, 2]]),
+      (`double_listed, [binder .input false false [], binder .claim true false [0], binder .precondition true true [0]]),
+      (`succ_hits_one_everywhere, [binder .claim true false [], binder .input false false [],
+        binder .precondition true true [1]])] do
     let found ← headline challenge (member name)
     check (found.binders challenge == binders)
       s!"the binders of {name} were classified as {repr (found.binders challenge)}"

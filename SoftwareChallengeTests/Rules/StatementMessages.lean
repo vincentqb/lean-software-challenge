@@ -44,6 +44,16 @@ def metaReached : ChallengeFacts :=
     metaImports := #[metaCodeImport]
     closure := #[`App.CoreSpec, `App.CoreCode] }
 
+def listBinder : BinderFact :=
+  { binderFact "xs" (.app (.const ``List [.zero]) (.bvar 0)) false "List α" with level := .succ .zero }
+
+def listedUnderInputClaim : ChallengeFacts :=
+  foreignChallenge [{ binderFact "α" (.sort (.succ .zero)) false "Type" with level := .succ (.succ .zero) }, listBinder,
+    { binderFact "h" (.app (.const `App.SuccAgreesOn []) (.bvar 0)) true "App.SuccAgreesOn xs" with
+      expanded := .app (.const `App.SuccAgreesOn []) (.app nativeSucc (.bvar 0)) },
+    binderFact "k" (equal (.app nativeSucc (.app (.const ``List.length [.zero]) (.bvar 1))) (.natLit 1)) true
+      "App.nativeSucc xs.length = 1"]
+
 def samples : List (Error × ChallengeFacts × LakeFacts) :=
   [(.duplicate `App.double_even_again `App.double_even, duplicated, baseLake),
    (.mentionsNothing `App.trivial, trivial, baseLake),
@@ -70,6 +80,7 @@ def samples : List (Error × ChallengeFacts × LakeFacts) :=
    (.witnessMissing `App.double_even, unwitnessed, baseLake),
    (.witnessPredeclared `App.double_even_applies `App.double_even, predeclared, baseLake),
    (.witnessMisstated `App.double_even_applies `App.double_even, misstatedWitness, baseLake),
+   (.witnessUnprovable `App.double_even 2 `App.nativeSucc 1, foreignUnderInputClaim, baseLake),
    (.unplainName (.str `App "1st"), unplainChallenge, baseLake),
    (.challengeLookup #[], baseChallenge, { baseLake with challengeCandidates := #[] }),
    (.challengeLookup twoChallenges.challengeCandidates, baseChallenge, twoChallenges),
@@ -285,6 +296,20 @@ end
 
 #guard says (.witnessPredeclared `App.double_even_applies `App.double_even)
   "Delete theorem App.double_even_applies from Challenge.lean, or rename it if it is a headline of its own"
+
+#guard says (.witnessUnprovable `App.double_even 2 `App.nativeSucc 1)
+  "Challenge.lean:8: App.double_even assumes `App.nativeSucc n = 1`, which mentions the foreign function \
+    App.nativeSucc, and every world claim it assumes about App.nativeSucc, such as `App.SuccAt n`, names an input"
+
+#guard says (.witnessUnprovable `App.double_even 2 `App.nativeSucc 1)
+  "State the claim as a law about App.nativeSucc that names no input, such as `∀ (n : Nat), App.SuccAt n`, which \
+    becomes a premise of double_even_applies, or state `App.nativeSucc n = 1` over what `App.SuccAt n` means, \
+    without App.nativeSucc, in Challenge.lean"
+
+#guard errorsOf (challenge := listedUnderInputClaim) == #[.witnessUnprovable `App.double_even 3 `App.nativeSucc 2]
+
+#guard mentions (renderedIn (.witnessUnprovable `App.double_even 3 `App.nativeSucc 2) listedUnderInputClaim)
+  "such as `∀ (α : Type) (xs : List α), App.SuccAgreesOn xs`"
 
 #guard says (.unplainName (.str `App "1st")) "App.«1st» is not a plain name"
 

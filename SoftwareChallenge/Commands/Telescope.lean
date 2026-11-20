@@ -64,20 +64,16 @@ def summarize (replaceable : Name → Bool) (binders : Array Expr) : MetaM (Arra
 
 def witnessStatement (binders : Array Expr) (summary : Array Binder) : MetaM Expr := do
   let kept := kept summary.toList
-  let keptOf := fun (kind : BinderKind) => kept.filter (summary[·]!.kind == kind)
-  let claims := keptOf .claim
-  let premise := fun (index : Nat) (statement : Expr) => do
-    return Expr.forallE (← binders[index]!.fvarId!.getUserName) (← inferType binders[index]!) statement .default
-  let mut statement := mkAndN (← (keptOf .precondition).mapM fun index => inferType binders[index]!)
-  for index in (claims.filter (!summary[·]!.refers.isEmpty)).reverse do
-    statement ← premise index statement
-  for index in (keptOf .input).reverse do
+  let premised := fun (index : Nat) => summary[index]!.kind == .claim && summary[index]!.refers.isEmpty
+  let conditions := kept.filter fun index => summary[index]!.kind != .input && !premised index
+  let mut statement := mkAndN (← conditions.mapM fun index => inferType binders[index]!)
+  for index in (kept.filter (summary[·]!.kind == .input)).reverse do
     let binder := binders[index]!
     let type ← inferType binder
     statement := mkApp2 (.const ``Exists [(← getLevel type).normalize]) type
       (.lam (← binder.fvarId!.getUserName).eraseMacroScopes type (statement.abstract #[binder]) .default)
-  for index in (claims.filter (summary[·]!.refers.isEmpty)).reverse do
-    statement ← premise index statement
+  for index in (kept.filter premised).reverse do
+    statement := .forallE (← binders[index]!.fvarId!.getUserName) (← inferType binders[index]!) statement .default
   return statement
 
 def witnessType (replaceable : Name → Bool) (type : Expr) : MetaM (Option Expr) := do

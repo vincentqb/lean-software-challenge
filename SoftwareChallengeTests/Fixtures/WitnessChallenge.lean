@@ -106,4 +106,26 @@ theorem double_odd_applies : ∃ n, double n = 3 := sorry
 
 theorem succ_law : SuccLaw := sorry
 
+theorem succ_vanishes (f : Nat → Nat) (agrees : SuccAgrees f) (n : Nat) (vanishes : f (double n) = 0) : False :=
+  sorry
+
+@[kills succ_vanishes] theorem succ_vanishes_rejects_zero :
+    ¬ ∀ (f : Nat → Nat), SuccAgrees f → ∀ n : Nat, f ((fun _ => 0) n) = 0 → False := sorry
+
+theorem double_listed (listed : List Nat) (agrees : SuccAgreesOn listed) (h : (listed.map double).sum = 0) :
+    listed.sum = 0 := sorry
+
+@[kills double_listed] theorem double_listed_rejects_zero :
+    ¬ ∀ (listed : List Nat), SuccAgreesOn listed → (listed.map (fun _ => 0)).sum = 0 → listed.sum = 0 := sorry
+
+theorem succ_hits_one_at (n : Nat) (h : SuccAt n) (k : nativeSucc n = 1) : n = 0 := sorry
+
+@[kills succ_hits_one_at] theorem succ_hits_one_at_rejects_identity :
+    ¬ ∀ (n : Nat), SuccAt n → (fun n => n) n = 1 → n = 0 := sorry
+
+theorem succ_hits_one_everywhere (h : ∀ m, SuccAt m) (n : Nat) (k : nativeSucc n = 1) : n = 0 := sorry
+
+@[kills succ_hits_one_everywhere] theorem succ_hits_one_everywhere_rejects_identity :
+    ¬ ((∀ m, SuccAt m) → ∀ n : Nat, (fun n => n) n = 1 → n = 0) := sorry
+
 end SoftwareChallengeTests.Fixtures.WitnessChallenge

@@ -350,6 +350,13 @@ def Setup.message (lake : LakeFacts) : Setup → Message
       fix := s!"Remove that line from {lakefile lake}, and {relock}"
       next := .build }
 
+def lawOver (challenge : ChallengeFacts) (headline : HeadlineFact) (claim : Nat) : String :=
+  let binders := headline.binders challenge
+  let named := (Telescope.close binders binders.length (((binders[claim]?).map (·.refers)).getD [])).filterMap
+    fun index => (headline.telescope[index]?).map fun binder => s!"({binder.name} : {binder.shown})"
+  let statement := ((headline.telescope[claim]?).map (·.shown)).getD ""
+  if named.isEmpty then statement else s!"∀ {" ".intercalate named}, {statement}"
+
 def claimWritten (claim : Name) : String :=
   match claim with
   | .str _ last => last
@@ -544,15 +551,16 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
     { place := placeOf challenge headline
       what := s!"{headline} has a precondition or input that mentions a hole or foreign function, but its kills \
         derived no {witness}"
-      why := s!"so nothing shows that some input meets its preconditions, and {headline} could hold vacuously"
+      why := s!"so nothing shows that some input meets its preconditions and the world claims about that input, and \
+        {headline} could hold vacuously"
       fix := s!"State each precondition of {headline} as a hypothesis of its own in {challenge.file}, so that \
         `@[kills {writtenOf challenge headline}]` derives {witness}, and {relock}"
       next := .build }
   | .witnessPredeclared witness headline =>
     { place := placeOf challenge witness
       what := s!"{witness} is stated in {challenge.file}"
-      why := s!"but `@[kills {writtenOf challenge headline}]` derives it from the preconditions of {headline}, so a \
-        stated one may not be the witness they call for"
+      why := s!"but `@[kills {writtenOf challenge headline}]` derives it from the preconditions and world claims of \
+        {headline}, so a stated one may not be the witness they call for"
       fix := s!"Delete theorem {witness} from {challenge.file}, or rename it if it is a headline of its own, and \
         {relock}"
       next := .build }
@@ -560,10 +568,25 @@ def Error.message (lake : LakeFacts) (files : FileFacts) (challenge : ChallengeF
     { place := placeOf challenge witness
       what := s!"{witness}, which `@[kills {writtenOf challenge headline}]` derived, does not state the witness that \
         the binders of {headline} call for"
-      why := s!"so it may not show that some input meets the preconditions of {headline}, and no edit to the \
-        editable files can fix that, because software_challenge's witness derivation wrote it"
+      why := s!"so it may not show that some input meets the preconditions of {headline} and the world claims about \
+        that input, and no edit to the editable files can fix that, because software_challenge's witness derivation \
+        wrote it"
       fix := s!"Update software_challenge in {lakefile lake} to a version whose derivation agrees with its \
         specification, and {relock}"
+      next := .build }
+  | .witnessUnprovable headline precondition foreign claim =>
+    let witness := suffixed challenge headline "_applies"
+    let telescope := ((headline? challenge headline).map (·.telescope)).getD []
+    let shownAt := fun (index : Nat) => ((telescope[index]?).map (·.shown)).getD s!"hypothesis {index + 1}"
+    let law := ((headline? challenge headline).map (lawOver challenge · claim)).getD (shownAt claim)
+    { place := placeOf challenge headline
+      what := s!"{headline} assumes `{shownAt precondition}`, which mentions the foreign function {foreign}, and \
+        every world claim it assumes about {foreign}, such as `{shownAt claim}`, names an input"
+      why := s!"so {witness} must prove `{shownAt claim}` and `{shownAt precondition}` for some input with nothing \
+        known about {foreign}, which no proof can do"
+      fix := s!"State the claim as a law about {foreign} that names no input, such as `{law}`, which becomes a premise \
+        of {witness}, or state `{shownAt precondition}` over what `{shownAt claim}` means, without {foreign}, in \
+        {challenge.file}, and {relock}"
       next := .build }
   | .unplainName name =>
     let place := placeOf challenge name

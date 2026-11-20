@@ -118,6 +118,7 @@ structure BinderFact where
   name : String
   type : Shape
   meaning : Shape
+  expanded : Shape := meaning
   prop : Bool
   shown : String
   conclusion : String
@@ -326,6 +327,13 @@ def HeadlineFact.Mentions (replaceable : Name → Bool) (headline : HeadlineFact
 
 def BinderFact.Open (binder : BinderFact) (index : Nat) : Prop :=
   ∃ earlier < index, binder.type.Refers earlier
+
+def ChallengeFacts.Foreign (challenge : ChallengeFacts) (name : Name) : Prop :=
+  name ∈ challenge.replaceable ∧ ∀ hole ∈ challenge.holes, hole.constant.name ≠ name
+
+def HeadlineFact.ClaimConstrains (claims : Array Name) (headline : HeadlineFact) (index : Nat) (binder : BinderFact)
+    (name : Name) : Prop :=
+  headline.telescope[index]? = some binder ∧ headline.Claim claims index ∧ binder.expanded.Mentions name
 
 def LakeFacts.Owned (lake : LakeFacts) (challenge : ChallengeFacts) (path : String) : Prop :=
   path ∈ lake.configFiles ∨ path = challenge.file ∨
