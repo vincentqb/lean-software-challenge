@@ -66,8 +66,7 @@ theorem output_correct_rejects_suffix :
 
 theorem fold_preserves_meaning_applies : ∃ (_ : Nat → Nat) (_ : Expr), True := ⟨fun _ => 0, .lit 0, trivial⟩
 
-theorem fold_closed_literal_applies : ∃ (e : Expr) (_ : closed e = true) (_ : Nat), True :=
-  ⟨.lit 0, rfl, 0, trivial⟩
+theorem fold_closed_literal_applies : ∃ (e : Expr) (_ : closed e = true), True := ⟨.lit 0, rfl, trivial⟩
 
 theorem fold_normalizes_applies : ∃ (_ : Expr), True := ⟨.lit 0, trivial⟩
 

@@ -301,8 +301,7 @@ theorem fold_folds_closed_rejects_identity : ¬ FoldsClosed id := by
   obtain ⟨n, hn⟩ := h (.add (.lit 1) (.lit 2)) rfl
   cases hn
 
-theorem fold_folds_closed_applies : ∃ (e : Expr) (_ : closed e = true) (_ : Nat), True :=
-  ⟨.lit 0, rfl, 0, trivial⟩
+theorem fold_folds_closed_applies : ∃ (e : Expr) (_ : closed e = true), True := ⟨.lit 0, rfl, trivial⟩
 
 end ConstantFolding"]
 

@@ -66,8 +66,10 @@ partial def witnessType (package : Option PkgId) (headline : Expr) : MetaM (Expr
         let (right, also) ← witnessType package right
         pure (if left.isConstOf ``True then right else if right.isConstOf ``True then left else mkAnd left right,
           hidden <|> also)
-      | .app (.app (.const ``Exists _) type) (.lam name _ property _) =>
-        witnessType package (.forallE name type property .default)
+      | .app (.app (.const ``Exists _) type) (.lam name _ property _) => do
+        let (inner, hidden) ← witnessType package (.forallE name type property .default)
+        pure (if inner.isAppOfArity ``Exists 2 && inner.appArg!.bindingBody!.isConstOf ``True then mkConst ``True
+          else inner, hidden)
       | _ => do
         let head ← conclusion.getAppFn.constName?.filterM fun head =>
           if packageOf env head == package && wasOriginallyDefn env head then isWritten head else pure false
