@@ -60,13 +60,16 @@ def killTemplate (holes : Array Name) (headline : Expr) : MetaM String := do
       wrong := wrong.replace fun expr => if expr.isConstOf hole then some value else none
   shown (mkNot wrong)
 
-partial def withoutMData (expr : Expr) : Expr :=
-  expr.replace fun | .mdata _ inner => some (withoutMData inner) | _ => none
+partial def asExported (expr : Expr) : Expr :=
+  expr.replace fun
+    | .mdata _ inner => some (asExported inner)
+    | .letE name type value body _ => some (.letE name (asExported type) (asExported value) (asExported body) false)
+    | _ => none
 
 partial def existsModels (claims : Array Expr) : List Name → Array (Name × Expr) → MetaM Expr
   | [], bound => return mkAndN (claims.map (replaceBound bound)).toList
   | name :: rest, bound => do
-    let type := replaceBound bound (withoutMData (← typeOf name))
+    let type := replaceBound bound (asExported (← typeOf name))
     withLocalDeclD (.mkSimple name.getString!) type fun model => do
       mkAppM ``Exists #[← mkLambdaFVars #[model] (← existsModels claims rest (bound.push (name, model)))]
 where
@@ -78,7 +81,7 @@ def Challenge.consistency (challenge : Challenge) : MetaM Expr := do
   existsModels claims (challenge.foreign.filter fun name => claims.any (·.getUsedConstants.contains name)).toList #[]
 
 def sameStatement (expected : Expr) (name : Name) : MetaM Bool :=
-  return Shape.ofExpr (← typeOf name) == Shape.ofExpr expected
+  return asExported (← typeOf name) == asExported expected
 
 def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Problem) := do
   let env ← getEnv

@@ -55,7 +55,7 @@ def standing (plan : Plan) (permitted : Array Name) (stated : Stated) : MetaM (O
     s!"Declare {name} : `{← shown stated.info.type}` there, as {stated.place} states it")
   let place ← plan.place name
   if declaredAs found != declaredAs stated.info || found.levelParams != stated.info.levelParams ||
-      Shape.ofExpr found.type != Shape.ofExpr stated.info.type then
+      !(← sameStatement stated.info.type name) then
     return some (lintProblem .pending place s!"{stated.kind} {name} is the {declaredAs found} `{← shown found.type}`"
       s!"so it is not the {declaredAs stated.info} `{← shown stated.info.type}` of {stated.place}"
       s!"State it exactly as {stated.place} does")
