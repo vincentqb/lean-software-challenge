@@ -6,40 +6,16 @@ namespace SoftwareChallenge.Grade
 
 open Lean System
 
-inductive Stage where
-  | commit | statement | owned | dependencies | worktree | build | lint | test | comparator
-  deriving BEq
-
-def Stage.order : List Stage := [.commit, .statement, .owned, .dependencies, .worktree, .build, .lint, .test, .comparator]
-
-def Stage.command : Stage → String
-  | .commit => "git rev-parse"
-  | .statement | .dependencies => "lake build :softwareChallengeStatement"
-  | .owned => "git diff"
-  | .worktree => "git worktree add"
-  | .build => "lake build"
-  | .lint => "lake lint"
-  | .test => "lake test"
-  | .comparator => "lake comparator"
-
 inductive Verdict where
-  | accept | refuse | cannotJudge
-  deriving BEq
+  | refuse | cannotJudge
 
 def Verdict.code : Verdict → UInt32
-  | .accept => 0
   | .refuse => 1
   | .cannotJudge => 3
 
 structure Observation where
-  stage : Stage
   verdict : Verdict
   detail : String
-
-def decide (observations : List Observation) : Verdict :=
-  match observations.find? (·.verdict != .accept) with
-  | some stopped => stopped.verdict
-  | none => if observations.map (·.stage) == Stage.order then .accept else .cannotJudge
 
 def rejections : List (String × String × String) := [
   ("kernel rejected the solution", "Lean's kernel rejects a proof that the build accepted",
@@ -57,8 +33,6 @@ def rejections : List (String × String × String) := [
   ("Solution constant is not a theorem", "the solution declares a theorem target as something other than a theorem",
     "Declare it as a `theorem`"),
   ("Illegal axiom detected", "a proof uses an axiom that comparator.json does not permit",
-    "Prove it without that axiom"),
-  ("is not permitted; it is used by", "a proof uses an axiom that comparator.json does not permit",
     "Prove it without that axiom")]
 
 def rejection? (code : UInt32) (output : String) : Option (String × String) :=
@@ -117,15 +91,15 @@ def Context.configFile (context : Context) : FilePath := context.scratch / s!"{c
 
 abbrev Judge := ExceptT Observation IO
 
-def stop {α : Type} (stage : Stage) (verdict : Verdict) (detail : String) : Judge α :=
-  throw { stage, verdict, detail }
+def stop {α : Type} (verdict : Verdict) (detail : String) : Judge α :=
+  throw { verdict, detail }
 
-def guarded {α : Type} (context : Context) (stage : Stage) (action : Judge α) : Judge α :=
+def guarded {α : Type} (context : Context) (command : String) (action : Judge α) : Judge α :=
   ExceptT.mk do
     try action.run
-    catch error => return .error { stage, verdict := .cannotJudge, detail := s!"cannot judge: grade's \
-      `{stage.command}` stage failed with `{error}`, so grade cannot tell whether {context.candidate} is right. Run \
-      `{stage.command}` in {context.base} to see the cause, fix it there, {context.again}." }
+    catch error => return .error { verdict := .cannotJudge, detail := s!"cannot judge: grade's \
+      `{command}` stage failed with `{error}`, so grade cannot tell whether {context.candidate} is right. Run \
+      `{command}` in {context.base} to see the cause, fix it there, {context.again}." }
 
 structure Dependency where
   name : String
@@ -147,18 +121,15 @@ structure BaseFacts where
   solution : String
   challenge : String
   sources : Array (Name × String)
-  targets : Nat
   dependencies : Array Dependency
-
-def stepFile (dir : FilePath) (name : String) : FilePath := dir / ".lake" / "build" / "softwareChallenge" / name
 
 def commitStage (context : Context) : Judge Unit := do
   unless (← output "git" #["rev-parse", "--show-toplevel"] context.base).exitCode == 0 do
-    stop .commit .cannotJudge s!"cannot judge: {context.base} is not in a git repository, so grade cannot compare \
+    stop .cannotJudge s!"cannot judge: {context.base} is not in a git repository, so grade cannot compare \
       the candidate's owned files with it. Run `lake exe grade {context.candidate}` from a git checkout of the base."
   unless (← output "git" #["rev-parse", "--verify", "--quiet", s!"{context.candidate}^\{commit}"] context.base).exitCode
       == 0 do
-    stop .commit .cannotJudge s!"cannot judge: {context.candidate} names no commit of the repository at \
+    stop .cannotJudge s!"cannot judge: {context.candidate} names no commit of the repository at \
       {context.base}, so grade cannot check it out. Pass a commit or branch of that repository, as in \
       `lake exe grade HEAD`."
 
@@ -169,27 +140,24 @@ def readJson (path : FilePath) : IO (Except String Json) := do
 def statementStage (context : Context) : Judge BaseFacts := do
   let base := context.base
   unless (← run context.lake #["build", ":softwareChallengeStatement"] base) == 0 do
-    stop .statement .cannotJudge s!"cannot judge: the statement check fails in {base}, as printed above, so it \
+    stop .cannotJudge s!"cannot judge: the statement check fails in {base}, as printed above, so it \
       states no challenge to grade {context.candidate} against. Fix each error there as it says until `lake build` \
       passes in {base}, commit, {context.merge}."
   let file := base / "comparator.json"
-  let plan := stepFile base "statement.json"
-  match ← readJson file, ← readJson plan with
-  | .ok config, .ok described =>
-    let facts : Except String BaseFacts := do
+  let plan := base / ".lake" / "build" / "softwareChallenge" / "statement.json"
+  let (configRead, planRead) := (← readJson file, ← readJson plan)
+  let facts : Except String BaseFacts := do
+    let (config, described) := (← configRead, ← planRead)
+    Except.mapError (s!"{file} or {plan} lacks what grade reads ({·})") do
       return { config := config.compress, solution := ← config.getObjValAs? String "solution_module"
                challenge := ← (← described.getObjVal? "challenge").getObjValAs? String "file"
                sources := ← (← described.getObjValAs? (Array Json) "modules").mapM fun source => do
                  return ((← source.getObjValAs? String "module").toName, ← source.getObjValAs? String "file")
-               targets := (← config.getObjValAs? (Array Json) "theorem_names").size
                dependencies := ← (← described.getObjValAs? (Array Json) "packages").mapM Dependency.parse }
-    match facts with
-    | .ok facts => return facts
-    | .error problem => stop .statement .cannotJudge s!"cannot judge: {file} or {plan} lacks what grade reads \
-        ({problem}), so grade has no statement to compare {context.candidate} with. Run `lake build` in {base}, \
-        {context.again}."
-  | .error problem, _ | _, .error problem => stop .statement .cannotJudge s!"cannot judge: {problem}, so grade has \
-      no statement to compare {context.candidate} with. Run `lake build` in {base}, {context.again}."
+  match facts with
+  | .ok facts => return facts
+  | .error problem => stop .cannotJudge s!"cannot judge: {problem}, so grade has no statement to compare \
+      {context.candidate} with. Run `lake build` in {base}, {context.again}."
 
 def ownedStage (context : Context) (facts : BaseFacts) : Judge String := do
   let base := context.base
@@ -203,18 +171,18 @@ def ownedStage (context : Context) (facts : BaseFacts) : Judge String := do
   match ← differ #[candidate] with
   | 0 => return packagePrefix
   | 1 => pure ()
-  | _ => stop .owned .cannotJudge gitFails
+  | _ => stop .cannotJudge gitFails
   match ← differ #["HEAD"] with
   | 0 => pure ()
   | 1 =>
     discard <| run "git" (#["diff", "--stat", "HEAD", "--"] ++ owned) base
-    stop .owned .cannotJudge s!"cannot judge: {base} has changes to the owned files listed above that are not \
+    stop .cannotJudge s!"cannot judge: {base} has changes to the owned files listed above that are not \
       committed, so no commit holds the statement grade would check. Commit them in {base}, {context.merge}."
-  | _ => stop .owned .cannotJudge gitFails
+  | _ => stop .cannotJudge gitFails
   discard <| run "git" (#["diff", "--stat", candidate, "--"] ++ owned) base
   let mergeBase := firstLine (← output "git" #["merge-base", "HEAD", candidate] base).stdout
   if (← differ #[mergeBase, candidate]) == 0 then
-    stop .owned .refuse s!"refused: {context.baseRef} changed the owned files listed above after {candidate} \
+    stop .refuse s!"refused: {context.baseRef} changed the owned files listed above after {candidate} \
       branched from it, so {candidate} solves an older statement. To grade it against this one, {context.merge}."
   let names ← output "git" (#["diff", "--name-only", "--no-renames", candidate, "--"] ++ owned) base
   let files := (names.stdout.splitOn "\n").filter (!·.isEmpty)
@@ -225,13 +193,13 @@ def ownedStage (context : Context) (facts : BaseFacts) : Judge String := do
     why := s!"which Challenge.lean and its imports state, so {candidate} solves another challenge"
     fix := s!"Restore them on {context.fixRef} (`{context.checkoutFix} && git restore --source={context.baseRef} \
       --staged --worktree -- {restore} && git commit -m 'Restore the owned files' && git checkout {context.baseRef}`)" }
-  stop .owned .refuse ("refused: " ++ changed.render)
+  stop .refuse ("refused: " ++ changed.render)
 
 def dependenciesStage (context : Context) (facts : BaseFacts) : Judge Unit := do
   let hidden := facts.dependencies.filter fun dependency => coveredRoots.any (within dependency.real ·)
   if hidden.isEmpty then return
   let base ← IO.FS.realPath context.base
-  stop .dependencies .cannotJudge <| "\n".intercalate <| hidden.toList.map fun dependency =>
+  stop .cannotJudge <| "\n".intercalate <| hidden.toList.map fun dependency =>
     let fix := if within dependency.real base.toString then
         s!"Clone the repository of {context.base} into a directory outside those, run `lake build` in the clone, \
           then run `lake exe grade {context.candidate}` there"
@@ -248,7 +216,7 @@ def worktreeStage (context : Context) (packagePrefix : String) (facts : BaseFact
   IO.FS.createDirAll context.scratch
   unless (← run "git" #["worktree", "add", "--detach", context.worktree.toString, context.candidate]
       context.base) == 0 do
-    stop .worktree .cannotJudge s!"cannot judge: `git worktree add` cannot check out {context.candidate} at \
+    stop .cannotJudge s!"cannot judge: `git worktree add` cannot check out {context.candidate} at \
       {context.worktree}, as printed above. Run `git worktree prune` in {context.base}, {context.again}."
   let checkout := context.worktree / packagePrefix
   IO.FS.createDirAll (checkout / ".lake")
@@ -256,59 +224,46 @@ def worktreeStage (context : Context) (packagePrefix : String) (facts : BaseFact
   IO.FS.writeFile (checkout / ".lake" / "package-overrides.json") overrides.pretty
   return checkout
 
-def stepStage (context : Context) (checkout : FilePath) (stage : Stage) (step : String) : Judge Unit := do
+def stepStage (context : Context) (checkout : FilePath) (step : String) : Judge Unit := do
   match ← run context.lake #[step] checkout with
   | 0 => return
-  | 3 => stop stage .cannotJudge s!"cannot judge: `{stage.command}` stopped in {checkout} before judging, as printed \
-      above, so grade cannot tell whether {context.candidate} is right. Run `{stage.command}` in a checkout of \
+  | 3 => stop .cannotJudge s!"cannot judge: `lake {step}` stopped in {checkout} before judging, as printed \
+      above, so grade cannot tell whether {context.candidate} is right. Run `lake {step}` in a checkout of \
       {context.candidate} to see the cause, fix it there, {context.amended}."
-  | _ => stop stage .refuse s!"refused: `{stage.command}` fails on {context.candidate}, as printed above. Fix each \
+  | _ => stop .refuse s!"refused: `lake {step}` fails on {context.candidate}, as printed above. Fix each \
       problem it reports in {context.candidate} as it says, {context.amended}."
 
-def comparator (context : Context) (checkout : FilePath) (config : String) : IO IO.Process.Output := do
-  IO.FS.writeFile context.configFile config
+def comparatorStage (context : Context) (checkout : FilePath) (facts : BaseFacts) : Judge Unit := do
+  IO.FS.writeFile context.configFile facts.config
   let attempt := output context.lake #["comparator", "--config", context.configFile.toString] checkout
   let mut out ← attempt
   for _ in [0:3] do
     unless out.exitCode != 0 && (out.stdout ++ out.stderr).contains "bwrap: Can't bind mount" do break
     IO.sleep 20000
     out ← attempt
-  return out
-
-def comparatorStage (context : Context) (checkout : FilePath) (facts : BaseFacts) : Judge Unit := do
-  let out ← comparator context checkout facts.config
   IO.print out.stdout
   (← IO.getStdout).flush
   IO.eprint out.stderr
   if out.exitCode == 0 then return
   match rejection? out.exitCode (out.stdout ++ "\n" ++ out.stderr) with
   | some (reason, remedy) =>
-    stop .comparator .refuse s!"refused: `lake comparator` rejects {context.candidate}, as printed above, because \
+    stop .refuse s!"refused: `lake comparator` rejects {context.candidate}, as printed above, because \
       {reason}. {remedy} in {facts.solution}, {context.again}."
   | none =>
-    stop .comparator .cannotJudge s!"cannot judge: `lake comparator` exited {out.exitCode} without a verdict, as \
+    stop .cannotJudge s!"cannot judge: `lake comparator` exited {out.exitCode} without a verdict, as \
       printed above, so grade cannot tell whether {context.candidate} is right. Run `lake comparator` in a checkout \
       of {context.candidate} to see the cause, such as `bwrap` permissions or a build failure in its sandbox, fix \
       it there, {context.again}."
 
-def judge (context : Context) (passed : IO.Ref (Array Observation)) : Judge Unit := do
-  let accept := fun (stage : Stage) (detail : String) =>
-    (passed.modify (·.push { stage, verdict := .accept, detail }) : IO Unit)
-  guarded context .commit (commitStage context)
-  accept .commit s!"{context.candidate} is a commit of the repository at {context.base}"
-  let facts ← guarded context .statement (statementStage context)
-  accept .statement s!"comparator.json states {facts.targets} theorems"
-  let packagePrefix ← guarded context .owned (ownedStage context facts)
-  accept .owned "the owned files are unchanged"
-  guarded context .dependencies (dependenciesStage context facts)
-  accept .dependencies s!"the comparator's sandbox sees all {facts.dependencies.size} dependencies"
-  let checkout ← guarded context .worktree (worktreeStage context packagePrefix facts)
-  accept .worktree s!"{context.candidate} is checked out at {checkout}"
-  for (stage, step) in [(Stage.build, "build"), (.lint, "lint"), (.test, "test")] do
-    guarded context stage (stepStage context checkout stage step)
-    accept stage s!"`{stage.command}` passes on {context.candidate}"
-  guarded context .comparator (comparatorStage context checkout facts)
-  accept .comparator s!"`lake comparator` accepts {context.candidate}"
+def judge (context : Context) : Judge Unit := do
+  guarded context "git rev-parse" (commitStage context)
+  let facts ← guarded context "lake build :softwareChallengeStatement" (statementStage context)
+  let packagePrefix ← guarded context "git diff" (ownedStage context facts)
+  guarded context "lake build :softwareChallengeStatement" (dependenciesStage context facts)
+  let checkout ← guarded context "git worktree add" (worktreeStage context packagePrefix facts)
+  for step in ["build", "lint", "test"] do
+    guarded context s!"lake {step}" (stepStage context checkout step)
+  guarded context "lake comparator" (comparatorStage context checkout facts)
 
 def clean (context : Context) : IO Unit := do
   discard <| output "git" #["worktree", "remove", "--force", context.worktree.toString] context.base
@@ -324,27 +279,22 @@ def grade (candidate : String) : IO UInt32 := do
   let shortCandidate := firstLine (← output "git" #["rev-parse", "--short", s!"{candidate}^\{commit}"] base).stdout
   let fixRef := if isBranch then candidate else s!"fix-{shortCandidate}"
   let checkoutFix := if isBranch then s!"git checkout {candidate}" else s!"git switch -c {fixRef} {candidate}"
+  let again := s!"then run `lake exe grade {candidate}`"
   let context : Context := {
-    lake := (← IO.getEnv "LAKE").getD "lake", base, candidate, baseRef, fixRef, checkoutFix
-    again := s!"then run `lake exe grade {candidate}`"
-    amended := if isBranch then s!"then run `lake exe grade {candidate}`"
+    lake := (← IO.getEnv "LAKE").getD "lake", base, candidate, again, baseRef, fixRef, checkoutFix
+    amended := if isBranch then again
       else s!"commit the fix on a branch (`{checkoutFix}`), then run `lake exe grade {fixRef}`"
     merge := s!"merge {baseRef} into {fixRef} (`{checkoutFix} && git merge {baseRef} && git checkout {baseRef}`), \
       then run `lake exe grade {fixRef}`"
     stamp := s!"{← IO.monoNanosNow}-{← IO.Process.getPID}" }
-  let passed ← IO.mkRef #[]
-  let outcome ← try (judge context passed).run finally clean context
-  let recorded ← passed.get
-  let observations := match outcome with
-    | .ok () => recorded
-    | .error stopped => recorded.push stopped
-  for observation in observations do
-    unless observation.verdict == .accept do IO.eprintln observation.detail
-  let verdict := decide observations.toList
-  if verdict == .accept then
+  match ← try (judge context).run finally clean context with
+  | .ok () =>
     IO.println s!"accepted: {candidate} proves every target that {base} states, and passes `lake build`, \
       `lake lint`, `lake test` and `lake comparator`."
-  return verdict.code
+    return 0
+  | .error stopped =>
+    IO.eprintln stopped.detail
+    return stopped.verdict.code
 
 end SoftwareChallenge.Grade
 
