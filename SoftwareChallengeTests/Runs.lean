@@ -75,6 +75,15 @@ def gradeRun (context : Context) : Check String := do
   let graded ← step dir #["exe", "grade", fixRef] 0 [s!"accepted: {fixRef}"]
   return ((graded.splitOn "\n").find? (·.startsWith "accepted:")).getD ""
 
+def builtinLintRun (context : Context) : Check Unit := do
+  let dir := context.dir "builtinLint"
+  templateCopy context.lsc dir [.replace "lakefile.lean" "  testDriver := \"tests\"\n"
+      "  testDriver := \"tests\"\n  builtinLint := true\n",
+    .replace solution "fold (fold e) = fold e :=\n  fold_eq_self_of_normal (fold e) (normal_fold e)"
+      "fold (fold e) = fold e := by\n  sorry",
+    .replace "ConstantFolding/Fold.lean" "end ConstantFolding" "def unusedArgument (n : Nat) : Nat := 0\n\nend ConstantFolding"]
+  discard <| step dir #["lint"] 1 ["Variable name `n` is not explicitly referenced", "Pending: 1"]
+
 def coverageRun (context : Context) : Check Unit := do
   let dir := context.dir "coverage"
   templateCopy context.lsc dir coverage

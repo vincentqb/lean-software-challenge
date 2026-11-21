@@ -90,7 +90,10 @@ script lint do
       (tests[0]?.map (·.root.name))
     let built ← roots.mapM fun mod => return (← mod.olean.fetch).map fun _ => ()
     return ((← stepsJob).mix (Job.mixArray built)).map fun _ => plan
-  (← IO.Process.spawn (← stepProcess pkg "lint" plan (← getLean) (← getAugmentedEnv))).wait
+  let code ← (← IO.Process.spawn (← stepProcess pkg "lint" plan (← getLean) (← getAugmentedEnv))).wait
+  unless code == 2 && pkg.config.builtinLint? == some true do return code
+  let builtin ← IO.Process.output { cmd := (← getLake).toString, args := #["lint", "--builtin-only"], cwd := pkg.dir }
+  return if builtin.exitCode == 0 then code else 1
 
 script test do
   let pkg ← getRootPackage
