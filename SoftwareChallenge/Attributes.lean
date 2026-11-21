@@ -38,9 +38,18 @@ partial def witnessType (package : Option PkgId) (headline : Expr) : MetaM (Expr
   forallTelescope headline fun binders conclusion => do
     let env ← getEnv
     let packaged := fun head => packageOf env head == package && wasOriginallyDefn env head
-    let (body, hidden) ← match ← delta? conclusion fun head => packaged head && env.hasExposedBody head with
-      | some unfolded => witnessType package unfolded
-      | none => pure (mkConst ``True, conclusion.getAppFn.constName?.filter packaged)
+    let (body, hidden) ← match conclusion with
+      | .letE _ _ value scope _ => witnessType package (scope.instantiate1 value)
+      | .app (.app (.const ``And _) left) right => do
+        let (left, hidden) ← witnessType package left
+        let (right, also) ← witnessType package right
+        pure (if left.isConstOf ``True then right else if right.isConstOf ``True then left else mkAnd left right,
+          hidden <|> also)
+      | .app (.app (.const ``Exists _) type) (.lam name _ property _) =>
+        witnessType package (.forallE name type property .default)
+      | _ => match ← delta? conclusion fun head => packaged head && env.hasExposedBody head with
+        | some unfolded => witnessType package unfolded
+        | none => pure (mkConst ``True, conclusion.getAppFn.constName?.filter packaged)
     let negated ← match binders.back? with
       | some last => pure (conclusion.isConstOf ``False && (← isProp (← inferType last)))
       | none => pure false

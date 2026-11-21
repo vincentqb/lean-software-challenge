@@ -57,7 +57,6 @@ def isWritten (name : Name) : CoreM Bool := do
   return ranges.range != ranges.selectionRange
 
 def shown (expr : Expr) : MetaM String := do
-  return toString (← withOptions (fun options => (options.setBool `pp.funBinderTypes true).set `format.width (10000 : Nat))
-    (ppExpr expr))
+  return (← withOptions (·.setBool `pp.funBinderTypes true) (ppExpr expr)).pretty 10000
 
 end SoftwareChallenge

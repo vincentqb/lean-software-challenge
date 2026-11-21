@@ -91,12 +91,21 @@ def fixtures : List Fixture := [
         `∃ (e : ConstantFolding.Expr), ∃ (a : ConstantFolding.closed e = true), True`",
       "headline ConstantFolding.fold_folds_closed concludes with ConstantFolding.Literal, whose body the witness \
         cannot see", "Mark ConstantFolding.Literal `@[expose]` in ConstantFolding/Expr.lean:31",
-      "has no witness ConstantFolding.fold_never_literal_applies stating `∃ (n : Nat), True`"]
+      "has no witness ConstantFolding.fold_never_literal_applies stating `∃ (n : Nat), True`",
+      "has no witness ConstantFolding.fold_keeps_closed_fixes_normal_applies stating \
+        `(∃ (e : ConstantFolding.Expr), ∃ (a : ConstantFolding.closed e = true), True) ∧ \
+        ∃ (e : ConstantFolding.Expr), ∃ (a : ConstantFolding.normal e = true), True`",
+      "has no witness ConstantFolding.fold_fixes_some_literal_applies stating \
+        `∃ (n : Nat), ∃ (e : ConstantFolding.Expr), ∃ (a : e = ConstantFolding.Expr.lit n), True`"]
     edits := [.replace challenge "@[kills fold_normalizes]"
         "theorem fold_normalizes_applies : True := by\n  sorry\n\n@[kills fold_normalizes]",
       .replace "ConstantFolding/Expr.lean" "end ConstantFolding" "def Literal (e : Expr) : Prop := ∃ n, e = .lit n\n\n\
         @[expose] def FoldsClosed (f : Expr → Expr) : Prop := ∀ e, closed e = true → Literal (f e)\n\n\
-        @[expose] def NeverLiteral (e : Expr) : Prop := ∀ n, e = .lit n → False\n\nend ConstantFolding",
+        @[expose] def NeverLiteral (e : Expr) : Prop := ∀ n, e = .lit n → False\n\n\
+        @[expose] def KeepsClosedFixesNormal (f : Expr → Expr) : Prop :=\n  \
+        (∀ e, closed e = true → closed (f e) = true) ∧ ∀ e, normal e = true → f e = e\n\n\
+        @[expose] def FixesSomeLiteral (f : Expr → Expr) : Prop := ∃ n, ∀ e, e = .lit n → f e = e\n\n\
+        end ConstantFolding",
       .replace challenge "end ConstantFolding" "theorem fold_folds_closed : FoldsClosed fold := by\n  sorry\n\n\
         theorem fold_folds_closed_applies : True := by\n  sorry\n\n\
         @[kills fold_folds_closed] theorem fold_folds_closed_rejects_identity : ¬ FoldsClosed id := by\n  sorry\n\n\
@@ -104,6 +113,14 @@ def fixtures : List Fixture := [
         theorem fold_never_literal_applies : True := by\n  sorry\n\n\
         @[kills fold_never_literal] theorem fold_never_literal_rejects_constant :\n    \
         ¬ NeverLiteral ((fun (_ : Expr) => Expr.lit 0) (.var 0)) := by\n  sorry\n\n\
+        theorem fold_keeps_closed_fixes_normal : KeepsClosedFixesNormal fold := by\n  sorry\n\n\
+        theorem fold_keeps_closed_fixes_normal_applies : True := by\n  sorry\n\n\
+        @[kills fold_keeps_closed_fixes_normal] theorem fold_keeps_closed_fixes_normal_rejects_variable :\n    \
+        ¬ KeepsClosedFixesNormal (fun _ => Expr.var 0) := by\n  sorry\n\n\
+        theorem fold_fixes_some_literal : FixesSomeLiteral fold := by\n  sorry\n\n\
+        theorem fold_fixes_some_literal_applies : True := by\n  sorry\n\n\
+        @[kills fold_fixes_some_literal] theorem fold_fixes_some_literal_rejects_doubling :\n    \
+        ¬ FixesSomeLiteral (fun e => Expr.add e e) := by\n  sorry\n\n\
         end ConstantFolding"] },
   { rule := .consistent, command := statement, code := 1, says := ["no @[consistent] theorem states"]
     edits := [.replace challenge "∀ (a b : Nat), nativeAdd a b = a + b := by" "∀ (a b : Nat), nativeAdd a b = b + a := by"] },
@@ -277,7 +294,8 @@ theorem fold_folds_closed_rejects_identity : ¬ FoldsClosed id := by
   obtain ⟨n, hn⟩ := h (.add (.lit 1) (.lit 2)) rfl
   cases hn
 
-theorem fold_folds_closed_applies : ∃ (e : Expr) (_ : closed e = true), True := ⟨.lit 0, rfl, trivial⟩
+theorem fold_folds_closed_applies : ∃ (e : Expr) (_ : closed e = true) (_ : Nat), True :=
+  ⟨.lit 0, rfl, 0, trivial⟩
 
 end ConstantFolding"]
 
