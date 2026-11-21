@@ -18,6 +18,7 @@ structure Link where
   kind : LinkKind
   source : Name
   target : Name
+  line : Nat := 0
 
 initialize linksExt : SimplePersistentEnvExtension Link (Array Link) ←
   registerSimplePersistentEnvExtension { addEntryFn := Array.push, addImportedFn := Array.flatten }
@@ -25,8 +26,8 @@ initialize linksExt : SimplePersistentEnvExtension Link (Array Link) ←
 def links (env : Environment) (kind : LinkKind) : Array (Name × Name) :=
   ((linksExt.getState env).filter (·.kind == kind)).map fun link => (link.source, link.target)
 
-def addLink (kind : LinkKind) (source target : Name) : CoreM Unit :=
-  modifyEnv (linksExt.addEntry · { kind, source, target })
+def addLink (kind : LinkKind) (source target : Name) (line : Nat := 0) : CoreM Unit :=
+  modifyEnv (linksExt.addEntry · { kind, source, target, line })
 
 def witnessName (headline : Name) : Name := headline.appendAfter "_applies"
 
@@ -62,7 +63,7 @@ def linking (name : Name) (kind : LinkKind) (descr : String) : IO Unit :=
   registerBuiltinAttribute { name, descr, add := fun declaration stx _ => do
     let target ← if kind == .consistent then pure declaration
       else withoutExporting (realizeGlobalConstNoOverloadWithInfo stx[1])
-    addLink kind declaration target
+    addLink kind declaration target ((← getFileMap).toPosition (stx.getPos?.getD 0)).line
     if kind == .kills then deriveWitness target stx }
 
 initialize linking `kills .kills "marks a kill of the headline it names and derives the headline's witness"
@@ -79,10 +80,10 @@ syntax (name := testsMain) "SoftwareChallenge.testsMain" : term
 
 @[term_elab testsMain] def elabTestsMain : TermElab := fun _ expectedType? => do
   let env ← getEnv
-  let tests ← (links env .tests).mapM fun (test, claim) => do
-    let module := ((env.getModuleIdxFor? test).map (env.header.moduleNames[·.toNat]!)).getD env.mainModule
-    let line := ((← findDeclarationRanges? test).map (·.range.pos.line)).getD 0
-    `(($(quote s!"{sourceOf module}:{line}"), $(quote test.toString), $(quote claim.toString), $(mkCIdent test)))
+  let tests ← ((linksExt.getState env).filter (·.kind == .tests)).mapM fun link => do
+    let module := ((env.getModuleIdxFor? link.source).map (env.header.moduleNames[·.toNat]!)).getD env.mainModule
+    `(($(quote s!"{sourceOf module}:{link.line}"), $(quote link.source.toString), $(quote link.target.toString),
+      $(mkCIdent link.source)))
   elabTerm (← `(SoftwareChallenge.runTests #[$tests,*])) expectedType?
 
 end SoftwareChallenge
