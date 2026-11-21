@@ -41,7 +41,10 @@ partial def witnessType (package : Option PkgId) (headline : Expr) : MetaM (Expr
     let (body, hidden) ← match ← delta? conclusion fun head => packaged head && env.hasExposedBody head with
       | some unfolded => witnessType package unfolded
       | none => pure (mkConst ``True, conclusion.getAppFn.constName?.filter packaged)
-    let witness ← binders.foldrM (init := body) fun binder body => do
+    let negated ← match binders.back? with
+      | some last => pure (conclusion.isConstOf ``False && (← isProp (← inferType last)))
+      | none => pure false
+    let witness ← (if negated then binders.pop else binders).foldrM (init := body) fun binder body => do
       let type ← inferType binder
       return mkApp2 (.const ``Exists [← getLevel type]) type (← mkLambdaFVars #[binder] body)
     return (witness, hidden)
