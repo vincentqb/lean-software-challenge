@@ -48,8 +48,14 @@ def declaredAs : ConstantInfo → String
   | .opaqueInfo _ => "opaque"
   | _ => "constant"
 
+def isImplemented (env : Environment) (hole : Name) : Bool := (env.find? hole).any (!isHole ·)
+
 def standing (plan : Plan) (permitted : Array Name) (stated : Stated) : MetaM (Option Problem) := do
   let name := stated.info.name
+  if isHole stated.info && !isImplemented (← getEnv) name then
+    return some (lintProblem .pending stated.place s!"hole {name} is not implemented yet"
+      "so there is no code to run or prove"
+      s!"Define {name} : `{← shown stated.info.type}` in an agent module that {plan.solution} imports")
   let some found := (← getEnv).find? name | return some (lintProblem .pending stated.place
     s!"{stated.kind} {name} is not in {plan.solution} or a module it imports" "so the comparator cannot check it"
     s!"Declare {name} : `{← shown stated.info.type}` there, as {stated.place} states it")
@@ -73,7 +79,6 @@ def standing (plan : Plan) (permitted : Array Name) (stated : Stated) : MetaM (O
 
 def purity (plan : Plan) (challenge : Challenge) (checked : NameSet) (hole : Name) : MetaM (Array Problem × NameSet) := do
   let env ← getEnv
-  unless env.contains hole do return (#[], checked)
   let reached := reach plan env #[hole]
   let withUnsafeTerm := (← reached.toArray.filterM (isUnsafeTerm env ·)).map (privateToUserName · |>.getPrefix)
   let impure ← ((reached.toArray.filter (!checked.contains ·)).qsort Name.lt).filterMapM fun name => do
@@ -94,10 +99,10 @@ def reachedFromMain (plan : Plan) (module : Name) : IO (Environment × NameSet) 
   let env ← importEnv module
   return (env, reach plan env #[`main])
 
-def unreached (plan : Plan) (challenge : Challenge) (program : Name) : IO (Array Problem) := do
+def unreached (plan : Plan) (implemented : Array Name) (program : Name) : IO (Array Problem) := do
   let (env, reached) ← reachedFromMain plan program
   let place ← inEnv env (plan.place `main)
-  return (challenge.holes.filter (!reached.contains ·)).map fun hole => lintProblem .unreached place
+  return (implemented.filter (!reached.contains ·)).map fun hole => lintProblem .unreached place
     s!"the main of {program} does not reach hole {hole}" "so the program does not run the code that is proved"
     s!"Make main compute through {hole}"
 
@@ -125,12 +130,13 @@ def lintStep (plan : Plan) : IO UInt32 := do
     return (challenge, (← stated "headline" challenge.headlines) ++ (← stated "kill" (challenge.kills.map (·.1))) ++
       (← stated "witness" challenge.witnesses) ++ (← stated "consistency theorem" challenge.consistent) ++
       (← stated "hole" challenge.holes) ++ (← stated "world claim" challenge.claims))
-  let (standings, impure) ← inEnv (← importEnv plan.solution) do
-    let (impure, _) ← challenge.holes.foldlM (init := (#[], {})) fun (impure, checked) hole => do
+  let (standings, impure, implemented) ← inEnv (← importEnv plan.solution) do
+    let implemented := challenge.holes.filter (isImplemented (← getEnv))
+    let (impure, _) ← implemented.foldlM (init := (#[], {})) fun (impure, checked) hole => do
       let (found, checked) ← purity plan challenge checked hole
       return (impure ++ found, checked)
-    return (← stated.mapM (standing plan (standardAxioms ++ challenge.claims)), impure)
-  let problems := standings.filterMap id ++ impure ++ (← plan.programs.flatMapM (unreached plan challenge)) ++
+    return (← stated.mapM (standing plan (standardAxioms ++ challenge.claims)), impure, implemented)
+  let problems := standings.filterMap id ++ impure ++ (← plan.programs.flatMapM (unreached plan implemented)) ++
     (← untested plan (stated.filter (·.kind == "world claim")))
   let errors := problems.filter (·.rule != .pending)
   let pending := problems.filter (·.rule == .pending)

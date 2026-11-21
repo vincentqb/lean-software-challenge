@@ -106,9 +106,13 @@ def fixtures : List Fixture := [
     edits := [.replace challenge "theorem fold_keeps_literal (n m : Nat)"
       "@[terminates output] theorem fold_keeps_literal (n m : Nat)"] },
   { rule := .pending, command := lint, code := 2
-    says := ["headline ConstantFolding.fold_idempotent uses sorry", "Proved: 5 of 6 headlines"]
+    says := ["headline ConstantFolding.fold_idempotent uses sorry", "Proved: 5 of 6 headlines",
+      "hole ConstantFolding.simplify is not implemented yet", "hole ConstantFolding.evaluate is not implemented yet"]
     edits := [.replace solution "fold (fold e) = fold e :=\n  fold_eq_self_of_normal (fold e) (normal_fold e)"
-      "fold (fold e) = fold e := by\n  sorry"] },
+        "fold (fold e) = fold e := by\n  sorry",
+      .replace challenge "def output (e : Expr) : String := sorry" "def output (e : Expr) : String := sorry\n\n\
+        def simplify (e : Expr) : Expr := sorry\n\ndef evaluate (e : Expr) : Nat := sorry",
+      .replace "ConstantFolding/Fold.lean" "end ConstantFolding" "def evaluate (e : Expr) : Nat := sorry\n\nend ConstantFolding"] },
   { rule := .axiomUsed, command := lint, code := 1
     says := ["headline ConstantFolding.fold_idempotent uses the axiom ConstantFolding.fold_idempotent_fact",
       "consistency theorem ConstantFolding.addAgrees_consistent uses the axiom ConstantFolding.addAgrees"]
