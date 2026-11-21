@@ -31,10 +31,20 @@ def addLink (kind : LinkKind) (source target : Name) (line : Nat := 0) : CoreM U
 
 def witnessName (headline : Name) : Name := headline.appendAfter "_applies"
 
-def witnessType (headline : Expr) : MetaM Expr :=
-  forallTelescope headline fun binders _ => binders.foldrM (init := mkConst ``True) fun binder body => do
-    let type ← inferType binder
-    return mkApp2 (.const ``Exists [← getLevel type]) type (← mkLambdaFVars #[binder] body)
+def packageOf (env : Environment) (name : Name) : Option PkgId :=
+  ((env.getModuleIdxFor? name).map env.getModulePackageByIdx?).getD env.getModulePackage?
+
+partial def witnessType (package : Option PkgId) (headline : Expr) : MetaM (Expr × Option Name) :=
+  forallTelescope headline fun binders conclusion => do
+    let env ← getEnv
+    let packaged := fun head => packageOf env head == package && wasOriginallyDefn env head
+    let (body, hidden) ← match ← delta? conclusion fun head => packaged head && env.hasExposedBody head with
+      | some unfolded => witnessType package unfolded
+      | none => pure (mkConst ``True, conclusion.getAppFn.constName?.filter packaged)
+    let witness ← binders.foldrM (init := body) fun binder body => do
+      let type ← inferType binder
+      return mkApp2 (.const ``Exists [← getLevel type]) type (← mkLambdaFVars #[binder] body)
+    return (witness, hidden)
 
 def deriveWitness (headline : Name) (ref : Syntax) : CoreM Unit := do
   let name := witnessName headline
@@ -44,7 +54,7 @@ def deriveWitness (headline : Name) (ref : Syntax) : CoreM Unit := do
   unless found.kind matches .thm do return
   let signature := found.sig.get
   let (type, value) ← withoutExporting <| MetaM.run' do
-    let type ← witnessType signature.type
+    let (type, _) ← witnessType (packageOf env headline) signature.type
     return (type, ← mkSorry type false)
   let used := (collectLevelParams {} type).params
   addDecl (.thmDecl { name, levelParams := signature.levelParams.filter used.contains, type, value })

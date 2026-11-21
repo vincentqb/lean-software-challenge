@@ -123,13 +123,17 @@ def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Probl
         with holes replaced by closed terms" "so it does not show that the headline rejects a wrong implementation"
         s!"State it as `{wanted}`, with each ?wrong_ a wrong closed term, and name a headline in @[kills]")
   for headline in challenge.headlines.filter fun headline => challenge.kills.any (·.2 == headline) do
-    let expected ← witnessType (← typeOf headline)
+    let (expected, hidden) ← witnessType (packageOf env headline) (← typeOf headline)
     let witness := witnessName headline
     let stated ← if env.contains witness then sameStatement expected witness else pure false
     unless stated do
       problems := problems.push (← problem .witness headline s!"headline {headline} has no witness {witness} \
         stating `{← shown expected}`" "so nothing shows that some input meets its hypotheses"
         s!"Delete any theorem {witness}, so that @[kills {headline}] derives it")
+    if let some hidden := hidden.filter (!challenge.holes.contains ·) then
+      problems := problems.push (← problem .witness headline s!"headline {headline} concludes with {hidden}, whose \
+        body the witness cannot see" "so nothing shows that some input meets any hypotheses inside it"
+        s!"Mark {hidden} `@[expose]` in {← plan.place hidden}")
   if !challenge.claims.isEmpty then
     let expected ← challenge.consistency
     let wrong ← challenge.consistent.filterM fun name => return !(← sameStatement expected name)

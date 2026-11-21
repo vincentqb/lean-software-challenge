@@ -31,7 +31,10 @@ def Plan.fileOf (plan : Plan) (module : Name) : String :=
 
 def importEnv (module : Name) : IO Environment := do
   unsafe enableInitializersExecution
-  importModules #[{ module }] {} (loadExts := true)
+  let (root, _) ← readModuleData (← findOLean module)
+  withImporting do
+    let (_, imported) ← (importModulesCore #[{ module }] (isExported := true)).run
+    finalizeImport imported #[{ module }] {} (leakEnv := false) (loadExts := true) (isModule := root.isModule)
 
 def inEnv {α : Type} (env : Environment) (action : MetaM α) : IO α := do
   let (value, _) ← (action.run' {} {}).toIO { fileName := "", fileMap := default, maxHeartbeats := 0 } { env }
