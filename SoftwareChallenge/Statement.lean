@@ -1,5 +1,4 @@
 import SoftwareChallenge.Plan
-import SoftwareChallenge.Shape
 import SoftwareChallenge.Problem
 
 namespace SoftwareChallenge
@@ -83,6 +82,25 @@ def Challenge.consistency (challenge : Challenge) : MetaM Expr := do
 def sameStatement (expected : Expr) (name : Name) : MetaM Bool :=
   return asExported (← typeOf name) == asExported expected
 
+def replacements (holes : Array Name) : Expr → Expr → Array (Name × Expr) → Array (Name × Expr)
+  | .const name _, value, found =>
+    if holes.contains name && !value.isConstOf name && !found.any (·.1 == name) then found.push (name, value) else found
+  | .app f a, .app g b, found => replacements holes a b (replacements holes f g found)
+  | .lam _ t b _, .lam _ u c _, found | .forallE _ t b _, .forallE _ u c _, found =>
+    replacements holes b c (replacements holes t u found)
+  | .letE _ t v b _, .letE _ u w c _, found =>
+    replacements holes b c (replacements holes v w (replacements holes t u found))
+  | .proj _ _ v, .proj _ _ w, found => replacements holes v w found
+  | _, _, found => found
+
+def rejects (holes : Array Name) (headline kill : Expr) : MetaM Bool := do
+  let headline := asExported headline
+  let some rejected := (asExported kill).not? | return false
+  let found := replacements holes headline rejected #[]
+  if found.isEmpty || found.any (·.2.hasLooseBVars) then return false
+  let wrong := headline.replace fun | .const name _ => (found.find? (·.1 == name)).map (·.2) | _ => none
+  withReducible (isDefEq wrong rejected)
+
 def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Problem) := do
   let env ← getEnv
   let problem := fun (rule : Rule) (name : Name) (what why fix : String) => do
@@ -98,9 +116,7 @@ def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Probl
       problems := problems.push (← problem .kill headline s!"headline {headline} has no kill"
         "so nothing shows that it rejects a wrong implementation" fix)
   for (kill, headline) in challenge.kills do
-    let rejects := challenge.headlines.contains headline &&
-      Shape.rejects challenge.holes.contains (Shape.ofExpr (← typeOf headline)) (Shape.ofExpr (← typeOf kill))
-    unless rejects do
+    unless challenge.headlines.contains headline && (← rejects challenge.holes (← typeOf headline) (← typeOf kill)) do
       let wanted ← if challenge.headlines.contains headline then killTemplate challenge.holes (← typeOf headline)
         else pure s!"¬ <a headline with its holes replaced>"
       problems := problems.push (← problem .killShape kill s!"kill {kill} does not negate headline {headline} \
