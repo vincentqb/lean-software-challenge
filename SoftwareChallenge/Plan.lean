@@ -52,10 +52,6 @@ def lineOf (name : Name) : CoreM Nat := do
 def Plan.place (plan : Plan) (name : Name) : CoreM String := do
   return s!"{plan.fileOf (moduleOf (← getEnv) name)}:{← lineOf name}"
 
-def isWritten (name : Name) : CoreM Bool := do
-  let some ranges ← findDeclarationRanges? name | return false
-  return ranges.range != ranges.selectionRange
-
 def shown (expr : Expr) : MetaM String := do
   return (← withOptions (·.setBool `pp.funBinderTypes true) (ppExpr expr)).pretty 10000
 

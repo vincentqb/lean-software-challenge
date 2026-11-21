@@ -96,7 +96,9 @@ def fixtures : List Fixture := [
         `(∃ (e : ConstantFolding.Expr), ∃ (a : ConstantFolding.closed e = true), True) ∧ \
         ∃ (e : ConstantFolding.Expr), ∃ (a : ConstantFolding.normal e = true), True`",
       "has no witness ConstantFolding.fold_fixes_some_literal_applies stating \
-        `∃ (n : Nat), ∃ (e : ConstantFolding.Expr), ∃ (a : e = ConstantFolding.Expr.lit n), True`"]
+        `∃ (n : Nat), ∃ (e : ConstantFolding.Expr), ∃ (a : e = ConstantFolding.Expr.lit n), True`",
+      "has no witness ConstantFolding.fold_all_closed_applies stating \
+        `∃ (e : ConstantFolding.Expr), ∃ (h : ConstantFolding.closed e = true), True`"]
     edits := [.replace challenge "@[kills fold_normalizes]"
         "theorem fold_normalizes_applies : True := by\n  sorry\n\n@[kills fold_normalizes]",
       .replace "ConstantFolding/Expr.lean" "end ConstantFolding" "def Literal (e : Expr) : Prop := ∃ n, e = .lit n\n\n\
@@ -105,7 +107,8 @@ def fixtures : List Fixture := [
         @[expose] def KeepsClosedFixesNormal (f : Expr → Expr) : Prop :=\n  \
         (∀ e, closed e = true → closed (f e) = true) ∧ ∀ e, normal e = true → f e = e\n\n\
         @[expose] def FixesSomeLiteral (f : Expr → Expr) : Prop := ∃ n, ∀ e, e = .lit n → f e = e\n\n\
-        end ConstantFolding",
+        @[expose] def AllClosed : Expr → Prop\n  | .lit _ => True\n  | .var _ => False\n  \
+        | .add a b => AllClosed a ∧ AllClosed b\n\nend ConstantFolding",
       .replace challenge "end ConstantFolding" "theorem fold_folds_closed : FoldsClosed fold := by\n  sorry\n\n\
         theorem fold_folds_closed_applies : True := by\n  sorry\n\n\
         @[kills fold_folds_closed] theorem fold_folds_closed_rejects_identity : ¬ FoldsClosed id := by\n  sorry\n\n\
@@ -121,6 +124,10 @@ def fixtures : List Fixture := [
         theorem fold_fixes_some_literal_applies : True := by\n  sorry\n\n\
         @[kills fold_fixes_some_literal] theorem fold_fixes_some_literal_rejects_doubling :\n    \
         ¬ FixesSomeLiteral (fun e => Expr.add e e) := by\n  sorry\n\n\
+        theorem fold_all_closed (e : Expr) (h : closed e = true) : AllClosed (fold e) := by\n  sorry\n\n\
+        theorem fold_all_closed_applies : True := by\n  sorry\n\n\
+        @[kills fold_all_closed] theorem fold_all_closed_rejects_variable :\n    \
+        ¬ ∀ (e : Expr), closed e = true → AllClosed ((fun _ => Expr.var 0) e) := by\n  sorry\n\n\
         end ConstantFolding"] },
   { rule := .consistent, command := statement, code := 1, says := ["no @[consistent] theorem states"]
     edits := [.replace challenge "∀ (a b : Nat), nativeAdd a b = a + b := by" "∀ (a b : Nat), nativeAdd a b = b + a := by"] },

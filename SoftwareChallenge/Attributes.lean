@@ -34,10 +34,31 @@ def witnessName (headline : Name) : Name := headline.appendAfter "_applies"
 def packageOf (env : Environment) (name : Name) : Option PkgId :=
   ((env.getModuleIdxFor? name).map env.getModulePackageByIdx?).getD env.getModulePackage?
 
+initialize writtenNames : IO.Ref (NameMap NameSet) ← IO.mkRef {}
+
+def writtenIn (module : Name) : IO NameSet := do
+  if let some names := (← writtenNames.get).find? module then return names
+  let olean ← findOLean module
+  let (main, _) ← readModuleData olean
+  let parts ← if main.isModule then (·.map (·.1)) <$> readModuleDataParts #[olean, OLeanLevel.server.adjustFileName olean]
+    else pure #[main]
+  let entries : Array EnvExtensionEntry :=
+    ((parts.back?.bind (·.entries.find? (·.1 == declRangeExt.name))).map (·.2)).getD #[]
+  let ranges : Array (Name × DeclarationRanges) := unsafe unsafeCast entries
+  let names := ranges.foldl (init := {}) fun names (name, declared) =>
+    if declared.range != declared.selectionRange then names.insert name else names
+  writtenNames.modify (·.insert module names)
+  return names
+
+def isWritten (name : Name) : CoreM Bool := do
+  let env ← getEnv
+  match env.getModuleIdxFor? name with
+  | some index => return (← writtenIn env.header.moduleNames[index.toNat]!).contains name
+  | none => return (← findDeclarationRangesCore? name).any fun ranges => ranges.range != ranges.selectionRange
+
 partial def witnessType (package : Option PkgId) (headline : Expr) : MetaM (Expr × Option Name) :=
   forallTelescope headline fun binders conclusion => do
     let env ← getEnv
-    let packaged := fun head => packageOf env head == package && wasOriginallyDefn env head
     let (body, hidden) ← match conclusion with
       | .letE _ _ value scope _ => witnessType package (scope.instantiate1 value)
       | .app (.app (.const ``And _) left) right => do
@@ -47,9 +68,12 @@ partial def witnessType (package : Option PkgId) (headline : Expr) : MetaM (Expr
           hidden <|> also)
       | .app (.app (.const ``Exists _) type) (.lam name _ property _) =>
         witnessType package (.forallE name type property .default)
-      | _ => match ← delta? conclusion fun head => packaged head && env.hasExposedBody head with
+      | _ => do
+        let head ← conclusion.getAppFn.constName?.filterM fun head =>
+          if packageOf env head == package && wasOriginallyDefn env head then isWritten head else pure false
+        match ← delta? conclusion fun name => head == some name && env.hasExposedBody name with
         | some unfolded => witnessType package unfolded
-        | none => pure (mkConst ``True, conclusion.getAppFn.constName?.filter packaged)
+        | none => pure (mkConst ``True, head)
     let negated ← match binders.back? with
       | some last => pure (conclusion.isConstOf ``False && (← isProp (← inferType last)))
       | none => pure false
