@@ -231,6 +231,13 @@ end Helpers
       eval (fun _ => 0) (f ((fun _ => Expr.lit 1) e)) = eval (fun _ => 0) e := by
   sorry
 
+theorem fold_leaves_no_literal_sum (e : Expr) (a b : Nat) (h : fold e = .add (.lit a) (.lit b)) : False := by
+  sorry
+
+@[kills fold_leaves_no_literal_sum] theorem fold_leaves_no_literal_sum_rejects_identity :
+    ¬ ∀ (e : Expr) (a b : Nat), id e = .add (.lit a) (.lit b) → False := by
+  sorry
+
 @[kills fold_preserves_meaning]",
   .replace solution "end ConstantFolding" "theorem fold_agrees (f : Expr → Expr)
     (h : ∀ e, eval (fun _ => 0) (f e) = eval (fun _ => 0) e) (e : Expr) :
@@ -243,6 +250,13 @@ theorem fold_agrees_rejects_constant :
   intro h
   exact absurd (h id (fun _ => rfl) (.lit 0)) (by decide)
 
+theorem fold_leaves_no_literal_sum (e : Expr) (a b : Nat) (h : fold e = .add (.lit a) (.lit b)) : False := by
+  simpa [h, normal, Expr.isLit] using normal_fold e
+
+theorem fold_leaves_no_literal_sum_rejects_identity :
+    ¬ ∀ (e : Expr) (a b : Nat), id e = .add (.lit a) (.lit b) → False :=
+  fun h => h (.add (.lit 0) (.lit 0)) 0 0 rfl
+
 end ConstantFolding"]
 
 def coverageSays : List String := [
@@ -250,6 +264,6 @@ def coverageSays : List String := [
   "Helpers.viaUnsafe, which hole ConstantFolding.fold computes through, is @[implemented_by]",
   "Helpers.unsafely, which hole ConstantFolding.fold computes through, is unsafe",
   "Helpers.external, which hole ConstantFolding.fold computes through, is @[extern]",
-  "Proved: 8 of 8 headlines, 8 of 8 kills, 1 of 1 witnesses, 1 of 1 consistency theorems"]
+  "Proved: 9 of 9 headlines, 9 of 9 kills, 1 of 1 witnesses, 1 of 1 consistency theorems"]
 
 end SoftwareChallengeTests

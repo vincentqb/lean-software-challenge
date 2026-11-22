@@ -59,8 +59,9 @@ def killTemplate (holes : Array Name) (headline : Expr) : MetaM String := do
   shown (mkNot wrong)
 
 def witnessTemplate (holes : Array Name) (headline : Expr) : MetaM (Option Expr) :=
-  forallTelescope headline fun binders _ => do
-    let aboutHoles ← binders.filterM fun binder => do
+  forallTelescope headline fun binders conclusion => do
+    let hypotheses := if conclusion.isFalse then binders.pop else binders
+    let aboutHoles ← hypotheses.filterM fun binder => do
       let type ← inferType binder
       return type.getUsedConstants.any holes.contains && (← isProp type)
     let some last := aboutHoles.back? | return none
