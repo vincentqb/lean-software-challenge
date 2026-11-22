@@ -68,4 +68,7 @@ theorem output_correct (e : Expr) : output e = toString (eval (fun _ => 0) e) :=
     ¬ ∀ e : Expr, (fun e => toString (eval (fun _ => 0) e) ++ "!") e = toString (eval (fun _ => 0) e) := by
   sorry
 
+@[witness fold_keeps_literal] theorem fold_keeps_literal_applies : ∃ (n m : Nat), fold (.lit n) = .lit m := by
+  sorry
+
 end ConstantFolding

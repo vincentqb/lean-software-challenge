@@ -9,7 +9,7 @@ structure Challenge where
   holes : Array Name
   headlines : Array Name
   kills : Array (Name × Name)
-  witnesses : Array Name
+  witnesses : Array (Name × Name)
   consistent : Array Name
   terminates : Array (Name × Name)
   claims : Array Name
@@ -34,20 +34,19 @@ def Challenge.read (plan : Plan) : MetaM Challenge := do
   let written ← (← declaredIn module).filterM (isWritten ·.name)
   let here := fun (kind : LinkKind) => (links env kind).filter (moduleOf env ·.1 == module)
   let marked := (here .kills ++ here .witness ++ here .consistent).map (·.1)
-  let theorems := (written.filter fun info => info.isTheorem && !marked.contains info.name).map (·.name)
   let owned ← (env.header.moduleNames.filter plan.owns).flatMapM declaredIn
   return {
     holes := (written.filter isHole).map (·.name)
-    headlines := theorems.filter fun name => !theorems.any (witnessName · == name)
+    headlines := (written.filter fun info => info.isTheorem && !marked.contains info.name).map (·.name)
     kills := here .kills
-    witnesses := theorems.filter (fun name => theorems.any (witnessName · == name)) ++ (here .witness).map (·.1)
+    witnesses := here .witness
     consistent := (here .consistent).map (·.1)
     terminates := here .terminates
     claims := (owned.filter (·.isAxiom)).map (·.name)
     foreign := (owned.filter (isExtern env ·.name)).map (·.name) }
 
 def Challenge.targets (challenge : Challenge) : Array Name :=
-  challenge.headlines ++ challenge.kills.map (·.1) ++ challenge.witnesses ++ challenge.consistent
+  challenge.headlines ++ challenge.kills.map (·.1) ++ challenge.witnesses.map (·.1) ++ challenge.consistent
 
 def typeOf (name : Name) : MetaM Expr := return (← getConstInfo name).type
 
@@ -58,6 +57,16 @@ def killTemplate (holes : Array Name) (headline : Expr) : MetaM String := do
       let value ← mkFreshExprMVar (← inferType (.const hole levels)) (userName := .mkSimple s!"wrong_{hole.getString!}")
       wrong := wrong.replace fun expr => if expr.isConstOf hole then some value else none
   shown (mkNot wrong)
+
+def witnessTemplate (holes : Array Name) (headline : Expr) : MetaM (Option Expr) :=
+  forallTelescope headline fun binders _ => do
+    let aboutHoles ← binders.filterM fun binder => do
+      let type ← inferType binder
+      return type.getUsedConstants.any holes.contains && (← isProp type)
+    let some last := aboutHoles.back? | return none
+    withNewBinderInfos (binders.map (·.fvarId!, .default)) do
+      some <$> (binders.takeWhile (· != last)).foldrM (init := ← inferType last) fun binder body => do
+        mkAppM ``Exists #[← mkLambdaFVars #[binder] body]
 
 partial def asExported (expr : Expr) : Expr :=
   expr.replace fun
@@ -102,7 +111,6 @@ def rejects (holes : Array Name) (headline kill : Expr) : MetaM Bool := do
   withReducible (isDefEq wrong rejected)
 
 def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Problem) := do
-  let env ← getEnv
   let problem := fun (rule : Rule) (name : Name) (what why fix : String) => do
     return { rule, place := ← plan.place name, what, why, fix, next := "lake build" : Problem }
   let mut problems := #[]
@@ -122,18 +130,17 @@ def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Probl
       problems := problems.push (← problem .killShape kill s!"kill {kill} does not negate headline {headline} \
         with holes replaced by closed terms" "so it does not show that the headline rejects a wrong implementation"
         s!"State it as `{wanted}`, with each ?wrong_ a wrong closed term, and name a headline in @[kills]")
-  for headline in challenge.headlines.filter fun headline => challenge.kills.any (·.2 == headline) do
-    let (expected, hidden) ← witnessType (packageOf env headline) (← typeOf headline)
-    let witness := witnessName headline
-    let stated ← if env.contains witness then sameStatement expected witness else pure false
-    unless stated do
-      problems := problems.push (← problem .witness headline s!"headline {headline} has no witness {witness} \
-        stating `{← shown expected}`" "so nothing shows that some input meets its hypotheses"
-        s!"Delete any theorem {witness}, so that @[kills {headline}] derives it")
-    if let some hidden := hidden.filter (!challenge.holes.contains ·) then
-      problems := problems.push (← problem .witness headline s!"headline {headline} concludes with {hidden}, whose \
-        body the witness cannot see" "so nothing shows that some input meets any hypotheses inside it"
-        s!"Mark {hidden} `@[expose]` in {← plan.place hidden}")
+  for headline in challenge.headlines do
+    let some witness ← witnessTemplate challenge.holes (← typeOf headline) | continue
+    unless challenge.witnesses.any (·.2 == headline) do
+      problems := problems.push (← problem .witness headline s!"headline {headline} has no witness"
+        "so nothing shows that its hypotheses about a hole can hold" s!"Add `@[witness {headline}] theorem \
+          {headline.getString!}_applies : {← shown witness} := by sorry`")
+  for (witness, headline) in challenge.witnesses do
+    unless challenge.headlines.contains headline do
+      problems := problems.push (← problem .witness witness s!"@[witness {headline}] marks {witness}, but \
+        {headline} is not a headline" "so it shows nothing about any headline's hypotheses"
+        s!"Name in @[witness] the headline whose hypotheses {witness} meets")
   if !challenge.claims.isEmpty then
     let expected ← challenge.consistency
     let wrong ← challenge.consistent.filterM fun name => return !(← sameStatement expected name)

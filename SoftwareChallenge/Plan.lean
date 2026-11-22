@@ -31,10 +31,7 @@ def Plan.fileOf (plan : Plan) (module : Name) : String :=
 
 def importEnv (module : Name) : IO Environment := do
   unsafe enableInitializersExecution
-  let (root, _) ← readModuleData (← findOLean module)
-  withImporting do
-    let (_, imported) ← (importModulesCore #[{ module }] (isExported := true)).run
-    finalizeImport imported #[{ module }] {} (leakEnv := false) (loadExts := true) (isModule := root.isModule)
+  importModules #[{ module }] {} (loadExts := true)
 
 def inEnv {α : Type} (env : Environment) (action : MetaM α) : IO α := do
   let (value, _) ← (action.run' {} {}).toIO { fileName := "", fileMap := default, maxHeartbeats := 0 } { env }
@@ -51,6 +48,9 @@ def lineOf (name : Name) : CoreM Nat := do
 
 def Plan.place (plan : Plan) (name : Name) : CoreM String := do
   return s!"{plan.fileOf (moduleOf (← getEnv) name)}:{← lineOf name}"
+
+def isWritten (name : Name) : CoreM Bool := do
+  return (← findDeclarationRangesCore? name).any fun ranges => ranges.range != ranges.selectionRange
 
 def shown (expr : Expr) : MetaM String := do
   return (← withOptions (·.setBool `pp.funBinderTypes true) (ppExpr expr)).pretty 10000

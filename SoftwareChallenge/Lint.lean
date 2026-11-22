@@ -128,7 +128,7 @@ def lintStep (plan : Plan) : IO UInt32 := do
     let stated := fun (kind : String) (names : Array Name) => names.mapM fun name => do
       return { kind, info := ← getConstInfo name, place := ← plan.place name : Stated }
     return (challenge, (← stated "headline" challenge.headlines) ++ (← stated "kill" (challenge.kills.map (·.1))) ++
-      (← stated "witness" challenge.witnesses) ++ (← stated "consistency theorem" challenge.consistent) ++
+      (← stated "witness" (challenge.witnesses.map (·.1))) ++ (← stated "consistency theorem" challenge.consistent) ++
       (← stated "hole" challenge.holes) ++ (← stated "world claim" challenge.claims))
   let (standings, impure, implemented) ← inEnv (← importEnv plan.solution) do
     let implemented := challenge.holes.filter (isImplemented (← getEnv))

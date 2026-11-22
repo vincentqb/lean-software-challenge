@@ -64,17 +64,7 @@ theorem output_correct_rejects_suffix :
   have := congrArg String.length (h (.lit 0))
   simp at this
 
-theorem fold_preserves_meaning_applies : ∃ (_ : Nat → Nat) (_ : Expr), True := ⟨fun _ => 0, .lit 0, trivial⟩
-
-theorem fold_closed_literal_applies : ∃ (e : Expr) (_ : closed e = true), True := ⟨.lit 0, rfl, trivial⟩
-
-theorem fold_normalizes_applies : ∃ (_ : Expr), True := ⟨.lit 0, trivial⟩
-
-theorem fold_idempotent_applies : ∃ (_ : Expr), True := ⟨.lit 0, trivial⟩
-
-theorem fold_keeps_literal_applies : ∃ (n m : Nat) (_ : fold (.lit n) = .lit m), True :=
-  ⟨0, 0, fold_eq_self_of_normal _ rfl, trivial⟩
-
-theorem output_correct_applies : ∃ (_ : Expr), True := ⟨.lit 0, trivial⟩
+theorem fold_keeps_literal_applies : ∃ (n m : Nat), fold (.lit n) = .lit m :=
+  ⟨0, 0, fold_eq_self_of_normal _ rfl⟩
 
 end ConstantFolding
