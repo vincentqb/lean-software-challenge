@@ -47,7 +47,8 @@ def templateRun (context : Context) : Check String := do
   templateCopy context.lsc dir []
   discard <| step dir #["build"] 0 []
   let linted ← step dir #["lint"] 0
-    ["Proved: 6 of 6 headlines, 6 of 6 kills, 1 of 1 witnesses, 1 of 1 consistency theorems"]
+    ["Proved: 6 of 6 headlines, 6 of 6 kills, 1 of 1 witnesses, 1 of 1 consistency theorems",
+      "Assumed: ConstantFolding.addAgrees, tested by ConstantFolding.addAgrees_beyond_64_bits, ConstantFolding.addAgrees_grid"]
   let tested ← step dir #["test"] 0 ["ConstantFolding/Checks.lean:10: ConstantFolding.addAgrees_beyond_64_bits passed", "Tests: 2 of 2 passed"]
   let compared ← comparatorIn dir
   let program ← step dir #["exe", "constant_folding"] 0 ["5"]

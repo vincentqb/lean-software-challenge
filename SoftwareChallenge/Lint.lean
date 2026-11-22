@@ -106,18 +106,22 @@ def unreached (plan : Plan) (implemented : Array Name) (program : Name) : IO (Ar
     s!"the main of {program} does not reach hole {hole}" "so the program does not run the code that is proved"
     s!"Make main compute through {hole}"
 
-def untested (plan : Plan) (claims : Array Stated) : IO (Array Problem) := do
+def untested (plan : Plan) (claims : Array Stated) : IO (Array Problem × Array String) := do
   let tested ← match plan.tests with
     | some root => do
       let (env, reached) ← reachedFromMain plan root
       pure ((links env .tests).filter (reached.contains ·.1))
     | none => pure #[]
   let runner := (plan.tests.map toString).getD "the lean_exe that testDriver names"
-  return (claims.filter fun claim => !tested.any (·.2 == claim.info.name)).map fun claim =>
+  let assumed := claims.map fun claim =>
+    match (tested.filter (·.2 == claim.info.name)).map (toString ·.1) with
+    | #[] => s!"{claim.info.name}, untested"
+    | tests => s!"{claim.info.name}, tested by {", ".intercalate tests.toList}"
+  return ((claims.filter fun claim => !tested.any (·.2 == claim.info.name)).map fun claim =>
     lintProblem .untested claim.place s!"world claim {claim.info.name} has no test that `lake test` runs"
       "so nothing checks that the native code satisfies it"
       s!"Add `@[tests {claim.info.name}] def … : IO Unit` to a module of {runner}, whose main is \
-        `SoftwareChallenge.testsMain`"
+        `SoftwareChallenge.testsMain`", assumed)
 
 def listing (title : String) (problems : Array Problem) : Array String :=
   if problems.isEmpty then #[] else #[s!"{title}: {problems.size}"] ++ problems.map ("  " ++ ·.render)
@@ -136,8 +140,9 @@ def lintStep (plan : Plan) : IO UInt32 := do
       let (found, checked) ← purity plan challenge checked hole
       return (impure ++ found, checked)
     return (← stated.mapM (standing plan (standardAxioms ++ challenge.claims)), impure, implemented)
+  let (untestedClaims, assumed) ← untested plan (stated.filter (·.kind == "world claim"))
   let problems := standings.filterMap id ++ impure ++ (← plan.programs.flatMapM (unreached plan implemented)) ++
-    (← untested plan (stated.filter (·.kind == "world claim")))
+    untestedClaims
   let errors := problems.filter (·.rule != .pending)
   let pending := problems.filter (·.rule == .pending)
   let proved := [("headline", "headlines"), ("kill", "kills"), ("witness", "witnesses"),
@@ -145,7 +150,7 @@ def lintStep (plan : Plan) : IO UInt32 := do
     let counted := (stated.zip standings).filter (·.1.kind == kind)
     if counted.isEmpty then none else some s!"{(counted.filter (·.2.isNone)).size} of {counted.size} {plural}"
   IO.println ("\n".intercalate (listing "Errors" errors ++ listing "Pending" pending ++
-    #["Proved: " ++ ", ".intercalate proved]).toList)
+    #["Proved: " ++ ", ".intercalate proved] ++ (if assumed.isEmpty then #[] else #["Assumed: " ++ "; ".intercalate assumed.toList])).toList)
   return if !errors.isEmpty then 1 else if !pending.isEmpty then 2 else 0
 
 end SoftwareChallenge
