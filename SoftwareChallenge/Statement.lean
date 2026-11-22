@@ -132,11 +132,15 @@ def statementProblems (plan : Plan) (challenge : Challenge) : MetaM (Array Probl
         with holes replaced by closed terms" "so it does not show that the headline rejects a wrong implementation"
         s!"State it as `{wanted}`, with each ?wrong_ a wrong closed term, and name a headline in @[kills]")
   for headline in challenge.headlines do
-    let some witness ← witnessTemplate challenge.holes (← typeOf headline) | continue
+    let some template ← witnessTemplate challenge.holes (← typeOf headline) | continue
     unless challenge.witnesses.any (·.2 == headline) do
       problems := problems.push (← problem .witness headline s!"headline {headline} has no witness"
         "so nothing shows that its hypotheses about a hole can hold" s!"Add `@[witness {headline}] theorem \
-          {headline.getString!}_applies : {← shown witness} := by sorry`")
+          {headline.getString!}_applies : {← shown template} := by sorry`")
+    for (witness, _) in challenge.witnesses.filter (·.2 == headline) do
+      unless ← sameStatement template witness do
+        problems := problems.push (← problem .witness witness s!"witness {witness} does not state its headline's \
+          hypotheses about a hole" "so it does not show that they can hold" s!"State it as `{← shown template}`")
   for (witness, headline) in challenge.witnesses do
     unless challenge.headlines.contains headline do
       problems := problems.push (← problem .witness witness s!"@[witness {headline}] marks {witness}, but \

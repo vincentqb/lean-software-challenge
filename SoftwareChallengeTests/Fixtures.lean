@@ -88,8 +88,14 @@ def fixtures : List Fixture := [
       "Add `@[witness ConstantFolding.fold_keeps_literal] theorem fold_keeps_literal_applies : ∃ (n : Nat), \
         ∃ (m : Nat), ConstantFolding.fold (ConstantFolding.Expr.lit n) = ConstantFolding.Expr.lit m := by sorry`",
       "@[witness ConstantFolding.fold_keeps_literal_rejects_zero] marks ConstantFolding.fold_keeps_literal_applies, \
-        but ConstantFolding.fold_keeps_literal_rejects_zero is not a headline"]
-    edits := [.replace challenge "@[witness fold_keeps_literal]" "@[witness fold_keeps_literal_rejects_zero]"] },
+        but ConstantFolding.fold_keeps_literal_rejects_zero is not a headline",
+      "witness ConstantFolding.fold_fixes_only_normal_applies does not state its headline's hypotheses about a hole",
+      "State it as `∃ (e : ConstantFolding.Expr), ConstantFolding.fold e = e`"]
+    edits := [.replace challenge "@[witness fold_keeps_literal]" "@[witness fold_keeps_literal_rejects_zero]",
+      .replace challenge "end ConstantFolding" "theorem fold_fixes_only_normal (e : Expr) (h : fold e = e) : \
+        normal e = true := by\n  sorry\n\n@[kills fold_fixes_only_normal] theorem fold_fixes_only_normal_rejects_identity :\n    \
+        ¬ ∀ (e : Expr), id e = e → normal e = true := by\n  sorry\n\n@[witness fold_fixes_only_normal] theorem \
+        fold_fixes_only_normal_applies : ∃ (e : Expr), fold e = .lit 0 := by\n  sorry\n\nend ConstantFolding"] },
   { rule := .consistent, command := statement, code := 1, says := ["no @[consistent] theorem states"]
     edits := [.replace challenge "∀ (a b : Nat), nativeAdd a b = a + b := by" "∀ (a b : Nat), nativeAdd a b = b + a := by"] },
   { rule := .terminates, command := statement, code := 1
