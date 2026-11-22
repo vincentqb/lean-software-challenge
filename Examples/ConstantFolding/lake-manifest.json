@@ -5,7 +5,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "1036d0666a5fdf9c63720fe5821ff64d16b90dfe",
+   "rev": "f2a3aaa43eb423bc9829cd3b6be5e780021bc967",
    "name": "software_challenge",
    "manifestFile": "lake-manifest.json",
    "inputRev": "main",
